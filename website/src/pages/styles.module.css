@@ -171,8 +171,8 @@
 
 .gridCurrentX,
 .gridCurrentY {
-  --ml-current: var(--ml-grid-current);
   filter: drop-shadow(0 0 3px var(--ml-current));
+  --ml-current: var(--ml-grid-current);
   position: absolute;
 }
 
@@ -197,10 +197,10 @@
 }
 
 .gridCurrentX:nth-child(2) {
-  --ml-current: var(--ml-grid-current-alt);
   animation-delay: -7s;
   animation-direction: reverse;
   background: linear-gradient(270deg, transparent, var(--ml-current));
+  --ml-current: var(--ml-grid-current-alt);
   top: 360px;
 }
 
@@ -210,9 +210,9 @@
 }
 
 .gridCurrentY:nth-child(4) {
-  --ml-current: var(--ml-grid-current-alt);
   animation-delay: -6s;
   left: calc(50% - 36px + 72px * 3);
+  --ml-current: var(--ml-grid-current-alt);
 }
 
 .gridCurrentY:nth-child(5) {
@@ -972,8 +972,8 @@
   font-size: 0.74rem;
   height: 330px;
   line-height: 1.6;
-  mask-image: linear-gradient(180deg, #000 85%, transparent);
   -webkit-mask-image: linear-gradient(180deg, #000 85%, transparent);
+  mask-image: linear-gradient(180deg, #000 85%, transparent);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0.9rem 1rem 2.5rem;
