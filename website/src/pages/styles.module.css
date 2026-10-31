@@ -24,6 +24,8 @@
   --ml-card-shadow:
     0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04);
   --ml-grid-line: rgba(15, 23, 42, 0.05);
+  --ml-grid-current: rgba(14, 143, 179, 0.55);
+  --ml-grid-current-alt: rgba(212, 162, 10, 0.55);
   --ml-aurora-opacity: 0.55;
   --ml-btn-bg: #0b0d12;
   --ml-btn-fg: #ffffff;
@@ -53,6 +55,8 @@
   );
   --ml-card-shadow: none;
   --ml-grid-line: rgba(255, 255, 255, 0.035);
+  --ml-grid-current: rgba(79, 209, 236, 0.75);
+  --ml-grid-current-alt: rgba(247, 223, 30, 0.6);
   --ml-aurora-opacity: 1;
   --ml-btn-bg: #ffffff;
   --ml-btn-fg: #08090c;
@@ -159,9 +163,81 @@
     #000 30%,
     transparent 100%
   );
+  overflow: hidden;
   pointer-events: none;
   position: absolute;
   z-index: 0;
+}
+
+.gridCurrentX,
+.gridCurrentY {
+  --ml-current: var(--ml-grid-current);
+  filter: drop-shadow(0 0 3px var(--ml-current));
+  position: absolute;
+}
+
+.gridCurrentX {
+  animation: gridCurrentX 14s linear infinite;
+  background: linear-gradient(90deg, transparent, var(--ml-current));
+  height: 1px;
+  left: -180px;
+  width: 180px;
+}
+
+.gridCurrentY {
+  animation: gridCurrentY 12s linear infinite;
+  background: linear-gradient(180deg, transparent, var(--ml-current));
+  height: 180px;
+  top: -180px;
+  width: 1px;
+}
+
+.gridCurrentX:nth-child(1) {
+  top: 144px;
+}
+
+.gridCurrentX:nth-child(2) {
+  --ml-current: var(--ml-grid-current-alt);
+  animation-delay: -7s;
+  animation-direction: reverse;
+  background: linear-gradient(270deg, transparent, var(--ml-current));
+  top: 360px;
+}
+
+.gridCurrentY:nth-child(3) {
+  animation-delay: -2s;
+  left: calc(50% - 36px - 72px * 5);
+}
+
+.gridCurrentY:nth-child(4) {
+  --ml-current: var(--ml-grid-current-alt);
+  animation-delay: -6s;
+  left: calc(50% - 36px + 72px * 3);
+}
+
+.gridCurrentY:nth-child(5) {
+  animation-delay: -10s;
+  left: calc(50% - 36px + 72px * 8);
+}
+
+@keyframes gridCurrentX {
+  from {
+    transform: translateX(0);
+  }
+  45%,
+  to {
+    transform: translateX(calc(100vw + 180px));
+  }
+}
+
+@keyframes gridCurrentY {
+  from {
+    transform: translateY(0);
+  }
+  35%,
+  to {
+    transform: translateY(900px);
+  }
 }
 
 .heroInner {
@@ -248,9 +324,9 @@
 .heroTitle {
   color: var(--ml-fg);
   font-family: 'Geist Variable', var(--ifm-font-family-base);
-  font-size: clamp(2.6rem, 7.4vw, 5.6rem);
-  font-weight: 700;
-  letter-spacing: -0.045em;
+  font-size: clamp(2.3rem, 6.4vw, 4.8rem);
+  font-weight: 500;
+  letter-spacing: -0.035em;
   line-height: 1.02;
   margin: 1.75rem 0 0;
 }
@@ -1310,6 +1386,12 @@
     font-size: 0.78rem;
   }
 
+  .heroTitle {
+    font-size: clamp(2.6rem, 7.4vw, 5.6rem);
+    font-weight: 700;
+    letter-spacing: -0.045em;
+  }
+
   .heroActions,
   .ctaLinks {
     flex-direction: column;
@@ -1358,6 +1440,11 @@
   .heroAurora::before,
   .heroAurora::after {
     animation: none;
+  }
+
+  .gridCurrentX,
+  .gridCurrentY {
+    display: none;
   }
 
   .buttonPrimary,

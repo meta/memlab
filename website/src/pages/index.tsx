@@ -628,7 +628,13 @@ export default function Home(): React.ReactElement {
       <div className={styles.page}>
         <header className={styles.hero}>
           <div aria-hidden={true} className={styles.heroAurora} />
-          <div aria-hidden={true} className={styles.heroGrid} />
+          <div aria-hidden={true} className={styles.heroGrid}>
+            <span className={styles.gridCurrentX} />
+            <span className={styles.gridCurrentX} />
+            <span className={styles.gridCurrentY} />
+            <span className={styles.gridCurrentY} />
+            <span className={styles.gridCurrentY} />
+          </div>
           <div className={styles.heroInner}>
             <Link
               className={styles.heroBadge}
