@@ -211,7 +211,7 @@ To auto-approve the read-only tools while keeping the rest on manual approval, a
 - **Resident snapshots.** The server keeps loaded `IHeapSnapshot` graphs in memory across tool calls, because loading is expensive for large heaps. Several snapshots can be resident at once (`keep_previous: true`). Tools read the active one, which `memlab_snapshots` switches. Node ids are only valid within the snapshot they came from. Most ladder tools load each snapshot transiently and release it, so they don't change the active snapshot.
 - **Light loads.** `light: true` skips the dominator, retained-size and shortest-path pass, which roughly halves load time. Tools that need those values return an error that names the light-safe tools, instead of reporting zeros.
 - **Wall-clock guardrail.** Every tool call runs under a wall-clock budget: 90 s by default. You can override it per call with `timeout_ms`, or globally with `MEMLAB_ANALYSIS_TIMEOUT_MS`; a value of 0 or less disables it. When a heap scan runs past the budget, the tool returns a clean "analysis stopped" result instead of wedging the server. The dominator pass inside a load is synchronous, so the guardrail can't interrupt it. That is why the load ceilings exist.
-- **Background jobs.** A tool that would outlast the client's tool timeout can run in the background with `memlab_start_job`, or with `async: true` on `memlab_eval` and `memlab_analysis_battery`. Collect the result with `memlab_job_status` or `memlab_battery_status`.
+- **Background jobs.** A tool that would outlast the client's tool timeout can run in the background with `memlab_start_job`, or with `async: true` on `memlab_eval`, `memlab_eval_across` and `memlab_analysis_battery`. Collect the result with `memlab_job_status` or `memlab_battery_status`; both take `wait_ms`, capped at 90 s so the call stays under a 120 s client tool timeout, and a RUNNING reply says when it was written.
 - **Compressed snapshots.** Snapshots may be gzipped. The loader resolves `<file>.gz` transparently, decompressing into a private per-user cache directory under the OS temp dir.
 
 ## Reading the numbers
@@ -332,7 +332,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_analysis_battery` | Run a whole round's analysis in one call, write per-tool detail to disk, return only a digest — the way to read a multi-round sweep without spending a context window on it. |
 | `memlab_retention_windows` | What windows could BOUND this population — timeouts, TTLs, cleanup intervals? Run it before calling any growth unbounded: a ladder shorter than the app's window cannot tell a leak from a working set. |
 | `memlab_prune_run` | Reclaim the disk a round occupies by gzipping its rungs (still analysable) or deleting them. A sweep is tens of GB. |
-| `memlab_battery_status` | Wait on a `memlab_analysis_battery({async: true})` run (`wait_ms`, up to 110 s) and collect its report when it finishes; `battery.done.json` in its output directory is written last. |
+| `memlab_battery_status` | Wait on a `memlab_analysis_battery({async: true})` run (`wait_ms`, up to 90 s) and collect its report when it finishes; `battery.done.json` in its output directory is written last. |
 | `memlab_start_job` | Run ANY tool in the background and get a job id at once — for ladder tools that would outlive the client tool timeout. |
 | `memlab_positive_controls` | Measure the round's declared positive controls — known accumulators — so a flat result can be trusted as clean rather than blind. Finds a control by value shape on a minified build, and says UNRESOLVED when it cannot. |
 | `memlab_judges` | Judge a round against its stated invariants at rest — PASS / LEAK / BACKLOG / UNSETTLED / UNVERIFIED per plain-words claim, every probe on every rung and the settle rung in one pass. |
@@ -343,7 +343,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_source_for_node` | Which module's code a node belongs to (closure scope chain → Haste module, exact), for going from "which object" to "which file" without code search. |
 | `memlab_stale_refs` | React refs whose `.current` is detached DOM, by owner and variable, against the owner's fiber count — bounded (≤1 per instance) or accumulating. |
 | `memlab_dev_subtracted_delta` | Per-class growth between two snapshots with everything reachable only through a dev root or dev edge removed — the dev build's honest "what did the app grow". |
-| `memlab_job_status` | Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done. |
+| `memlab_job_status` | Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done. `wait_ms` (up to 90 s) waits for it to finish. |
 | `memlab_shape_census_diff` | Per-SHAPE growth across the ladder. Reach for this the moment a class-level tool blames `Object`: it turns "`Object` +377,959" into "`{event,timestamp}` ~0 → 53,029" in one call. |
 | `memlab_census_diff` | Detached-DOM and listener census at TWO rungs, diffed per class and per callback in one call. |
 | `memlab_leak_report` | The ladder verdict: per-class growth across an ordered set of snapshots; SATURATING (warm-up) and STEP+LINEAR (post-step rate) rows are told apart from linear growth. |

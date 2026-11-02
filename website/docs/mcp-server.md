@@ -484,7 +484,11 @@ takes seconds over a ladder that already has one.
 
 Ladder tools can run longer than an assistant's tool timeout. Start them with
 `memlab_start_job` and collect the result with `memlab_job_status`. A large
-snapshot can be loaded the same way with `memlab_load_snapshot({async: true})`. Every call
+snapshot can be loaded the same way with `memlab_load_snapshot({async: true})`,
+and `memlab_eval_across` takes `async: true` too. `memlab_job_status` and
+`memlab_battery_status` take `wait_ms`, capped at 90 s so the call returns
+before a client that backgrounds long calls (at 120 s) would. A RUNNING reply
+carries the time it was written, so a reply delivered late reads as stale. Every call
 also runs under a wall-clock budget (90 s by default; override it with
 `timeout_ms` or `MEMLAB_ANALYSIS_TIMEOUT_MS`), so a runaway scan returns a clean
 "analysis stopped" result instead of wedging the server.

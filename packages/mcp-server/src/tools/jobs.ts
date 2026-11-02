@@ -43,6 +43,22 @@ export interface Job {
 }
 
 const MAX_JOBS = 50;
+
+/**
+ * Longest a status call waits server-side before answering.
+ *
+ * Claude Code moves any MCP call that runs past 120 s to the background, and
+ * the reply then arrives later with the status as it was when the wait
+ * ended. A 110 s wait plus transport overhead crossed that line about one
+ * call in three, and the late reply said RUNNING for a job that had already
+ * finished. 90 s leaves room.
+ */
+export const MAX_STATUS_WAIT_MS = 90_000;
+
+/** Wall-clock time for a status line, so a late reply reads as stale. */
+export function statusTime(): string {
+  return `${new Date().toISOString().slice(11, 19)} UTC`;
+}
 // No tool runs this long; a job still "running" past it awaits something that
 // will never settle, and must not hold a slot forever.
 const JOB_MAX_AGE_MS = 6 * 60 * 60 * 1000;
@@ -204,8 +220,17 @@ export function registerJobs(server: McpServer): void {
         .string()
         .optional()
         .describe('The id `memlab_start_job` returned.'),
+      wait_ms: z
+        .number()
+        .int()
+        .min(0)
+        .max(110000)
+        .optional()
+        .describe(
+          `Wait up to this long for a running job to finish before answering, instead of returning its progress at once. Capped at ${MAX_STATUS_WAIT_MS} so the call stays under the client tool timeout.`,
+        ),
     },
-    async ({job_id}) => {
+    async ({job_id, wait_ms}) => {
       if (job_id == null || job_id === '') {
         if (jobs.size === 0) {
           return toolResult(
@@ -231,10 +256,24 @@ export function registerJobs(server: McpServer): void {
           new Error(`no job \`${job_id}\` in this server process`),
         );
       }
+      if (wait_ms != null && wait_ms > 0) {
+        const until = Date.now() + Math.min(wait_ms, MAX_STATUS_WAIT_MS);
+        while (job.status === 'running' && Date.now() < until) {
+          await new Promise(r =>
+            setTimeout(r, Math.min(500, Math.max(0, until - Date.now()))),
+          );
+        }
+      }
       const header = `Job \`${job.id}\` (\`${job.tool}\`): **${job.status}** after ${elapsed(job)}.`;
       if (job.status === 'running') {
         return toolResult(
-          [header, '', ...job.notes.slice(-8).map(n => `- ${n}`)].join('\n'),
+          [
+            header,
+            '',
+            ...job.notes.slice(-8).map(n => `- ${n}`),
+            '',
+            `_Status as of ${statusTime()}. If this reply arrived late it is stale: call again, the job may have finished since._`,
+          ].join('\n'),
         );
       }
       job.retrieved = true;

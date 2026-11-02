@@ -18,6 +18,8 @@ import {
 } from '../heap-state.js';
 import {errorResult, toolResult} from '../utils.js';
 import {runEval} from './eval.js';
+import {startJob} from './jobs.js';
+import {runWithReadScope} from '../read-scope.js';
 import {loadRunManifest} from '../run-manifest.js';
 import {
   armScanBudgetFor,
@@ -132,147 +134,175 @@ export function registerEvalAcross(server: McpServer): void {
         .describe(
           'Stop at the first snapshot whose code throws (default false: record the error for that rung and continue, so one bad rung does not discard the others).',
         ),
+      async: z
+        .boolean()
+        .optional()
+        .describe(
+          'Run as a background job and return a job id at once; collect the result with `memlab_job_status({job_id, wait_ms})`. A full-heap walk over four multi-million-node rungs takes longer than the client tool timeout (~120 s), and a call that runs past it is backgrounded with no handle.',
+        ),
     },
-    async ({
-      code,
-      handles,
-      paths,
-      run_dir,
-      rungs,
-      timeout_ms,
-      max_nodes,
-      stop_on_error,
-    }) => {
-      const originalHandle = getCurrentHandle();
-      try {
-        const given = [
-          handles != null && handles.length > 0,
-          paths != null && paths.length > 0,
-          run_dir != null && run_dir !== '',
-        ].filter(Boolean).length;
-        if (given > 1) {
-          return errorResult(
-            new Error('Pass one of `handles`, `paths` or `run_dir`.'),
-          );
-        }
-        if (rungs != null && (run_dir == null || run_dir === '')) {
-          return errorResult(new Error('`rungs` needs `run_dir`.'));
-        }
-        let targets: Target[];
-        const files =
-          run_dir != null && run_dir !== ''
-            ? rungPaths(run_dir, rungs)
-            : (paths ?? []);
-        if (files.length > 0) {
-          const {rungs: resolved} = resolveRungs(files);
-          targets = resolved.map(rung => ({
-            label: rung.label,
-            run: async fn => {
-              armScanBudgetFor(scaledTimeoutMs(rung.sizeMB, timeout_ms));
-              return {
-                ok: true as const,
-                value: await withSnapshotAt(rung.localPath, () => fn()),
-              };
-            },
-          }));
-        } else {
-          const resident = listSnapshots().map(m => m.handle);
-          if (resident.length === 0) {
-            return errorResult(
-              new Error(
-                'No snapshots are loaded. Pass `paths` or `run_dir` to load rungs for the run, or load them with memlab_load_snapshot({keep_previous: true}) first.',
-              ),
-            );
-          }
-          const chosen =
-            handles != null && handles.length > 0 ? handles : resident;
-          const unknown = chosen.filter(h => getMetadataByHandle(h) == null);
-          if (unknown.length > 0) {
-            return errorResult(
-              new Error(
-                `Unknown snapshot handle(s): ${unknown.join(', ')}. Resident: ${resident.join(', ')}. ` +
-                  'Handles come from memlab_snapshots or the alias passed to memlab_load_snapshot.',
-              ),
-            );
-          }
-          targets = chosen.map(handle => {
-            const meta = getMetadataByHandle(handle);
-            return {
-              label: `${handle}${meta ? ` — ${meta.fileName}` : ''}`,
-              run: async fn =>
-                setCurrentSnapshot(handle)
-                  ? {ok: true as const, value: await fn()}
-                  : {ok: false as const},
-            };
-          });
-        }
-        if (targets.length < 2) {
-          // Not an error — a single-handle run is a legitimate way to script
-          // one rung — but the whole point of the tool is the comparison.
-          // Saying so beats silently returning a one-row report.
-          // (falls through and runs)
-        }
-
-        const sections: string[] = [];
-        let failures = 0;
-        for (const target of targets) {
-          const header = `### ${target.label}`;
-          try {
-            const ran = await target.run(() =>
-              runEval({code, timeout_ms, max_nodes}),
-            );
-            if (!ran.ok) {
-              sections.push(`${header}\n\n(could not switch to this snapshot)`);
-              failures++;
-              continue;
-            }
-            // The section title names the snapshot; runEval's own header would
-            // list every rung this call has read so far.
-            const body = textOf(ran.value).replace(/^> Snapshots?: .*\n+/, '');
-            if (/^Error:/m.test(body)) failures++;
-            sections.push(`${header}\n\n${body}`);
-            if (stop_on_error && /^Error:/m.test(body)) {
-              sections.push(
-                '_Stopped here: stop_on_error is set and this rung failed._',
-              );
-              break;
-            }
-          } catch (err) {
-            failures++;
-            const msg = err instanceof Error ? err.message : String(err);
-            sections.push(`${header}\n\nError: ${msg}`);
-            if (stop_on_error) {
-              sections.push(
-                '_Stopped here: stop_on_error is set and this rung failed._',
-              );
-              break;
-            }
-          }
-        }
-
-        const lines = [
-          `## eval across ${targets.length} snapshot(s)`,
-          '',
-          `Order: ${targets.map(t => t.label.replace(/ — .*$/, '')).join(' → ')}${failures > 0 ? ` · ${failures} rung(s) reported an error` : ''}`,
-          '',
-          ...(targets.length < 2
-            ? [
-                '_Only one snapshot targeted — this tool exists for the comparison; pass a second path or rung, or load one with `keep_previous: true`._',
-                '',
-              ]
-            : []),
-          sections.join('\n\n'),
-          '',
-          '_Values are comparable across rungs. Node ids are only comparable between captures of ONE isolate (same tab, no reload) — memlab_diff_snapshots detects that and matches objects by id; otherwise compare counts, sizes, shapes and string values._',
-        ];
-        return toolResult(lines.join('\n'));
-      } catch (err) {
-        return errorResult(err);
-      } finally {
-        // Restore whatever the caller had active, so a comparison run is not a
-        // hidden state change for every tool that follows it.
-        if (originalHandle != null) setCurrentSnapshot(originalHandle);
+    async args => {
+      if (args.async === true) {
+        const job = startJob('memlab_eval_across', () =>
+          runWithReadScope(() => runEvalAcross(args)),
+        );
+        if (typeof job === 'string') return errorResult(new Error(job));
+        return toolResult(
+          `Started \`memlab_eval_across\` as job \`${job.id}\`. Collect it with ` +
+            `\`memlab_job_status({job_id: "${job.id}", wait_ms: 90000})\`.`,
+        );
       }
+      return runEvalAcross(args);
     },
   );
+}
+
+async function runEvalAcross({
+  code,
+  handles,
+  paths,
+  run_dir,
+  rungs,
+  timeout_ms,
+  max_nodes,
+  stop_on_error,
+}: {
+  code: string;
+  handles?: string[];
+  paths?: string[];
+  run_dir?: string;
+  rungs?: number[];
+  timeout_ms: number;
+  max_nodes?: number;
+  stop_on_error: boolean;
+}) {
+  const originalHandle = getCurrentHandle();
+  try {
+    const given = [
+      handles != null && handles.length > 0,
+      paths != null && paths.length > 0,
+      run_dir != null && run_dir !== '',
+    ].filter(Boolean).length;
+    if (given > 1) {
+      return errorResult(
+        new Error('Pass one of `handles`, `paths` or `run_dir`.'),
+      );
+    }
+    if (rungs != null && (run_dir == null || run_dir === '')) {
+      return errorResult(new Error('`rungs` needs `run_dir`.'));
+    }
+    let targets: Target[];
+    const files =
+      run_dir != null && run_dir !== ''
+        ? rungPaths(run_dir, rungs)
+        : (paths ?? []);
+    if (files.length > 0) {
+      const {rungs: resolved} = resolveRungs(files);
+      targets = resolved.map(rung => ({
+        label: rung.label,
+        run: async fn => {
+          armScanBudgetFor(scaledTimeoutMs(rung.sizeMB, timeout_ms));
+          return {
+            ok: true as const,
+            value: await withSnapshotAt(rung.localPath, () => fn()),
+          };
+        },
+      }));
+    } else {
+      const resident = listSnapshots().map(m => m.handle);
+      if (resident.length === 0) {
+        return errorResult(
+          new Error(
+            'No snapshots are loaded. Pass `paths` or `run_dir` to load rungs for the run, or load them with memlab_load_snapshot({keep_previous: true}) first.',
+          ),
+        );
+      }
+      const chosen = handles != null && handles.length > 0 ? handles : resident;
+      const unknown = chosen.filter(h => getMetadataByHandle(h) == null);
+      if (unknown.length > 0) {
+        return errorResult(
+          new Error(
+            `Unknown snapshot handle(s): ${unknown.join(', ')}. Resident: ${resident.join(', ')}. ` +
+              'Handles come from memlab_snapshots or the alias passed to memlab_load_snapshot.',
+          ),
+        );
+      }
+      targets = chosen.map(handle => {
+        const meta = getMetadataByHandle(handle);
+        return {
+          label: `${handle}${meta ? ` — ${meta.fileName}` : ''}`,
+          run: async fn =>
+            setCurrentSnapshot(handle)
+              ? {ok: true as const, value: await fn()}
+              : {ok: false as const},
+        };
+      });
+    }
+    if (targets.length < 2) {
+      // Not an error — a single-handle run is a legitimate way to script
+      // one rung — but the whole point of the tool is the comparison.
+      // Saying so beats silently returning a one-row report.
+      // (falls through and runs)
+    }
+
+    const sections: string[] = [];
+    let failures = 0;
+    for (const target of targets) {
+      const header = `### ${target.label}`;
+      try {
+        const ran = await target.run(() =>
+          runEval({code, timeout_ms, max_nodes}),
+        );
+        if (!ran.ok) {
+          sections.push(`${header}\n\n(could not switch to this snapshot)`);
+          failures++;
+          continue;
+        }
+        // The section title names the snapshot; runEval's own header would
+        // list every rung this call has read so far.
+        const body = textOf(ran.value).replace(/^> Snapshots?: .*\n+/, '');
+        if (/^Error:/m.test(body)) failures++;
+        sections.push(`${header}\n\n${body}`);
+        if (stop_on_error && /^Error:/m.test(body)) {
+          sections.push(
+            '_Stopped here: stop_on_error is set and this rung failed._',
+          );
+          break;
+        }
+      } catch (err) {
+        failures++;
+        const msg = err instanceof Error ? err.message : String(err);
+        sections.push(`${header}\n\nError: ${msg}`);
+        if (stop_on_error) {
+          sections.push(
+            '_Stopped here: stop_on_error is set and this rung failed._',
+          );
+          break;
+        }
+      }
+    }
+
+    const lines = [
+      `## eval across ${targets.length} snapshot(s)`,
+      '',
+      `Order: ${targets.map(t => t.label.replace(/ — .*$/, '')).join(' → ')}${failures > 0 ? ` · ${failures} rung(s) reported an error` : ''}`,
+      '',
+      ...(targets.length < 2
+        ? [
+            '_Only one snapshot targeted — this tool exists for the comparison; pass a second path or rung, or load one with `keep_previous: true`._',
+            '',
+          ]
+        : []),
+      sections.join('\n\n'),
+      '',
+      '_Values are comparable across rungs. Node ids are only comparable between captures of ONE isolate (same tab, no reload) — memlab_diff_snapshots detects that and matches objects by id; otherwise compare counts, sizes, shapes and string values._',
+    ];
+    return toolResult(lines.join('\n'));
+  } catch (err) {
+    return errorResult(err);
+  } finally {
+    // Restore whatever the caller had active, so a comparison run is not a
+    // hidden state change for every tool that follows it.
+    if (originalHandle != null) setCurrentSnapshot(originalHandle);
+  }
 }

@@ -49,6 +49,7 @@ import {snapshotExists} from '../snapshot-index.js';
 import {errorResult, formatBytes, formatNumber, toolResult} from '../utils.js';
 import {runWithReadScope} from '../read-scope.js';
 import {runWithRungRetention} from '../snapshot-borrow.js';
+import {MAX_STATUS_WAIT_MS, statusTime} from './jobs.js';
 
 /**
  * A battery started with `async: true`, tracked so `memlab_battery_status` can
@@ -1709,7 +1710,7 @@ export function registerAnalysisBattery(server: McpServer): void {
             '',
             `\`${path.basename(run_dir.replace(/\/$/, ''))}\` (${profile}), ${plan.length} tool(s), writing to \`${outDir}/\`.`,
             '',
-            `Wait on it with \`memlab_battery_status({battery_id: "${tracked.id}", wait_ms: 110000})\`, or from a shell on \`${doneFile}\`, which is written last. The full report comes back from that call once it finishes; per-tool output lands in \`${outDir}/<tool>.txt\` as each step completes, so a specific question can be answered before the whole battery is done.`,
+            `Wait on it with \`memlab_battery_status({battery_id: "${tracked.id}", wait_ms: ${MAX_STATUS_WAIT_MS}})\`, or from a shell on \`${doneFile}\`, which is written last. The full report comes back from that call once it finishes; per-tool output lands in \`${outDir}/<tool>.txt\` as each step completes, so a specific question can be answered before the whole battery is done.`,
             '',
             '_A standard battery is 7-10 minutes. Started this way it does not occupy the tool timeout, so there is no backgrounding and no interleaved completion notification — but nothing polls on your behalf either._',
           ].join('\n'),
@@ -1737,7 +1738,7 @@ export function registerAnalysisBattery(server: McpServer): void {
         .max(110000)
         .optional()
         .describe(
-          'Wait up to this long (at most 110000, under the client tool timeout) for a running battery to finish before answering, instead of returning RUNNING at once. Returns as soon as it finishes. Without `battery_id`, waits on the one running battery (if exactly one is).',
+          `Wait up to this long for a running battery to finish before answering, instead of returning RUNNING at once. Capped at ${MAX_STATUS_WAIT_MS} so the call stays under the client tool timeout; a larger value is accepted and clamped. Returns as soon as it finishes. Without \`battery_id\`, waits on the one running battery (if exactly one is).`,
         ),
     },
     async ({battery_id: requested, wait_ms}) => {
@@ -1806,7 +1807,7 @@ export function registerAnalysisBattery(server: McpServer): void {
         );
       }
       if (wait_ms != null && wait_ms > 0) {
-        const until = Date.now() + wait_ms;
+        const until = Date.now() + Math.min(wait_ms, MAX_STATUS_WAIT_MS);
         while (run.finishedAt == null && Date.now() < until) {
           await new Promise(r =>
             setTimeout(r, Math.min(500, Math.max(0, until - Date.now()))),
@@ -1829,7 +1830,7 @@ export function registerAnalysisBattery(server: McpServer): void {
               ? `, now running \`${run.currentTool}\``
               : '') +
             `. Output so far is in \`${run.outDir}/\`.\n\n` +
-            `_Pass \`wait_ms\` (up to 110000) to wait for it, or watch \`${path.join(run.outDir, 'battery.done.json')}\`, which is written last. Each completed tool has already written its full output to disk._`,
+            `_Status as of ${statusTime()}; a reply that arrives late is stale, so call again. Pass \`wait_ms\` (up to ${MAX_STATUS_WAIT_MS}) to wait for it, or watch \`${path.join(run.outDir, 'battery.done.json')}\`, which is written last. Each completed tool has already written its full output to disk._`,
         );
       }
       if (run.error != null) {

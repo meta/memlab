@@ -239,7 +239,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_battery_status',
-        'Wait on a `memlab_analysis_battery({async: true})` run (`wait_ms`, up to 110 s) and collect its report when it finishes; `battery.done.json` in its output directory is written last.',
+        'Wait on a `memlab_analysis_battery({async: true})` run (`wait_ms`, up to 90 s) and collect its report when it finishes; `battery.done.json` in its output directory is written last.',
       ],
       [
         'memlab_start_job',
@@ -283,7 +283,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_job_status',
-        'Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done.',
+        'Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done. `wait_ms` (up to 90 s) waits for it to finish.',
       ],
       [
         'memlab_shape_census_diff',
