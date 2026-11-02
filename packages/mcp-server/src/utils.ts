@@ -1720,6 +1720,107 @@ export function collapseRepeatedRuns(
 }
 
 /**
+ * Fold a REPEATING multi-hop pattern into one copy plus a count.
+ *
+ * `collapseRepeatedRuns` folds `A → A → A`. A scope chain alternates —
+ * `closure → context → closure → context`, or a four-hop cycle through two
+ * compiler temporaries — so no two consecutive hops are alike and a
+ * 1,739-hop path was printed hop by hop, 190 KB of output. This keeps the
+ * first period, then notes the elided repeats on the hop after the run, which
+ * is the first hop OUTSIDE the chain: usually the holder a fix acts on.
+ */
+export function collapsePeriodicRuns(
+  steps: RetainerTreeStep[],
+  maxPeriod = 6,
+  minRepeats = 3,
+): RetainerTreeStep[] {
+  // The note is written onto the hop after a run; never onto the caller's.
+  steps = [...steps];
+  const key = (s: RetainerTreeStep) =>
+    `${s.type}::${s.name}::${s.edgeName ?? ''}`;
+  const out: RetainerTreeStep[] = [];
+  const foldLimit = steps.length - 1;
+  let i = 0;
+  while (i < foldLimit) {
+    let best: {period: number; repeats: number} | null = null;
+    for (let p = 2; p <= maxPeriod && i + p * minRepeats <= foldLimit; p++) {
+      let repeats = 1;
+      while (i + (repeats + 1) * p <= foldLimit) {
+        let same = true;
+        for (let k = 0; k < p && same; k++) {
+          same = key(steps[i + k]) === key(steps[i + repeats * p + k]);
+        }
+        if (!same) break;
+        repeats++;
+      }
+      if (
+        repeats >= minRepeats &&
+        (best == null || repeats * p > best.repeats * best.period)
+      ) {
+        best = {period: p, repeats};
+      }
+    }
+    if (best == null) {
+      out.push(steps[i]);
+      i++;
+      continue;
+    }
+    const {period, repeats} = best;
+    out.push(...steps.slice(i, i + period));
+    const end = i + period * repeats;
+    const elided = steps
+      .slice(i + period, end)
+      .reduce((n, s) => n + 1 + (s.collapsedBefore ?? 0), 0);
+    const pattern = steps
+      .slice(i, i + period)
+      .map(
+        s =>
+          `${s.name.length > 30 ? `${s.name.slice(0, 29)}…` : s.name}${s.edgeName != null ? ` .${s.edgeName}` : ''}`,
+      )
+      .join(' → ');
+    const next = steps[end];
+    const note = `${elided} hop(s): the ${period}-hop pattern [${pattern}] repeats ×${repeats} in all`;
+    steps[end] = {
+      ...next,
+      collapsedBefore: (next.collapsedBefore ?? 0) + elided,
+      collapsedNote:
+        next.collapsedNote != null ? `${note}; ${next.collapsedNote}` : note,
+    };
+    i = end;
+  }
+  out.push(steps[foldLimit]);
+  return out;
+}
+
+/**
+ * Keep the first `head` and last `tail` steps of a long path and elide the
+ * middle, counting what was cut. A path still this long after folding has no
+ * repeating structure left to compress.
+ */
+export function capPathMiddle(
+  steps: RetainerTreeStep[],
+  head = 20,
+  tail = 20,
+): RetainerTreeStep[] {
+  if (steps.length <= head + tail + 1) return steps;
+  const cut = steps.slice(head, steps.length - tail);
+  const elided = cut.reduce(
+    (n, s) => n + (s.repeatCount ?? 1) + (s.collapsedBefore ?? 0),
+    0,
+  );
+  const first = steps[steps.length - tail];
+  return [
+    ...steps.slice(0, head),
+    {
+      ...first,
+      collapsedBefore: (first.collapsedBefore ?? 0) + elided,
+      collapsedNote: `${elided} hop(s) elided (pass \`expand: true\` for all)`,
+    },
+    ...steps.slice(steps.length - tail + 1),
+  ];
+}
+
+/**
  * Collapse runs of an identical rendered label, for formatters that have already
  * reduced each hop to a string. Mirrors `collapseRepeatedRuns` for chain-style
  * (`A → B → C`) renderers.

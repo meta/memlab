@@ -24,6 +24,8 @@ import {
   formatNumber,
   formatNodeInline,
   truncateNodeName,
+  capPathMiddle,
+  collapsePeriodicRuns,
   collapseRepeatedRuns,
   formatRetainerTree,
   isNodeWorthInspecting,
@@ -252,7 +254,7 @@ export function registerRetainerTrace(server: McpServer): void {
         .optional()
         .default(false)
         .describe(
-          'Expand the elided middle: show every node on the path instead of collapsing consecutive V8/internal runs and repeating async-continuation ladders (Promise → Context → Generator). Use when the interesting library/application boundary is hidden inside a "… N internal node(s) …" or "… N async continuation frames …" gap.',
+          'Expand the elided middle: show every node on the path instead of collapsing consecutive V8/internal runs, repeating async-continuation ladders (Promise → Context → Generator), repeating multi-hop patterns (a scope chain `closure → context → closure → context`, printed once with its repeat count) and, past 41 steps, everything but the first and last 20. Use when the interesting library/application boundary is hidden inside a "… N internal node(s) …" or "… N async continuation frames …" gap.',
         ),
       exclude_dev: z
         .boolean()
@@ -597,7 +599,11 @@ export function registerRetainerTrace(server: McpServer): void {
           // unless the caller explicitly asked to see every node.
           lines.push(
             formatRetainerTree(
-              expand ? treeSteps : collapseRepeatedRuns(treeSteps),
+              expand
+                ? treeSteps
+                : capPathMiddle(
+                    collapsePeriodicRuns(collapseRepeatedRuns(treeSteps)),
+                  ),
               {showSizes: true},
             ),
           );
@@ -635,15 +641,28 @@ export function registerRetainerTrace(server: McpServer): void {
           lines.push(parts.join(''));
         }
 
+        // Root first, target last; `edge` is the edge into the next node.
+        const pathRefs = reverseItems.map(it => ({
+          ...nodeRef(it.node),
+          ...(it.edgeName != null
+            ? {edge: it.edgeName, edge_type: it.edgeType}
+            : {}),
+        }));
+        // Bounded like the text: a 1,739-hop chain made the structured copy
+        // alone larger than the client's output cap.
+        const STRUCTURED_PATH_MAX = 200;
         return structuredResult(lines.join('\n'), {
           mode: 'shortest',
-          // Root first, target last; `edge` is the edge into the next node.
-          path: reverseItems.map(it => ({
-            ...nodeRef(it.node),
-            ...(it.edgeName != null
-              ? {edge: it.edgeName, edge_type: it.edgeType}
-              : {}),
-          })),
+          path:
+            expand || pathRefs.length <= STRUCTURED_PATH_MAX
+              ? pathRefs
+              : [
+                  ...pathRefs.slice(0, STRUCTURED_PATH_MAX / 2),
+                  ...pathRefs.slice(-STRUCTURED_PATH_MAX / 2),
+                ],
+          ...(expand || pathRefs.length <= STRUCTURED_PATH_MAX
+            ? {}
+            : {path_elided: pathRefs.length - STRUCTURED_PATH_MAX}),
         });
       } catch (err) {
         return errorResult(err);

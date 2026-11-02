@@ -391,6 +391,11 @@ figures are defined or grouped differently:
   beside it. On a dev build a single dev-only hash table can double in size
   partway through a run, and the raw total then grows by megabytes with no
   change in the app.
+- **Long retainer paths are folded.** `memlab_retainer_trace` prints a
+  repeating multi-hop pattern (a scope chain alternating closures and
+  contexts) once, with its repeat count, on the first hop outside the
+  pattern, and keeps the first and last 20 steps of a path that is still
+  longer than that. `expand: true` prints every hop.
 - **Warm-up is not a leak.** A class that grows at every rung while each step
   adds less than the one before (preloading, first-open loads) reads
   `SATURATING` in `memlab_leak_report` once its last step adds under 20% of

@@ -386,7 +386,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_error_callsites` | Where retained Error objects were created, from the stack frames V8 captured (survives a truncated `.stack`); groups by top frames, names the JSX site of React `_debugStack` Errors. |
 | `memlab_model_duplicates` | Records that share an identity value (`identity_path`, e.g. `__x_id._serialized`): copies of a one-per-id model, where the extras are held and what they retain; per-rung counts with `run_dir`. |
 | `memlab_scope_chains` | Chains of contexts of one function, each call pinning the previous call's scope through a captured closure: invisible to class counts. Flags the React Compiler dev hook-guard artifact (links only through `t0`..`tN`); per-rung lengths with `run_dir`. |
-| `memlab_retainer_trace` | The shortest retainer path for one node; `mode: "tree"` shows every owner as a bounded tree (`max_depth`, `max_nodes`, `max_siblings`) ending at a root or the page global. |
+| `memlab_retainer_trace` | The shortest retainer path for one node; `mode: "tree"` shows every owner as a bounded tree (`max_depth`, `max_nodes`, `max_siblings`) ending at a root or the page global. A repeating multi-hop chain prints once with its count. |
 | `memlab_retainer_summary` | Retainer paths across many instances, clustered by shape. |
 | `memlab_referrer_summary` | Who points at this, grouped by edge. |
 | `memlab_pinch_points` | Single objects whose release would free the most. |
