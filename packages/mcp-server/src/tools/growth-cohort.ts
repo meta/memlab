@@ -32,7 +32,9 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import memlabCore from '@memlab/core';
 const {utils, NumericSet} = memlabCore;
 import {z} from 'zod';
-import {getSnapshot} from '../heap-state.js';
+import {getFilePath, getSnapshot} from '../heap-state.js';
+import {noteSnapshotRead} from '../read-scope.js';
+import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {
   clampLabel,
   errorResult,
@@ -96,6 +98,65 @@ function shapeLabel(node: IHeapNode): string {
   return clampLabel(`{${names.join(',')}}`, 60);
 }
 
+/** The first `k` sorted property names, `…` marking the ones left out. */
+function shapePrefixLabel(node: IHeapNode, k: number): string {
+  const names: string[] = [];
+  try {
+    for (const e of node.references) {
+      if (e.type !== 'property') continue;
+      const n = String(e.name_or_index);
+      if (n !== '__proto__') names.push(n);
+    }
+  } catch {
+    return '(unreadable)';
+  }
+  if (names.length === 0) return '(no properties)';
+  names.sort();
+  const shown = names.slice(0, k).map(n => clampLabel(n, 24));
+  return `{${shown.join(',')}${names.length > k ? ',…' : ''}}`;
+}
+
+/** The selector both rungs are filtered with, so their groups compare. */
+interface Selector {
+  className?: string;
+  want: Set<string> | null;
+  nodeType?: string;
+}
+
+function selectNodes(snapshot: IHeapSnapshot, sel: Selector): IHeapNode[] {
+  const out: IHeapNode[] = [];
+  snapshot.nodes.forEach((node: IHeapNode) => {
+    if (node.id <= 3) return;
+    if (sel.nodeType != null && node.type !== sel.nodeType) return;
+    if (
+      sel.className != null &&
+      sel.className !== '' &&
+      node.name !== sel.className
+    ) {
+      return;
+    }
+    if (sel.want != null) {
+      // DISTINCT names. Counting matching edges instead lets one wanted key
+      // present on several edges — which a heap does produce — satisfy a
+      // two-key shape on its own, so `[a, b]` matches an object that has
+      // only `a`.
+      const seen = new Set<string>();
+      try {
+        for (const e of node.references) {
+          if (e.type !== 'property') continue;
+          const n = String(e.name_or_index);
+          if (sel.want.has(n)) seen.add(n);
+        }
+      } catch {
+        return;
+      }
+      if (seen.size < sel.want.size) return;
+    }
+    out.push(node);
+  });
+  return out;
+}
+
 /** The class of the GC-root-side end of this node's retainer path. */
 function rootPathHead(node: IHeapNode): string {
   let cur: IHeapNode | null = node;
@@ -146,13 +207,110 @@ function combinedRetained(
   );
 }
 
+/**
+ * The cohort grouped by (referrer edge, shape prefix) in one table.
+ *
+ * The separate tables say "60% are held by `Map.table`" and "40% are
+ * `{action,eagerState,…}`" without saying whether those are the same 40%.
+ * On a class like `Object`, where the growth is several record types under
+ * different holders, the joint key is what splits it into rows a fix can act
+ * on.
+ */
+async function jointTable(opts: {
+  snapshot: IHeapSnapshot;
+  all: readonly IHeapNode[];
+  newest: readonly IHeapNode[];
+  selector: Selector;
+  shapeKeys: number;
+  top: number;
+  baselinePath?: string;
+}): Promise<string[]> {
+  const keyOf = (n: IHeapNode): string =>
+    `${referrerEdgeLabel(n)} · ${shapePrefixLabel(n, opts.shapeKeys)}`;
+  const groups = new Map<string, IHeapNode[]>();
+  for (const n of opts.newest) {
+    const k = keyOf(n);
+    const g = groups.get(k);
+    if (g) g.push(n);
+    else groups.set(k, [n]);
+  }
+  const ranked = [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, opts.top);
+  const wanted = new Set(ranked.map(([k]) => k));
+  const countIn = (nodes: readonly IHeapNode[]): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const n of nodes) {
+      const k = keyOf(n);
+      if (wanted.has(k)) m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  };
+  const totalNow = countIn(opts.all);
+  let baseline: Map<string, number> | null = null;
+  let baselineLabel = '';
+  if (opts.baselinePath != null && opts.baselinePath !== '') {
+    // The header lists the files read; without this it names only the
+    // baseline, as if the table were about it.
+    const active = getFilePath();
+    if (active != null) noteSnapshotRead(active);
+    const {rungs} = resolveRungs([opts.baselinePath]);
+    baselineLabel = rungs[0].label.replace(/^.*\//, '');
+    baseline = await withSnapshotAt(rungs[0].localPath, snap =>
+      countIn(selectNodes(snap, opts.selector)),
+    );
+  }
+  const rows = ranked.map(([key, nodes]) => {
+    const [holder, shapeText] = key.split(' · ');
+    const now = totalNow.get(key) ?? 0;
+    return [
+      holder,
+      shapeText,
+      formatNumber(nodes.length),
+      share(nodes.length, opts.newest.length),
+      formatNumber(now),
+      ...(baseline != null
+        ? [
+            formatNumber(baseline.get(key) ?? 0),
+            `${now - (baseline.get(key) ?? 0) >= 0 ? '+' : ''}${formatNumber(now - (baseline.get(key) ?? 0))}`,
+          ]
+        : []),
+      formatBytes(nodes.reduce((s, n) => s + n.self_size, 0)),
+      formatBytes(combinedRetained(nodes, opts.snapshot)),
+      `@${nodes[nodes.length - 1].id}`,
+    ];
+  });
+  return [
+    '### Newest instances by (referrer edge, shape)',
+    '',
+    `_Shape = the first ${opts.shapeKeys} sorted property names. "now" counts the whole population with that key on this rung, not just the cohort${baseline != null ? `; "baseline" counts it on \`${baselineLabel}\`` : ''}._`,
+    '',
+    markdownTable(
+      [
+        'Referrer edge',
+        'Shape',
+        'newest',
+        'share',
+        'now',
+        ...(baseline != null ? ['baseline', 'Δ'] : []),
+        'Σ self',
+        'retained',
+        'example',
+      ],
+      rows,
+      new Set(baseline != null ? [2, 3, 4, 5, 6, 7, 8] : [2, 3, 4, 5, 6]),
+    ),
+    '',
+  ];
+}
+
 export function registerGrowthCohort(server: McpServer): void {
   server.tool(
     'memlab_growth_cohort',
     'Group the NEWEST instances of a population by who holds them — top referrer edges, top shapes, top root-path heads, and their dominator-deduped retained size.\n\n' +
       'V8 assigns heap-snapshot node ids monotonically as objects are allocated, so the highest-id members of a class ARE the ones created most recently: the tail IS the growth cohort. That is the population a ladder measured growing, and it is usually not the population a whole-class question answers about.\n\n' +
       'The point is the DISAGREEMENT. This reports the cohort next to the whole population, so "the newest instances are held by `X` while the class at large is held by `Y`" is visible in one call — the signature of a large static collection sitting beside a small accumulating one, where only the second grew. A retainer voted over the whole population names the static one every time.\n\n' +
-      'Select with `class_name`, `shape` (a property set), or both. Needs a snapshot loaded, ideally the LAST rung of a ladder.',
+      'Select with `class_name`, `shape` (a property set), or both. Needs a snapshot loaded, ideally the LAST rung of a ladder. `group_by: "referrer+shape"` groups the cohort by (referrer edge, shape) in one table, and `baseline_path` adds each group\'s count on an earlier rung.',
     {
       class_name: z
         .string()
@@ -188,8 +346,40 @@ export function registerGrowthCohort(server: McpServer): void {
         .optional()
         .default(12)
         .describe('Rows per breakdown table (default 12).'),
+      group_by: z
+        .enum(['separate', 'referrer+shape'])
+        .optional()
+        .default('separate')
+        .describe(
+          '"separate" (default): one table each for referrer edges, shapes and root-path heads. "referrer+shape": ONE table keyed by (referrer edge, first `shape_keys` property names), with count, self size and dominator-deduped retained size per group. Use it on a class like `Object`, where the growth is several record types held by different things and the two separate tables cannot say which shape goes with which holder.',
+        ),
+      shape_keys: z
+        .number()
+        .int()
+        .min(1)
+        .max(24)
+        .optional()
+        .default(5)
+        .describe(
+          'With `group_by: "referrer+shape"`: how many sorted property names form the shape part of the key (default 5).',
+        ),
+      baseline_path: z
+        .string()
+        .optional()
+        .describe(
+          'With `group_by: "referrer+shape"`: an earlier rung of the SAME ladder. Its whole population is grouped by the same key, and each row gets the baseline count and the growth since it, so a group that was already there at baseline is not read as new.',
+        ),
     },
-    async ({class_name, shape, node_type, cohort, top}) => {
+    async ({
+      class_name,
+      shape,
+      node_type,
+      cohort,
+      top,
+      group_by,
+      shape_keys,
+      baseline_path,
+    }) => {
       try {
         if (
           (class_name == null || class_name === '') &&
@@ -204,36 +394,12 @@ export function registerGrowthCohort(server: McpServer): void {
         const snapshot = getSnapshot();
         const want = shape != null && shape.length > 0 ? new Set(shape) : null;
 
-        const all: IHeapNode[] = [];
-        snapshot.nodes.forEach((node: IHeapNode) => {
-          if (node.id <= 3) return;
-          if (node_type != null && node.type !== node_type) return;
-          if (
-            class_name != null &&
-            class_name !== '' &&
-            node.name !== class_name
-          ) {
-            return;
-          }
-          if (want != null) {
-            // DISTINCT names. Counting matching edges instead lets one
-            // wanted key present on several edges — which a heap does
-            // produce — satisfy a two-key shape on its own, so `[a, b]`
-            // matches an object that has only `a`.
-            const seen = new Set<string>();
-            try {
-              for (const e of node.references) {
-                if (e.type !== 'property') continue;
-                const n = String(e.name_or_index);
-                if (want.has(n)) seen.add(n);
-              }
-            } catch {
-              return;
-            }
-            if (seen.size < want.size) return;
-          }
-          all.push(node);
-        });
+        const selector: Selector = {
+          className: class_name,
+          want,
+          nodeType: node_type,
+        };
+        const all = selectNodes(snapshot, selector);
 
         if (all.length === 0) {
           return errorResult(
@@ -293,6 +459,21 @@ export function registerGrowthCohort(server: McpServer): void {
             `(Σ self size ${formatBytes(newest.reduce((s, n) => s + n.self_size, 0))}).`,
           '',
         );
+
+        if (group_by === 'referrer+shape') {
+          lines.push(
+            ...(await jointTable({
+              snapshot,
+              all,
+              newest,
+              selector,
+              shapeKeys: shape_keys,
+              top,
+              baselinePath: baseline_path,
+            })),
+          );
+          return toolResult(lines.join('\n'));
+        }
 
         const sections: Array<{
           title: string;

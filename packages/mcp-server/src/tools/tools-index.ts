@@ -299,7 +299,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_growth_cohort',
-        'Who holds the NEWEST instances — the tail of the id range IS the growth. Reports it next to the whole population, so a static collection masking an accumulating one is visible in one call.',
+        'Who holds the NEWEST instances — the tail of the id range IS the growth. Reports it next to the whole population, so a static collection masking an accumulating one is visible in one call. `group_by: "referrer+shape"` splits an `Object` cohort into (holder, record type) rows, with counts on a `baseline_path` rung.',
       ],
       [
         'memlab_sequence_analysis',
