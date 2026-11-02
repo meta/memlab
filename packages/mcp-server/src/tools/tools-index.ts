@@ -466,7 +466,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_blink_native_census',
-        'Native (Blink) classes growing across a ladder, split into JS-held (app-releasable) vs browser-internal, with fixed-capacity browser buffers annotated.',
+        'Native (Blink) classes growing across a ladder, split into JS-held (app-releasable) vs browser-internal, with fixed-capacity browser buffers annotated and uncapped holders (ordered scopes, performance entries, listener and style data) rated per cycle by name. The battery runs it in every profile.',
       ],
       [
         'memlab_dev_artifacts',

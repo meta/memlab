@@ -535,7 +535,12 @@ side, and `wait_for_rungs: "all"` queues a battery until the round's
 `round.done` marker appears. On an A/B round (run.json has an `ab` section
 and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one
-`memlab_ab_compare` verdict table. The digest ends with the next calls worth
+`memlab_ab_compare` verdict table. Every profile also runs
+`memlab_blink_native_census`, which counts native (Blink) objects per rung and
+rates a fixed list of uncapped browser holders (ordered scopes, performance
+entries, User Timing marks, event-target data, style caches, observer
+registrations) by name, so native growth that no JavaScript-side step sees is
+in the digest; it is left out on A/B rounds. The digest ends with the next calls worth
 making for that round; a call already suggested in an earlier round of the
 same sweep, for the same class, is named once instead of repeated. Likewise a
 `memlab_round_audit` row an earlier round of the sweep showed word for word is

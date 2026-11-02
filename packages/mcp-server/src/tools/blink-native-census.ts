@@ -52,6 +52,112 @@ const BOUNDED_BUFFERS: ReadonlyMap<string, {cap: number; what: string}> =
     ['PerformanceLongAnimationFrameTiming', {cap: 200, what: 'LoAF buffer'}],
   ]);
 
+/**
+ * Browser holders with no cap that have grown without bound in real rounds.
+ * They are checked by name on every rung and reported whether or not they
+ * cleared `min_growth`: a holder adding 19 per cycle stays under a growth
+ * threshold for most of a short round.
+ */
+const WATCHED_HOLDERS: ReadonlyArray<{
+  label: string;
+  re: RegExp;
+  what: string;
+}> = [
+  {
+    label: 'blink::OrderedScope<…>',
+    re: /^blink::OrderedScope</,
+    what: 'OrderedScopeTree children_ (quote and counter scopes); a scope is removed only with its layout object',
+  },
+  {
+    label: 'Performance entries',
+    re: /^(Performance(?!Observer)\w+|LayoutShift(Attribution)?|LargestContentfulPaint|TaskAttributionTiming)$/,
+    what: 'performance timeline buffers, all entry types',
+  },
+  {
+    label: 'PerformanceMark / PerformanceMeasure',
+    re: /^Performance(Mark|Measure)$/,
+    what: 'User Timing buffer: no cap, held until clearMarks() / clearMeasures()',
+  },
+  {
+    label: 'blink::EventTargetData',
+    re: /^blink::EventTargetData$/,
+    what: 'per-target listener storage',
+  },
+  {
+    label: 'blink::RegisteredEventListener',
+    re: /^blink::RegisteredEventListener$/,
+    what: 'registered event listeners',
+  },
+  {
+    label: 'blink::CachedMatchedProperties',
+    re: /^blink::CachedMatchedProperties$/,
+    what: 'style engine matched-properties cache',
+  },
+  {
+    label: 'blink::ComputedStyle',
+    re: /^blink::ComputedStyle$/,
+    what: 'computed styles',
+  },
+  {
+    label: 'Mutation / intersection observations',
+    re: /^(MutationObserverRegistration|blink::IntersectionObservation)$/,
+    what: 'observer registrations',
+  },
+];
+
+/** Rate at or above which a watched holder is flagged as growing. */
+const WATCHED_GROWTH_RATE = 0.5;
+
+/** The watched-holders table, or null when none of them is in the heap. */
+function watchedTable(
+  perRung: ReadonlyArray<Map<string, number>>,
+  xs: number[],
+  unit: string,
+): string | null {
+  const rows: string[][] = [];
+  const names = new Set(perRung.flatMap(m => [...m.keys()]));
+  const rate = (slope: number) => `${slope >= 0 ? '+' : ''}${slope.toFixed(3)}`;
+  for (const w of WATCHED_HOLDERS) {
+    const members = [...names].filter(name => w.re.test(name));
+    if (members.length === 0) continue;
+    const series = (name: string) => perRung.map(m => m.get(name) ?? 0);
+    const ys = perRung.map((_, i) =>
+      members.reduce((n, name) => n + series(name)[i], 0),
+    );
+    const slope = linearFit(xs, ys).slope;
+    let what = w.what;
+    if (slope >= WATCHED_GROWTH_RATE) {
+      // A group's growth is named by its fastest member, which may be a
+      // capped buffer the table above already explains.
+      const top =
+        members.length > 1
+          ? members
+              .map(name => ({name, slope: linearFit(xs, series(name)).slope}))
+              .sort((a, b) => b.slope - a.slope)[0]
+          : null;
+      what =
+        `**grows** — ${w.what}` +
+        (top != null
+          ? `; fastest \`${top.name}\` (${rate(top.slope)}/${unit})`
+          : '');
+    }
+    rows.push([
+      w.label,
+      ys.map(v => formatNumber(v)).join(' → '),
+      rate(slope),
+      what,
+    ]);
+  }
+  if (rows.length === 0) return null;
+  return [
+    '### Watched browser holders',
+    '',
+    markdownTable(['Holder', 'Series', `Δ/${unit}`, 'What'], rows),
+    '',
+    '_Uncapped browser holders that have grown without bound before, counted by name on every rung whether or not they passed `min_growth`. A growing one is held by something the app keeps creating; its newest instances are in the table above when they also passed `min_growth`._',
+  ].join('\n');
+}
+
 const PERF_CLASS_RE =
   /^(Performance\w+|LayoutShift\w*|LargestContentfulPaint|TaskAttributionInfo\w*|DOMRectReadOnly)$/;
 
@@ -206,7 +312,7 @@ export function registerBlinkNativeCensus(server: McpServer): void {
   server.tool(
     'memlab_blink_native_census',
     'Native (Blink) classes that grow across a ladder — `blink::*`, performance-timeline entries, other `native` objects — each split by WHO holds its newest instances: a JavaScript holder (a promise reaction, an app array; an app change can release it) or the browser itself (performance timeline, soft-navigation heuristics; it cannot). ' +
-      'Known fixed-capacity browser buffers (Event Timing, Layout Instability, LCP, Resource Timing, Long Tasks) are annotated with their cap, so a buffer filling up is not reported as a leak. Takes `run_dir` or `paths`.',
+      'Known fixed-capacity browser buffers (Event Timing, Layout Instability, LCP, Resource Timing, Long Tasks) are annotated with their cap, so a buffer filling up is not reported as a leak. Uncapped holders that have grown without bound before (ordered scopes, performance entries, User Timing marks, event-target data, style caches, observer registrations) are checked by name on every rung and listed with their rate. Takes `run_dir` or `paths`.',
     {
       run_dir: z
         .string()
@@ -319,6 +425,8 @@ export function registerBlinkNativeCensus(server: McpServer): void {
         // it ended above, so it leaves the table; it is named below rather
         // than dropped without a trace.
         const rows = fitted.filter(r => r.slope > 0);
+        const unit = axis != null ? 'cycle' : 'rung';
+        const watched = watchedTable(perRung, xs, unit);
         const drainingNames = fitted.filter(r => r.slope <= 0).map(r => r.name);
         const drainNote =
           drainingNames.length > 0
@@ -344,10 +452,10 @@ export function registerBlinkNativeCensus(server: McpServer): void {
               `No native class both grew by ${formatNumber(min_growth)} or more from the first rung and has a rising per-rung trend across ${rungPaths.length} rungs.`,
               ...(lateNote != null ? ['', lateNote] : []),
               ...(drainNote != null ? ['', drainNote] : []),
+              ...(watched != null ? ['', watched] : []),
             ].join('\n'),
           );
         }
-        const unit = axis != null ? 'cycle' : 'rung';
         const table = rows.slice(0, limit).map(r => {
           const buf = BOUNDED_BUFFERS.get(r.name);
           const last = r.ys[r.ys.length - 1];
@@ -413,6 +521,7 @@ export function registerBlinkNativeCensus(server: McpServer): void {
             ...(lateNote != null ? [lateNote, ''] : []),
             ...(drainNote != null ? [drainNote, ''] : []),
             '_JS / browser holders: of the newest instances sampled, how many have a JavaScript object on their shortest retainer path (an app change can release them) versus a path through browser objects only. A JS-held native grower is worth a `memlab_retainer_trace` on one of its newest instances; a browser-internal one usually is not app-fixable._',
+            ...(watched != null ? ['', watched] : []),
           ].join('\n'),
         );
       } catch (err) {

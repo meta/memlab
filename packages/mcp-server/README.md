@@ -402,7 +402,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | --- | --- |
 | `memlab_artifact_budget` | ONE number for how much of the heap is not the application — and, with a baseline, how much of the GROWTH was the app. `app_delta` is the number that should lead a report; `windows` also gives it without the app's bounded retention windows. |
 | `memlab_replicate` | Does the effect REPRODUCE across independently-driven runs? Refuses to call it real until it does — the guard against filing a one-off. |
-| `memlab_blink_native_census` | Native (Blink) classes growing across a ladder, split into JS-held (app-releasable) vs browser-internal, with fixed-capacity browser buffers annotated. |
+| `memlab_blink_native_census` | Native (Blink) classes growing across a ladder, split into JS-held (app-releasable) vs browser-internal, with fixed-capacity browser buffers annotated and uncapped holders (ordered scopes, performance entries, listener and style data) rated per cycle by name. The battery runs it in every profile. |
 | `memlab_dev_artifacts` | Memory retained ONLY by dev/automation roots — DevTools, extensions, React Fast Refresh, the a11y cache. Run before calling anything a production leak. |
 | `memlab_explain_delta` | Sums the OTHER artifact family — V8 engine code (JIT warmup, code flushing) — in its own line; dev_artifacts does not count it. Read both. |
 | `memlab_check_health` | Prioritized triage that separates likely-real from likely-noise. |

@@ -282,6 +282,9 @@ function buildPlan(
     // were run by hand every round because the battery did not.
     {tool: 'memlab_detached_dom', args: {run_dir: runDir}},
     {tool: 'memlab_event_registry', args: {run_dir: runDir}},
+    // Native growth is invisible to every JS-side step above: a Blink
+    // scope tree adding 19 entries per cycle was found only by hand.
+    {tool: 'memlab_blink_native_census', args: {run_dir: runDir}},
     ...(hasControls
       ? [{tool: 'memlab_positive_controls', args: {run_dir: runDir}}]
       : []),
@@ -492,7 +495,9 @@ export function perArmPlan(
           stem: `${st.tool}.${arm}`,
         });
       }
-    } else {
+    } else if (st.tool !== 'memlab_blink_native_census') {
+      // The native census has no `segment`; over the whole round it would
+      // fit one rate across two isolates.
       out.push(st);
     }
     if (st.tool === 'memlab_round_audit' && !placed) {
@@ -570,6 +575,11 @@ const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
     {
       tool: /detached_dom/,
       re: /^Totals:|^\*\*|\| (STEP\+LINEAR|STEP|LINEAR|ONSET)\s+\|$/,
+      max: 6,
+    },
+    {
+      tool: /blink_native_census/,
+      re: /^No native class|\*\*JS-held\*\*|\*\*grows\*\*/,
       max: 6,
     },
     {tool: /positive_controls/, re: /PASS|FAIL|UNRESOLVED|n\/a/, max: 4},
