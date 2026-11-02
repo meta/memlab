@@ -46,7 +46,7 @@ const gunzipAsync = promisify(zlib.gunzip);
  * rebuilt rather than misread — silently reading an old layout is the failure
  * mode a cache has that a recomputation does not.
  */
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 
 /** Every numeric array index collapses to this one key. */
 const INDEX_EDGE_NAME = '[i]';
@@ -92,6 +92,13 @@ export interface SnapshotIndex {
    * that a fresh census would have kept.
    */
   shapes: Record<string, [number, number, number]>;
+  /**
+   * The same table restricted to nodes whose class is exactly `Object`, the
+   * filter `memlab_shape_census_diff` is nearly always called with. Without
+   * it a filtered call cannot use the sidecar and parses every rung, which on
+   * a 2.7 M-node rung ran past the per-call budget. Added in version 2.
+   */
+  objectShapes: Record<string, [number, number, number]>;
   /**
    * Edge name -> holder count, by edge type. Numeric array indices collapse
    * to `[i]`, and names over 120 characters are dropped: both are values
@@ -240,6 +247,10 @@ function validateSidecar(
     if (!isTuple(v, 2)) return null;
   }
   for (const v of Object.values(parsed.shapes)) {
+    if (!isTuple(v, 3)) return null;
+  }
+  if (!isTable(parsed.objectShapes)) return null;
+  for (const v of Object.values(parsed.objectShapes)) {
     if (!isTuple(v, 3)) return null;
   }
   return parsed;
@@ -446,6 +457,8 @@ export function buildSnapshotIndex(
   // for the whole server process.
   const classes: Record<string, [number, number]> = Object.create(null);
   const shapes: Record<string, [number, number, number]> = Object.create(null);
+  const objectShapes: Record<string, [number, number, number]> =
+    Object.create(null);
   const edgeNames: Record<string, Record<string, number>> = Object.create(null);
   let detachedCount = 0;
   let unreadableNodes = 0;
@@ -506,12 +519,9 @@ export function buildSnapshotIndex(
     if (node.type !== 'object' || props.length === 0) return;
     props.sort();
     const shapeKey = joinShapeKey(props);
-    const s = shapes[shapeKey];
-    if (s) {
-      s[0]++;
-      s[1] += node.self_size;
-    } else {
-      shapes[shapeKey] = [1, node.self_size, props.length];
+    countShape(shapes, shapeKey, node.self_size, props.length);
+    if (node.name === 'Object') {
+      countShape(objectShapes, shapeKey, node.self_size, props.length);
     }
   });
 
@@ -533,10 +543,26 @@ export function buildSnapshotIndex(
     builtAtMs: Date.now(),
     classes,
     shapes,
+    objectShapes,
     edgeNames,
     detachedCount,
     unreadableNodes,
   };
+}
+
+function countShape(
+  table: Record<string, [number, number, number]>,
+  key: string,
+  selfSize: number,
+  propCount: number,
+): void {
+  const s = table[key];
+  if (s) {
+    s[0]++;
+    s[1] += selfSize;
+  } else {
+    table[key] = [1, selfSize, propCount];
+  }
 }
 
 /**

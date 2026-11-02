@@ -471,6 +471,12 @@ give a ladder in three ways:
 `memlab_eval_across` takes `paths`, or `run_dir` with `rungs: [0, -1]`, to run
 one eval program over chosen rungs the same way, without loading them first.
 
+The first load of a rung writes a sidecar index next to it
+(`<snapshot>.memlab-index.json`) with class counts, edge names and shape
+tables. Later ladder calls read the sidecar instead of parsing the rung:
+`memlab_shape_census_diff` with no filter or with `class_filter: "Object"`
+takes seconds over a ladder that already has one.
+
 Ladder tools can run longer than an assistant's tool timeout. Start them with
 `memlab_start_job` and collect the result with `memlab_job_status`. A large
 snapshot can be loaded the same way with `memlab_load_snapshot({async: true})`. Every call

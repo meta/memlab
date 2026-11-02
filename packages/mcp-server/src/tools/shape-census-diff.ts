@@ -249,20 +249,23 @@ export function registerShapeCensusDiff(server: McpServer): void {
         /**
          * The shape census for one rung, from the sidecar when it can be.
          *
-         * The sidecar's shape table is UNFILTERED (it is built once, before
-         * anyone knows what will be asked), so it only answers a call with no
-         * class/name filter — but that is the common call, and it turns a
-         * 22-43 s parse per rung into a JSON read. With a filter, the graph is
-         * opened as before.
+         * The sidecar holds two shape tables, built once before anyone knows
+         * what will be asked: every object, and `Object`-class objects only.
+         * They answer a call with no filter or with `class_filter: "Object"`,
+         * which turns a 22-43 s parse per rung into a JSON read. Any other
+         * filter opens the graph as before.
          */
         const censusOf = async (
           localPath: string,
           opts: typeof censusOpts,
         ): Promise<Map<string, ShapeStats>> => {
           const unfiltered = opts.className == null && opts.namePattern == null;
-          if (unfiltered) {
+          const plainObjects =
+            opts.className === 'Object' && opts.namePattern == null;
+          if (unfiltered || plainObjects) {
             const side = readSidecar(localPath);
             if (side != null) {
+              const table = unfiltered ? side.shapes : side.objectShapes;
               cachedRungs++;
               // The count the sidecar RECORDED when it was built, so a
               // cached rung reports the same short-walk caveat a freshly
@@ -270,7 +273,7 @@ export function registerShapeCensusDiff(server: McpServer): void {
               // skipped the walk.
               unreadableNodes += side.unreadableNodes ?? 0;
               const out = new Map<string, ShapeStats>();
-              for (const [key, entry] of Object.entries(side.shapes)) {
+              for (const [key, entry] of Object.entries(table)) {
                 const [count, selfSize, propCount] = entry;
                 // The STORED property count, with no fallback. A property
                 // name containing a comma makes `key.split(',').length` too

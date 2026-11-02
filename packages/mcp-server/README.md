@@ -575,7 +575,7 @@ The server keeps a few small files so that work survives a restart:
 
 | File | Written by | Override |
 | --- | --- | --- |
-| `<snapshot>.memlab-index.json` | Sidecar index next to each analyzed snapshot, so later ladder analyses run from cache | `MEMLAB_NO_INDEX_CACHE=1` disables it |
+| `<snapshot>.memlab-index.json` | Sidecar index next to each analyzed snapshot, so later ladder analyses run from cache. It holds class counts, edge names and two shape tables (all objects, and `Object`-class objects), so `memlab_shape_census_diff` with no filter or with `class_filter: "Object"` reads it instead of parsing each rung. A sidecar from an older server version is rebuilt on the next load. | `MEMLAB_NO_INDEX_CACHE=1` disables it |
 | `~/.memlab-mcp/ladders.json` | `memlab_ladder` | — |
 | `~/.memlab-mcp/findings.json` (or `findings.<workstream>.json`) | `memlab_finding_index` | `MEMLAB_FINDINGS_INDEX` (file, or a directory) |
 | `~/.memlab-mcp/judge-calibration.json` | `memlab_calibrate_judges` | `MEMLAB_JUDGE_LEDGER` |
