@@ -63,12 +63,68 @@ interface RoundData {
   rates: Map<string, number>;
   /** component -> longest pending chain */
   chains: Map<string, number>;
+  /** Driven steps grouped by how many landed per cycle (run.json `steps`). */
+  events: RoundEvent[];
   /** Analysis artifacts that are ABSENT — the all-missing test counts these. */
   missing: string[];
   /** Artifacts that exist but could not be read for what this tool needs. */
   notes: string[];
   /** How many analysis artifacts `readRound` looked for, for the all-missing test. */
   artifactCount: number;
+}
+
+interface RoundEvent {
+  names: string[];
+  perCycle: number;
+}
+
+/**
+ * The steps a round drove, grouped by landed-per-cycle so two steps that ran
+ * equally often are one match. A step landing under once per five cycles
+ * (a periodic smoke step) is left out: dividing by a small count turns any
+ * rate into some whole multiple of it.
+ */
+function roundEvents(
+  stepsLanded: Record<string, number> | null,
+  cycles: number,
+): RoundEvent[] {
+  if (stepsLanded == null || cycles <= 0) return [];
+  const byRate = new Map<string, RoundEvent>();
+  for (const [name, landed] of Object.entries(stepsLanded)) {
+    const perCycle = landed / cycles;
+    if (!(perCycle >= 0.2)) continue;
+    const key = perCycle.toFixed(2);
+    const e = byRate.get(key) ?? {names: [], perCycle};
+    e.names.push(name);
+    byRate.set(key, e);
+  }
+  return [...byRate.values()].sort((a, b) => a.perCycle - b.perCycle);
+}
+
+const MAX_PER_STEP_MULTIPLE = 5;
+
+/**
+ * How a per-cycle value lands on a whole number: per cycle, or per landed
+ * step when a cycle drives a step more than once. Exactly one record per
+ * chat open reads 2.000/cycle on a combo that opens two chats per cycle, and
+ * only the per-step match names it.
+ *
+ * Per-step multiples are capped lower than per-cycle ones: each step is one
+ * more chance for a rate to land near a whole number by accident.
+ */
+export function wholeMatches(v: number, events: RoundEvent[]): string[] {
+  const out: string[] = [];
+  const perCycle = nearWhole(v);
+  if (perCycle != null) out.push(`${perCycle} per cycle`);
+  for (const e of events) {
+    // Once a cycle is the per-cycle match above.
+    if (Math.abs(e.perCycle - 1) < 0.005) continue;
+    const k = nearWhole(v / e.perCycle, 0.03, MAX_PER_STEP_MULTIPLE);
+    if (k == null) continue;
+    const names = e.names.map(n => `\`${n}\``).join(', ');
+    out.push(`${k} per ${names} (${e.perCycle.toFixed(2)}/cycle)`);
+  }
+  return out;
 }
 
 /**
@@ -367,6 +423,7 @@ function readRound(dir: string): RoundData {
     appDeltaMB: parseAppDelta(budget),
     rates,
     chains: parseChains(queues),
+    events: roundEvents(manifest.stepsLanded, manifest.cycles),
     missing,
     notes,
   };
@@ -376,7 +433,7 @@ export function registerCompareRounds(server: McpServer): void {
   server.tool(
     'memlab_compare_rounds',
     'Compare N rounds of a sweep and surface the patterns no single round shows.\n\n' +
-      'Two of them are worth the call on their own. **A per-cycle rate that lands on a whole number names a MECHANISM** — a population accumulating exactly 1 or 2 per interaction is a different and much stronger finding than "it grew", and it is what turns a trend into a fix. **A population that grows while `app_delta` is NEGATIVE is invisible** to the aggregate ladder people actually look at; a measured sweep had eight such rounds, with chains reaching 9,818 records while the heap shrank.\n\n' +
+      'Two of them are worth the call on their own. **A rate that lands on a whole number, per cycle or per landed step, names a MECHANISM** — a population accumulating exactly 1 or 2 per interaction is a different and much stronger finding than "it grew", and it is what turns a trend into a fix. **A population that grows while `app_delta` is NEGATIVE is invisible** to the aggregate ladder people actually look at; a measured sweep had eight such rounds, with chains reaching 9,818 records while the heap shrank.\n\n' +
       'That sweep found both by pasting twenty digests into a table by hand, because nothing compared rounds. This reads the per-round files `memlab_analysis_battery` already wrote and builds the matrix.\n\n' +
       'Loads NO snapshots — comparing twenty rounds must not mean re-reading eighty captures. It therefore requires each round to have been analysed first; a round with no `analysis/` directory is reported as such rather than silently omitted.',
     {
@@ -489,7 +546,7 @@ export function registerCompareRounds(server: McpServer): void {
           ...(detachedWarning != null ? [detachedWarning, ''] : []),
         ];
 
-        const unitRateNotes: string[] = [];
+        const unitRates: string[][] = [];
         const invisibleNotes: string[] = [];
 
         const buildMatrix = (
@@ -520,17 +577,21 @@ export function registerCompareRounds(server: McpServer): void {
               ...rounds.map(r => {
                 const v = pick(r).get(n);
                 if (v == null) return '—';
-                const whole = nearWhole(v);
-                return whole != null ? `**${v.toFixed(2)}**` : v.toFixed(2);
+                return wholeMatches(v, r.events).length > 0
+                  ? `**${v.toFixed(2)}**`
+                  : v.toFixed(2);
               }),
             ]);
             for (const r of present) {
               const v = pick(r).get(n) as number;
-              const whole = nearWhole(v);
-              if (whole != null) {
-                unitRateNotes.push(
-                  `\`${n}\` in **${r.name}**: ${v.toFixed(3)} ≈ **${whole}** ${unitLabel}`,
-                );
+              const matches = wholeMatches(v, r.events);
+              if (matches.length > 0) {
+                unitRates.push([
+                  `\`${n}\``,
+                  r.name,
+                  `${v.toFixed(3)} ${unitLabel}`,
+                  matches.join('; '),
+                ]);
               }
               if (
                 valueIsGrowthRate &&
@@ -718,17 +779,20 @@ export function registerCompareRounds(server: McpServer): void {
           );
         }
 
-        if (unitRateNotes.length > 0) {
-          const uniqueUnitRateNotes = [...new Set(unitRateNotes)];
+        if (unitRates.length > 0) {
           lines.push(
-            '### ⚑ Unit rates — a whole number names a MECHANISM',
+            '### ⚑ Exact integer rates — a whole number names a MECHANISM',
             '',
             'A population accumulating exactly N per interaction is a much stronger finding than ' +
               '"it grew": it says one record is stranded per interaction, which points at a specific ' +
-              'call site rather than at a trend.',
+              'call site rather than at a trend. A rate is matched per cycle and per landed step ' +
+              '(run.json `steps`), so a combo that opens two chats per cycle shows one record per chat open as "1 per `open-chat`".',
             '',
-            ...uniqueUnitRateNotes.slice(0, NOTE_LIMIT).map(n => `- ${n}`),
-            ...truncationNote(uniqueUnitRateNotes.length),
+            markdownTable(
+              ['Population', 'Round', 'Rate', 'Whole number per'],
+              unitRates.slice(0, NOTE_LIMIT),
+            ),
+            ...truncationNote(unitRates.length),
             '',
           );
         }

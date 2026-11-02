@@ -449,6 +449,11 @@ figures are defined or grouped differently:
   what its first did. It is not counted as a leak candidate. A mount followed
   by steady growth reads `STEP+LINEAR`, with its post-step rate, which is the
   leak rate; the overall Δ/cycle overstates it.
+- **A whole-number rate is a mechanism.** `memlab_compare_rounds` lists
+  every population, in any round of a sweep, whose rate is a whole number per
+  cycle or per landed step (from run.json `steps`), with the step it matches.
+  A combo that opens two chats per cycle reads 2.000/cycle for one record per
+  chat open; the table says `1 per open-chat`.
 - **Minified builds rename variables, not record fields.** A probe that
   looks a collection up by its variable name finds nothing on a production
   bundle. A probe stuck at -1 (its own "not found" value) at every rung, and a

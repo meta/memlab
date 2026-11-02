@@ -223,7 +223,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_compare_rounds',
-        'Compare N rounds of a sweep: per-cycle rates that land on a WHOLE NUMBER (a mechanism, not a trend) and populations that grew while app_delta was negative (invisible to the aggregate ladder).',
+        'Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder).',
       ],
       [
         'memlab_field_release_impact',
