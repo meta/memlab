@@ -382,6 +382,12 @@ figures are defined or grouped differently:
   unknown.
 - **Default lists** in memlab leave out engine-internal node types (arrays,
   code, native, synthetic) unless you ask for them by `node_type`.
+- **Engine code in deltas is summed, not ranked.** `memlab_explain_delta` and
+  `memlab_dev_subtracted_delta` put V8 engine code (compiled code, bytecode,
+  feedback, inline caches, and what code flushing drops) in one line of its
+  own. It grows as new paths are compiled and shrinks when cold code is
+  flushed, so it otherwise filled the top of the table with rows no app fix
+  can change. Pass `include_engine: true` to list it.
 - **Production-only totals** leave out memory a development build holds only
   through a dev root or dev edge (React Fast Refresh registries, React
   `_debug*` fields, devtools globals, and the React Compiler's dev hook-guard

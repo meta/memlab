@@ -26,6 +26,7 @@ import {
   computeReachableWithoutDevRoots,
 } from './dev-artifacts.js';
 import {normalizeClassName} from '../snapshot-index.js';
+import {isEngineClass} from '../artifact-classes.js';
 import {
   armScanBudgetFor,
   resolveRungs,
@@ -87,12 +88,19 @@ export function registerDevSubtractedDelta(server: McpServer): void {
         .optional()
         .default(20)
         .describe('Classes to list (default 20), by production-only growth.'),
+      include_engine: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          'List V8 engine classes (compiled code, bytecode, feedback, code flushing) in the table. Default false: they are summed in their own section, because no app fix changes them.',
+        ),
       max_file_size_mb: z
         .number()
         .optional()
         .describe('Per-file size ceiling, matching memlab_load_snapshot.'),
     },
-    async ({baseline, target, limit, max_file_size_mb}) => {
+    async ({baseline, target, limit, include_engine, max_file_size_mb}) => {
       try {
         const {rungs, largestMB} = resolveRungs(
           [baseline, target],
@@ -126,13 +134,25 @@ export function registerDevSubtractedDelta(server: McpServer): void {
               r.rawBytes !== 0,
           )
           .sort((x, y) => y.prodBytes - x.prodBytes);
+        const isEngine = (k: string) => {
+          const sep = k.indexOf('::');
+          return isEngineClass(k.slice(sep + 2), k.slice(0, sep));
+        };
+        const engineRows = rows.filter(r => isEngine(r.k));
+        const tableRows = include_engine
+          ? rows
+          : rows.filter(r => !isEngine(r.k));
+        const engineBytes = engineRows.reduce((n, r) => n + r.prodBytes, 0);
         const rawDelta = b.allBytes - a.allBytes;
         const prodDelta = b.prodBytes - a.prodBytes;
+        const signedBytes = (n: number) =>
+          `${n >= 0 ? '+' : '−'}${formatBytes(Math.abs(n))}`;
         const lines = [
           '## Production-only growth',
           '',
           `Raw self-size delta **${formatBytes(rawDelta)}**; with dev-only memory removed **${formatBytes(prodDelta)}** ` +
-            `(dev-only share of the target: ${formatBytes(b.allBytes - b.prodBytes)}).`,
+            `(dev-only share of the target: ${formatBytes(b.allBytes - b.prodBytes)}). ` +
+            `V8 engine code is ${signedBytes(engineBytes)} of it, so app classes moved **${signedBytes(prodDelta - engineBytes)}**.`,
           '',
           markdownTable(
             [
@@ -142,7 +162,7 @@ export function registerDevSubtractedDelta(server: McpServer): void {
               'Δ count (raw)',
               'Dev share of Δ bytes',
             ],
-            rows.slice(0, limit).map(r => {
+            tableRows.slice(0, limit).map(r => {
               const sep = r.k.indexOf('::');
               const name = r.k.slice(sep + 2);
               return [
@@ -160,8 +180,32 @@ export function registerDevSubtractedDelta(server: McpServer): void {
             new Set([1, 2, 3, 4]),
           ),
           '',
-          '_A class whose raw growth is mostly dev share is the dev build growing, not the app. Self sizes; dominator-retained sizes need `memlab_what_if` on the population._',
         ];
+        if (!include_engine && engineRows.length > 0) {
+          // `code` nodes are named per function; their V8 class is the family.
+          const families = new Map<string, number>();
+          for (const r of engineRows) {
+            const sep = r.k.indexOf('::');
+            const name = r.k.slice(sep + 2);
+            const family = name.startsWith('system / ')
+              ? name.split(' / ').slice(0, 2).join(' / ')
+              : `(${r.k.slice(0, sep)})`;
+            families.set(family, (families.get(family) ?? 0) + r.prodBytes);
+          }
+          const top = [...families]
+            .filter(([, bytes]) => bytes !== 0)
+            .sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))
+            .slice(0, 5)
+            .map(([family, bytes]) => `\`${family}\` ${signedBytes(bytes)}`);
+          lines.push(
+            `**Engine (JIT tier-up / code flushing):** net ${signedBytes(engineBytes)} over ${formatNumber(families.size)} V8 class(es)${top.length > 0 ? ` — ${top.join(', ')}` : ''}. ` +
+              'Compiled code, bytecode, feedback and inline caches grow as new paths run and shrink when V8 flushes cold code; no app fix moves them (`include_engine: true` lists them above).',
+            '',
+          );
+        }
+        lines.push(
+          '_A class whose raw growth is mostly dev share is the dev build growing, not the app. Self sizes; dominator-retained sizes need `memlab_what_if` on the population._',
+        );
         return toolResult(lines.join('\n'));
       } catch (err) {
         return errorResult(err);

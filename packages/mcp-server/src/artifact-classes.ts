@@ -305,6 +305,33 @@ export function isHarnessToolManifestShape(
  * Classify a class NAME as a known measurement artifact, or null when it is a
  * genuine leak candidate.
  */
+/**
+ * Code that V8 FLUSHES (drops) when a function goes cold, so these shrink on
+ * their own between rungs. Like the warmup families, an app fix never moves
+ * them.
+ */
+const FLUSHED_CLASS_NAMES: ReadonlySet<string> = new Set([
+  'ArrayBoilerplateDescription',
+  '(constant elements)',
+  'PreparseData',
+]);
+
+/**
+ * V8 engine memory: compiled code, bytecode, feedback and inline caches (JIT
+ * tier-up) and what code flushing drops. `type` is the heap node type when
+ * known; every `code` node counts. Engine rows outnumber app rows at the top
+ * of a delta, and no application fix changes them.
+ */
+export function isEngineClass(name: string, type?: string): boolean {
+  if (type === 'code') return true;
+  const bare = name.replace(/^system \/ /, '');
+  return (
+    WARMUP_CLASS_NAMES.has(bare) ||
+    FLUSHED_CLASS_NAMES.has(bare) ||
+    /^SharedFunctionInfo( \/ |$)/.test(bare)
+  );
+}
+
 export function classifyArtifact(name: string): ArtifactKind | null {
   const bare = name.replace(/^system \/ /, '');
   if (WARMUP_CLASS_NAMES.has(bare)) return 'warmup';

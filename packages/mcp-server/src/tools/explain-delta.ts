@@ -29,7 +29,7 @@ import {
   errorResult,
   toolResult,
 } from '../utils.js';
-import {classifyArtifact} from '../artifact-classes.js';
+import {classifyArtifact, isEngineClass} from '../artifact-classes.js';
 import {normalizeClassName} from './sequence-analysis.js';
 import {
   collectDevRoots,
@@ -171,7 +171,7 @@ export function registerExplainDelta(server: McpServer): void {
     'memlab_explain_delta',
     'Explain WHERE a heap grew between two loaded snapshots, attributed by dominator (who owns the new bytes) rather than by class (what the new bytes are). ' +
       '"Object grew by 99,418 instances" does not tell you what to fix; "the bytes hanging off CometStyleXSheet grew by 12 MB" does. Every node\'s SELF size is attributed to its immediate dominator\'s class and the two attributions are differenced, so the numbers partition the heap and add up — unlike a per-class sum of retained sizes, which double-counts nested objects and can exceed the heap. ' +
-      'Known measurement-artifact owners (JIT warmup, CDP inspector, a11y caches, captured Error stacks) are flagged so an inspector-driven delta is not read as an application regression. Both snapshots must be resident: load them with keep_previous:true.',
+      'V8 engine owners (compiled code, bytecode, feedback, code flushing) are summed in one line, and known measurement-artifact owners (CDP inspector, a11y caches, captured Error stacks) are flagged, so neither is read as an application regression. Both snapshots must be resident: load them with keep_previous:true.',
     {
       baseline_handle: z
         .string()
@@ -223,6 +223,13 @@ export function registerExplainDelta(server: McpServer): void {
         .describe(
           'Include owners that are known measurement artifacts (default false: counted in a one-line summary instead).',
         ),
+      include_engine: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          'List owners that are V8 engine code (compiled code, bytecode, feedback, code flushing) in the tables. Default false: they are summed in one line, because no app fix changes them.',
+        ),
       include_dev: z
         .boolean()
         .optional()
@@ -239,6 +246,7 @@ export function registerExplainDelta(server: McpServer): void {
       limit,
       min_delta_bytes,
       include_artifacts,
+      include_engine,
       include_dev,
     }) => {
       try {
@@ -374,6 +382,7 @@ export function registerExplainDelta(server: McpServer): void {
           after: number;
           nodesDelta: number;
           artifact: boolean;
+          engine: boolean;
           step: ReturnType<typeof capacityStep>;
         }
         const rows: Row[] = [];
@@ -390,6 +399,7 @@ export function registerExplainDelta(server: McpServer): void {
             after: after?.selfBytes ?? 0,
             nodesDelta: (after?.nodes ?? 0) - (before?.nodes ?? 0),
             artifact: classifyArtifact(owner) != null,
+            engine: isEngineClass(owner),
             step: capacityStep(before, after, delta),
           });
         }
@@ -407,8 +417,13 @@ export function registerExplainDelta(server: McpServer): void {
           '',
         ];
 
-        const artifactRows = rows.filter(r => r.artifact);
-        const usable = include_artifacts ? rows : rows.filter(r => !r.artifact);
+        // Engine owners get their own line; the artifact line covers the rest.
+        const engineRows = include_engine ? [] : rows.filter(r => r.engine);
+        const appRows = include_engine ? rows : rows.filter(r => !r.engine);
+        const artifactRows = appRows.filter(r => r.artifact);
+        const usable = include_artifacts
+          ? appRows
+          : appRows.filter(r => !r.artifact);
         const grew = usable
           .filter(r => r.delta > 0)
           .sort((x, y) => y.delta - x.delta)
@@ -462,11 +477,26 @@ export function registerExplainDelta(server: McpServer): void {
             '',
           );
         }
+        if (engineRows.length > 0) {
+          const sum = (rs: Row[]) => rs.reduce((n, r) => n + r.delta, 0);
+          const up = engineRows.filter(r => r.delta > 0);
+          const down = engineRows.filter(r => r.delta < 0);
+          const top = [...engineRows]
+            .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))
+            .slice(0, 4)
+            .map(
+              r =>
+                `\`${r.owner.slice(0, 40)}\` ${r.delta >= 0 ? '+' : '−'}${formatBytes(Math.abs(r.delta))}`,
+            );
+          lines.push(
+            `> ⚙ **Engine (JIT tier-up / code flushing):** ${formatNumber(engineRows.length)} owner(s) left out — +${formatBytes(sum(up))} grew, −${formatBytes(Math.abs(sum(down)))} shrank (${top.join(', ')}). Compiled code and feedback grow as new paths run and shrink when V8 flushes cold code; no app fix moves them. \`include_engine: true\` lists them. \`memlab_dev_artifacts\` does not count these: it measures retention by a dev root.`,
+            '',
+          );
+        }
         if (!include_artifacts && artifactRows.length > 0) {
           const bytes = artifactRows.reduce((s, r) => s + r.delta, 0);
           lines.push(
-            `> 🧹 **${formatNumber(artifactRows.length)} owner(s) suppressed as known measurement artifacts** (net ${bytes >= 0 ? '+' : '−'}${formatBytes(Math.abs(bytes))}) — JIT warmup, CDP inspector retention, a11y caches, captured Error stacks. Pass \`include_artifacts: true\` to see them.`,
-            '> Note the split of responsibilities: the JIT-warmup families counted here (`system/Code`, `InstructionStream`, `BytecodeArray`, `ProtectedFixedArray`) are NOT counted by `memlab_dev_artifacts`, which measures retention by a dev root instead. Neither total is the whole artifact bill on its own — read both before deciding how much of a round is real.',
+            `> 🧹 **${formatNumber(artifactRows.length)} owner(s) suppressed as known measurement artifacts** (net ${bytes >= 0 ? '+' : '−'}${formatBytes(Math.abs(bytes))}) — CDP inspector retention, a11y caches, captured Error stacks. Pass \`include_artifacts: true\` to see them.`,
             '',
           );
         }

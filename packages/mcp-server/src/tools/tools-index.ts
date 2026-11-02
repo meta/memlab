@@ -474,7 +474,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_explain_delta',
-        'Counts the OTHER artifact family — V8 JIT warmup — which dev_artifacts does not. Read both.',
+        'Sums the OTHER artifact family — V8 engine code (JIT warmup, code flushing) — in its own line; dev_artifacts does not count it. Read both.',
       ],
       [
         'memlab_check_health',

@@ -228,6 +228,7 @@ memlab and the browser's own heap profiler read the same snapshot, but a few fig
 | Distance (`memlab_get_node`) | Distance | Hops from the root over strong edges, with page globals at 1. |
 | Detachedness (`memlab_get_node`) | Detached flag | The snapshot's own three states: attached, detached, unknown. JS objects are always unknown. |
 | Default lists | Everything | `memlab_largest_objects` and several scans leave out engine-internal node types (arrays, code, native, synthetic) unless you ask for them by `node_type`. |
+| Engine code in a delta | Listed with the other classes | `memlab_explain_delta` and `memlab_dev_subtracted_delta` sum V8 engine code (compiled code, bytecode, feedback and inline caches, and what code flushing drops) in one line instead of ranking it with app classes. It grows as new paths are compiled and shrinks when cold code is flushed, and no app fix changes it. `include_engine: true` lists it in the tables. |
 
 Dev-only figures (the `Dev-only` column of `memlab_leak_report`, production-only totals in `memlab_explain_delta` and `memlab_dev_subtracted_delta`) leave out memory reachable only through a dev root or a dev edge. Dev edges include React `_debug*` fields, Fast Refresh registries and the React Compiler's dev hook-guard links: a compiler temporary `tN` holding a closure into an earlier context of the same scope, which a production compile never creates.
 
@@ -402,7 +403,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_replicate` | Does the effect REPRODUCE across independently-driven runs? Refuses to call it real until it does — the guard against filing a one-off. |
 | `memlab_blink_native_census` | Native (Blink) classes growing across a ladder, split into JS-held (app-releasable) vs browser-internal, with fixed-capacity browser buffers annotated. |
 | `memlab_dev_artifacts` | Memory retained ONLY by dev/automation roots — DevTools, extensions, React Fast Refresh, the a11y cache. Run before calling anything a production leak. |
-| `memlab_explain_delta` | Counts the OTHER artifact family — V8 JIT warmup — which dev_artifacts does not. Read both. |
+| `memlab_explain_delta` | Sums the OTHER artifact family — V8 engine code (JIT warmup, code flushing) — in its own line; dev_artifacts does not count it. Read both. |
 | `memlab_check_health` | Prioritized triage that separates likely-real from likely-noise. |
 
 ### Detached DOM and event listeners
