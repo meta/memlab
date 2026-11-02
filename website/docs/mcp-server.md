@@ -353,6 +353,15 @@ reads the served revision and a hash of the gating values from run.json, so
 two rounds that drove the same combos against different code or gating can
 be told apart.
 
+Pass `run_dir` to any action and the round fills in `round` and, when no
+`workstream` is given, the workstream: run.json `findings_workstream`, or an
+existing index named after run.json `app`. A `check` that finds nothing under
+the exact fingerprint lists entries that are probably the same finding (the
+same path with another class set, or a path whose last hops share names);
+attach the sighting to one with `action: "reconfirm"`, `fingerprint` and an
+optional `rate`. Set `MEMLAB_FIX_STATUS_CMD` to a shell command containing
+`{diff}` to show the live status of each diff a finding records as its fix.
+
 ## Reading the numbers
 
 memlab and the browser's own heap profiler read the same snapshot, but a few

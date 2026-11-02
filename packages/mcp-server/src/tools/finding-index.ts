@@ -9,6 +9,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
+import {execSync} from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -146,6 +147,8 @@ interface Finding {
   keys?: Record<string, string>;
   /** A retainer path seen for a structured finding; not part of its identity. */
   example_path?: string;
+  /** Rounds that re-confirmed this finding (`action: "reconfirm"`), oldest first. */
+  sightings?: Array<{round: string; rate?: string; note?: string}>;
 }
 
 /**
@@ -1094,6 +1097,135 @@ export function coverFromRun(runDir: string): {
   };
 }
 
+/**
+ * The workstream a round's findings belong to, from its run.json:
+ * `findings_workstream` as the runner recorded it, else the `app` when an index
+ * of that name already exists. Undefined when neither applies.
+ */
+export function workstreamFromRun(runDir: string): string | undefined {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'),
+    ) as {findings_workstream?: unknown; app?: unknown};
+    if (
+      typeof raw.findings_workstream === 'string' &&
+      raw.findings_workstream !== ''
+    ) {
+      return raw.findings_workstream;
+    }
+    if (typeof raw.app === 'string' && raw.app !== '') {
+      return fs.existsSync(resolveIndexPath(raw.app)) ? raw.app : undefined;
+    }
+  } catch {
+    // No readable run.json: nothing to infer from.
+  }
+  return undefined;
+}
+
+const GENERIC_PATH_TOKENS = new Set([
+  'object',
+  'array',
+  'context',
+  'map',
+  'set',
+  'table',
+  'system',
+  'elements',
+  'properties',
+  'window',
+]);
+
+/** Identifier-like words in the last `n` hops of a signature. */
+function tailTokens(signature: string, n = 3): Set<string> {
+  const hops = signature.split(' > ');
+  const out = new Set<string>();
+  for (const hop of hops.slice(-n)) {
+    for (const w of hop.toLowerCase().match(/[a-z_$][\w$<>:]{2,}/g) ?? []) {
+      if (!GENERIC_PATH_TOKENS.has(w)) out.add(w);
+    }
+  }
+  return out;
+}
+
+/**
+ * Entries that are probably this finding under a different fingerprint.
+ *
+ * The fingerprint hashes the signature AND the class set, so one finding seen
+ * again with one class fewer, or with one edge renamed, gets a new id: a
+ * re-sighting of a known Blink leak was filed as a second entry and its
+ * recorded fix was never shown. Matching is on the path's last three hops,
+ * where a leak's identity lives; the head is the root route and varies.
+ */
+export function possibleSameFinding(
+  index: FindingIndex,
+  signature: string,
+  classes: readonly string[],
+  excludeFingerprint: string,
+): Array<{f: Finding; why: string}> {
+  const mine = tailTokens(signature);
+  const wanted = new Set(classes);
+  const out: Array<{f: Finding; why: string; score: number}> = [];
+  for (const f of Object.values(index.findings)) {
+    if (f.fingerprint === excludeFingerprint) continue;
+    if (f.first_seen_round === 'builtin') continue;
+    const sharedClasses = f.growing_classes.filter(c => wanted.has(c));
+    if (f.signature === signature) {
+      out.push({f, why: 'same retainer path, different class set', score: 100});
+      continue;
+    }
+    const theirs = tailTokens(f.signature);
+    const shared = [...mine].filter(t => theirs.has(t));
+    if (
+      shared.length >= 2 ||
+      (shared.length >= 1 && sharedClasses.length > 0)
+    ) {
+      out.push({
+        f,
+        why: `path tail shares ${shared.map(t => `\`${t}\``).join(', ')}${sharedClasses.length > 0 ? ` and class ${sharedClasses.map(c => `\`${c}\``).join(', ')}` : ''}`,
+        score: shared.length * 2 + sharedClasses.length,
+      });
+    }
+  }
+  return out
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(({f, why}) => ({f, why}));
+}
+
+/**
+ * The live status of each diff a finding names as its fix, when the operator
+ * configured a lookup.
+ *
+ * A finding recorded with a fix reads as handled, and one round spent its
+ * investigation re-deriving a leak whose fix was still an unlanded draft.
+ * `MEMLAB_FIX_STATUS_CMD` is a shell command with `{diff}` in it (for example
+ * a code-review CLI that prints whether a change landed); its first output
+ * line is shown per diff. Unset, nothing is run.
+ */
+function fixStatusLines(f: Finding): string[] {
+  const template = process.env.MEMLAB_FIX_STATUS_CMD;
+  if (template == null || template === '' || f.fixed_by_diffs == null) {
+    return [];
+  }
+  return f.fixed_by_diffs.slice(0, 4).flatMap(diff => {
+    // Only an identifier reaches the shell.
+    if (!/^[A-Za-z]{0,4}\d+$/.test(diff)) return [];
+    try {
+      const out = execSync(template.split('{diff}').join(diff), {
+        timeout: 8000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .toString()
+        .trim()
+        .split('\n')[0]
+        ?.slice(0, 200);
+      return out ? [`- Fix status of ${diff}: ${out}`] : [];
+    } catch {
+      return [`- Fix status of ${diff}: (lookup failed)`];
+    }
+  });
+}
+
 export function registerFindingIndex(server: McpServer): void {
   server.tool(
     'memlab_finding_index',
@@ -1112,9 +1244,10 @@ export function registerFindingIndex(server: McpServer): void {
           'export',
           'amend',
           'delete',
+          'reconfirm',
         ])
         .describe(
-          '"check" (fingerprint + look up, no write), "record" (add/update), "amend" (edit an EXISTING entry in place, without counting a sighting), "delete" (remove an entry), "import" (bulk-seed history), "export" (write the whole index to a file so it can be checked in), "list", "cover" (log combos driven in a round). `amend` and `delete` address an entry by `fingerprint` — which is how a bad entry is repaired, since a wrong signature cannot be re-derived from a path.',
+          '"check" (fingerprint + look up, no write), "record" (add/update), "amend" (edit an EXISTING entry in place, without counting a sighting), "delete" (remove an entry), "import" (bulk-seed history), "export" (write the whole index to a file so it can be checked in), "list", "cover" (log combos driven in a round). `amend` and `delete` address an entry by `fingerprint` — which is how a bad entry is repaired, since a wrong signature cannot be re-derived from a path. "reconfirm" adds a sighting (`round`, optional `rate` and `note`) to an EXISTING entry by `fingerprint`: the way to attach a re-sighting whose path or class set came out slightly different, instead of minting a second entry for the same finding.',
         ),
       retainer_path: z
         .string()
@@ -1151,7 +1284,13 @@ export function registerFindingIndex(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'Round identifier (e.g. "r59"), recorded as first/last seen. With `list`: only findings first or last seen in this round.',
+          'Round identifier (e.g. "r59"), recorded as first/last seen. With `list`: only findings first or last seen in this round. Defaults to the `run_dir` directory name when that is given.',
+        ),
+      rate: z
+        .string()
+        .optional()
+        .describe(
+          'For action "reconfirm": the rate this round measured, e.g. "+19.00/cycle", stored with the sighting.',
         ),
       status: z
         // NO `.default('known')`. `record` applies that default itself; a
@@ -1240,7 +1379,7 @@ export function registerFindingIndex(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'For action "cover": a leak-hunt round. Fills `round` (the directory name), `combos`, `served_revision` and `preset_hash` from its run.json when not given.',
+          'A leak-hunt round. For any action it fills `round` (the directory name) and, when `workstream` is not given, the workstream from run.json (`findings_workstream`, else an existing index named after run.json `app`). For "cover" it also fills `combos`, `served_revision` and `preset_hash`.',
         ),
       workstream: z
         .string()
@@ -1289,7 +1428,8 @@ export function registerFindingIndex(server: McpServer): void {
       served_revision,
       preset_hash,
       run_dir,
-      workstream,
+      workstream: workstreamArg,
+      rate,
       from,
       to,
       findings,
@@ -1300,12 +1440,32 @@ export function registerFindingIndex(server: McpServer): void {
         // whichever index a previous call happened to touch is not — the
         // finding lands somewhere the caller did not name and the next round
         // does not find it. Reads may inherit; writes use what was passed.
+        // From the round when the caller did not name one: a `check` that
+        // read the unscoped index answered NEW for a finding filed under the
+        // app's workstream, and a `record` minted a duplicate there.
+        const inferred =
+          (workstreamArg == null || workstreamArg === '') &&
+          run_dir != null &&
+          run_dir !== ''
+            ? workstreamFromRun(run_dir)
+            : undefined;
+        const workstream = inferred ?? workstreamArg;
+        if (
+          (round == null || round === '') &&
+          run_dir != null &&
+          run_dir !== '' &&
+          action !== 'cover' &&
+          action !== 'list'
+        ) {
+          round = path.basename(run_dir.replace(/\/+$/, ''));
+        }
         const isWrite =
           action === 'import' ||
           action === 'record' ||
           action === 'cover' ||
           action === 'amend' ||
-          action === 'delete';
+          action === 'delete' ||
+          action === 'reconfirm';
         const effectiveWorkstream = isWrite
           ? workstream
           : stickyWorkstream(workstream);
@@ -1328,7 +1488,7 @@ export function registerFindingIndex(server: McpServer): void {
         // file", and it used to appear only in the empty-index banner.
         const indexPathLine = `_Index: \`${indexPath}\`${
           effectiveWorkstream != null && effectiveWorkstream !== ''
-            ? ` (workstream \`${effectiveWorkstream}\`${workstream == null || workstream === '' ? ', remembered from an earlier call in this session' : ''})`
+            ? ` (workstream \`${effectiveWorkstream}\`${inferred != null ? ", from the round's run.json" : workstream == null || workstream === '' ? ', remembered from an earlier call in this session' : ''})`
             : ' (unscoped)'
         }._`;
 
@@ -1722,7 +1882,11 @@ export function registerFindingIndex(server: McpServer): void {
         // fingerprint. That is deliberate and not merely convenient: the entry
         // that most needs removing is one whose signature is wrong, and a
         // wrong signature cannot be re-derived from a path.
-        if (action === 'amend' || action === 'delete') {
+        if (
+          action === 'amend' ||
+          action === 'delete' ||
+          action === 'reconfirm'
+        ) {
           let target = fingerprintArg;
           let resolvedBySignature = false;
           if (target == null || target === '') {
@@ -1776,6 +1940,30 @@ export function registerFindingIndex(server: McpServer): void {
           if (entry == null) {
             return errorResult(
               `No finding with fingerprint \`${target}\` in \`${indexPath}\`. \`action: "list"\` prints the ${formatNumber(Object.keys(index.findings).length)} entry/entries this index holds.`,
+            );
+          }
+          if (action === 'reconfirm') {
+            if (round == null || round === '') {
+              return errorResult(
+                'action "reconfirm" needs the `round` that saw it again (or a `run_dir`).',
+              );
+            }
+            entry.seen_count++;
+            entry.last_seen_round = round;
+            entry.sightings = [
+              ...(entry.sightings ?? []),
+              {
+                round,
+                ...(rate != null && rate !== '' ? {rate} : {}),
+                ...((note ?? notes) != null ? {note: note ?? notes} : {}),
+              },
+            ];
+            saveIndex(indexPath, index);
+            return result(
+              [
+                `Re-confirmed \`${target}\` in ${round}${rate ? ` at ${rate}` : ''} — **${entry.status}**, \`${entry.signature}\`, first seen ${entry.first_seen_round}, now seen ${formatNumber(entry.seen_count)}×.`,
+                ...fixStatusLines(entry),
+              ].join('\n'),
             );
           }
           if (action === 'delete') {
@@ -1960,7 +2148,35 @@ export function registerFindingIndex(server: McpServer): void {
                     : []),
                 ]
               : [];
-            const related = relatedByClass(index, growing_classes, fingerprint);
+            const near = possibleSameFinding(
+              index,
+              signature,
+              growing_classes,
+              fingerprint,
+            );
+            const nearLines =
+              near.length === 0
+                ? []
+                : [
+                    '',
+                    `### Possibly the same finding (${near.length})`,
+                    '',
+                    ...near.map(
+                      ({f, why}) =>
+                        `- \`${f.fingerprint}\` **${f.title ?? f.signature}** (${f.first_seen_round}, ${f.status}) — ${why}` +
+                        (f.fixed_by_diffs != null && f.fixed_by_diffs.length > 0
+                          ? `; fix: ${f.fixed_by_diffs.join(', ')}`
+                          : ''),
+                    ),
+                    ...near.flatMap(({f}) => fixStatusLines(f)),
+                    '',
+                    'A path that differs only in a class or an edge is usually the same finding seen again. If it is, attach this sighting with `action: "reconfirm", fingerprint: "<id>"` instead of recording a new entry.',
+                  ];
+            const related = relatedByClass(
+              index,
+              growing_classes,
+              fingerprint,
+            ).filter(f => !near.some(n => n.f.fingerprint === f.fingerprint));
             const relatedLines =
               related.length === 0
                 ? []
@@ -1991,6 +2207,7 @@ export function registerFindingIndex(server: McpServer): void {
                   'round recognizes it.',
                 '',
                 indexPathLine,
+                ...nearLines,
                 ...relatedLines,
               ].join('\n'),
             );
@@ -2038,6 +2255,7 @@ export function registerFindingIndex(server: McpServer): void {
               existing.fixed_by_diffs.length > 0
                 ? `Fixed by: ${existing.fixed_by_diffs.join(', ')}${existing.verified_by_ab === true ? ' (A/B verified)' : ' (NOT A/B verified — the fix is a claim, not a measured result)'}`
                 : '',
+              ...fixStatusLines(existing),
               existing.status === 'artifact'
                 ? '**Stop here — this population is NOT production memory.** A previous round ' +
                   'identified it as a measurement artifact (an automation bridge, a DevTools ' +
