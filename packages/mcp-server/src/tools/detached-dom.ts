@@ -12,7 +12,8 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {ladderShape} from '../ladder-shape.js';
 import {normalizeClassName} from '../snapshot-index.js';
 import {z} from 'zod';
-import {getSnapshot, getSnapshotEnv} from '../heap-state.js';
+import {getFilePath, getSnapshot, getSnapshotEnv} from '../heap-state.js';
+import {noteSnapshotRead} from '../read-scope.js';
 import type {IHeapNode, IHeapEdge, IHeapSnapshot} from '@memlab/core';
 import {
   queryNodes,
@@ -765,6 +766,12 @@ export function registerDetachedDom(server: McpServer): void {
             : undefined;
 
         if (group_by) {
+          // Without this the header names only the baseline, as if the
+          // table were about it.
+          const active = getFilePath();
+          if (baseline != null && baseline !== '' && active != null) {
+            noteSnapshotRead(active);
+          }
           const baselineCounts =
             baseline != null && baseline !== ''
               ? await detachedGroupCountsAt(
@@ -941,6 +948,10 @@ export function registerDetachedDom(server: McpServer): void {
               i > 0 && h !== 'Owner is' && h !== 'Example ID' ? [i] : [],
             ),
           );
+          const labelShown = new Set<string>();
+          const sharedShown = sorted.some(
+            ([, st]) => (byLabel.get(st.label)?.rows ?? 1) > 1,
+          );
           const rows = sorted.map(([key, stats]) => {
             const pct =
               totalRetainedAll > 0
@@ -952,8 +963,14 @@ export function registerDetachedDom(server: McpServer): void {
               formatNumber(stats.count),
               ...(baselineCounts != null
                 ? (() => {
-                    const shared =
-                      (byLabel.get(stats.label)?.rows ?? 1) > 1 ? '*' : '';
+                    const isShared = (byLabel.get(stats.label)?.rows ?? 1) > 1;
+                    // A shared label's counts cover all its rows, so they are
+                    // printed once, on its first row.
+                    if (isShared && labelShown.has(stats.label)) {
+                      return ['″', '″'];
+                    }
+                    labelShown.add(stats.label);
+                    const shared = isShared ? '*' : '';
                     const d = newOf(stats);
                     return [
                       `${formatNumber(atBaselineOf(stats))}${shared}`,
@@ -1024,7 +1041,10 @@ export function registerDetachedDom(server: McpServer): void {
                   );
                   return [
                     `**${formatNumber(base)} detached node(s) at the baseline, ${formatNumber(counted)} here (${counted - base >= 0 ? '+' : '−'}${formatNumber(Math.abs(counted - base))}).** ` +
-                      'Groups are sorted by **Δ since** the baseline: a group whose nodes were all there already is a standing population, not what this round grew.',
+                      'Groups are sorted by **Δ since** the baseline: a group whose nodes were all there already is a standing population, not what this round grew.' +
+                      (sharedShown
+                        ? ' `*`: several rows share this owner label, and its counts are for all of them together (`″` on the others).'
+                        : ''),
                   ];
                 })()
               : []),
