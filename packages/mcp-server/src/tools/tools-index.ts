@@ -458,7 +458,7 @@ const GROUPS: Group[] = [
     tools: [
       [
         'memlab_artifact_budget',
-        'ONE number for how much of the heap is not the application — and, with a baseline, how much of the GROWTH was the app. `app_delta` is the number that should lead a report.',
+        "ONE number for how much of the heap is not the application — and, with a baseline, how much of the GROWTH was the app. `app_delta` is the number that should lead a report; `windows` also gives it without the app's bounded retention windows.",
       ],
       [
         'memlab_replicate',

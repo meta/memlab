@@ -231,6 +231,7 @@ function buildPlan(
   hasSettleRung: boolean,
   hasControls = false,
   hasInvariants = false,
+  windows: Array<{name: string; edge: string; value_keys: string[]}> = [],
 ): Step[] {
   const ladder: Step[] = [
     // FIRST, deliberately. On one app 59-75% of the heap is not the
@@ -240,7 +241,11 @@ function buildPlan(
     // without it. It was also the most under-used tool in the set.
     {
       tool: 'memlab_artifact_budget',
-      args: {target: finalRung, baseline: baseRung},
+      args: {
+        target: finalRung,
+        baseline: baseRung,
+        ...(windows.length > 0 ? {windows} : {}),
+      },
     },
     {tool: 'memlab_round_audit', args: {run_dir: runDir}},
     // `run_dir`, deliberately, NOT the pinned `paths`.
@@ -1335,6 +1340,11 @@ export function registerAnalysisBattery(server: McpServer): void {
           hasSettleRung,
           manifest.positiveControls.length > 0,
           hasInvariants(run_dir),
+          // A positive control is an accumulator the app bounds by a window,
+          // so its growth is reported apart from app_delta.
+          manifest.positiveControls
+            .filter(c => c.kind === 'map-size')
+            .map(c => ({name: c.name, edge: c.edge, value_keys: c.valueKeys})),
         );
         const ab = abSegments(run_dir, manifest);
         if (ab == null && probeSet != null) {

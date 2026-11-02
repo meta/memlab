@@ -12,6 +12,10 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {artifactLabel} from '../artifact-classes.js';
 import {computeHeapBudget, devFamilyBytes} from '../heap-budget.js';
+import type {IHeapSnapshot} from '@memlab/core';
+import {findDeclaredCollection} from './positive-controls.js';
+import {freedByReleasing} from './what-if.js';
+import {enumerateMapEntries, enumerateSetElements} from '../utils.js';
 import type {HeapBudget} from '../heap-budget.js';
 import {
   armScanBudgetFor,
@@ -97,8 +101,20 @@ export function registerArtifactBudget(server: McpServer): void {
         .number()
         .optional()
         .describe('Per-file size ceiling, matching memlab_load_snapshot.'),
+      windows: z
+        .array(
+          z.object({
+            name: z.string(),
+            edge: z.string(),
+            value_keys: z.array(z.string()).optional(),
+          }),
+        )
+        .optional()
+        .describe(
+          "Collections the app bounds by a retention window (a 30-minute trace buffer, a TTL cache), as `{name, edge, value_keys?}`: the edge that binds the Map/Set/Array, and the property names its values carry for a minified build. With `baseline`, their retained growth is reported and `app_delta` is also given without it. The battery passes the round's `map-size` positive controls.",
+        ),
     },
-    async ({target, baseline, max_file_size_mb}) => {
+    async ({target, baseline, max_file_size_mb, windows}) => {
       try {
         const paths = baseline != null ? [baseline, target] : [target];
         const {rungs, largestMB} = resolveRungs(paths, max_file_size_mb);
@@ -109,19 +125,46 @@ export function registerArtifactBudget(server: McpServer): void {
         // capture size rather than losing a large snapshot to the default.
         const scanBudgetMs = scaledTimeoutMs(largestMB);
 
-        let baseBudget = null;
+        const declared = windows ?? [];
+        const measure = (snap: IHeapSnapshot) => ({
+          budget: computeHeapBudget(snap),
+          windows: declared.map(w => {
+            const hit = findDeclaredCollection(
+              snap,
+              w.edge,
+              w.value_keys ?? [],
+            );
+            if (hit == null) return null;
+            // The entries, not the collection: an entry with a cleanup timer
+            // has two holders, so the Map alone dominates almost nothing.
+            const values =
+              hit.node.name === 'Map'
+                ? enumerateMapEntries(hit.node).map(e => e.value)
+                : hit.node.name === 'Set'
+                  ? enumerateSetElements(hit.node)
+                  : [];
+            const ids = values.flatMap(v =>
+              v != null && v.type === 'object' ? [v.id] : [],
+            );
+            return {
+              bytes:
+                ids.length > 0
+                  ? freedByReleasing(snap, ids).bytes
+                  : hit.node.retainedSize,
+              entries: hit.entries,
+              byShape: hit.byShape,
+            };
+          }),
+        });
+        let base: ReturnType<typeof measure> | null = null;
         if (baseRung != null) {
           armScanBudgetFor(scanBudgetMs);
-          baseBudget = await withSnapshotAt(
-            baseRung.localPath,
-            computeHeapBudget,
-          );
+          base = await withSnapshotAt(baseRung.localPath, measure);
         }
         armScanBudgetFor(scanBudgetMs);
-        const budget = await withSnapshotAt(
-          targetRung.localPath,
-          computeHeapBudget,
-        );
+        const measured = await withSnapshotAt(targetRung.localPath, measure);
+        const baseBudget = base?.budget ?? null;
+        const budget = measured.budget;
 
         const nonApp = budget.total - budget.app;
         const nonAppPct = budget.total > 0 ? (nonApp / budget.total) * 100 : 0;
@@ -198,7 +241,42 @@ export function registerArtifactBudget(server: McpServer): void {
             totalDelta !== 0 && shareIsMeaningful
               ? ` — ${Math.abs((appDelta / totalDelta) * 100).toFixed(0)}% of the ${signed(totalDelta)} total`
               : '';
-          lines.push(`**app_delta: ${signed(appDelta)}**${share}.`);
+          // A window fills until its first entries expire, so on a ladder
+          // shorter than the window it reads as linear app growth.
+          const windowRows = declared.map((w, i) => {
+            const b = base?.windows[i] ?? null;
+            const t = measured.windows[i];
+            return {
+              name: w.name,
+              delta: b != null && t != null ? t.bytes - b.bytes : null,
+              entries: b != null && t != null ? t.entries - b.entries : null,
+              byShape: t?.byShape === true,
+            };
+          });
+          const windowDelta = windowRows.reduce(
+            (n, r) => n + (r.delta ?? 0),
+            0,
+          );
+          const resolved = windowRows.filter(r => r.delta != null);
+          const exclWindows =
+            resolved.length > 0
+              ? ` Without the bounded window(s), counting what releasing their entries frees (${resolved
+                  .map(
+                    r =>
+                      `\`${r.name}\` ${signed(r.delta ?? 0)}, ${r.entries != null && r.entries >= 0 ? '+' : ''}${formatNumber(r.entries ?? 0)} entries${r.byShape ? ' (found by value shape)' : ''}`,
+                  )
+                  .join('; ')}): **${signed(appDelta - windowDelta)}**.`
+              : '';
+          lines.push(
+            `**app_delta: ${signed(appDelta)}**${share}.${exclWindows}`,
+          );
+          const unresolved = windowRows.filter(r => r.delta == null);
+          if (unresolved.length > 0) {
+            lines.push(
+              '',
+              `_Bounded window(s) not found in both rungs, so not subtracted: ${unresolved.map(r => `\`${r.name}\``).join(', ')}._`,
+            );
+          }
           if (totalDelta !== 0 && sameDirection && !shareIsMeaningful) {
             lines.push('');
             lines.push(

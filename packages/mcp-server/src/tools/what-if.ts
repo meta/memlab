@@ -113,6 +113,36 @@ function reachableFrom(
   return seen;
 }
 
+/**
+ * Self bytes that become unreachable when every edge INTO `ids` is cut, the
+ * nodes themselves included: what releasing those objects frees, however many
+ * holders they have.
+ */
+export function freedByReleasing(
+  snapshot: IHeapSnapshot,
+  ids: readonly number[],
+): {bytes: number; nodes: number} {
+  const maxId = maxNodeId(snapshot);
+  const removed = new Uint8Array(maxId + 1);
+  for (const id of ids) if (id <= maxId) removed[id] = 1;
+  const roots = findRootIds(snapshot);
+  const before = reachableFrom(
+    snapshot,
+    roots,
+    new Uint8Array(maxId + 1),
+    maxId,
+  );
+  const after = reachableFrom(snapshot, roots, removed, maxId);
+  let bytes = 0;
+  let nodes = 0;
+  for (let id = 0; id <= maxId; id++) {
+    if (before[id] !== 1 || after[id] === 1) continue;
+    nodes++;
+    bytes += snapshot.getNodeById(id)?.self_size ?? 0;
+  }
+  return {bytes, nodes};
+}
+
 export function registerWhatIf(server: McpServer): void {
   server.tool(
     'memlab_what_if',

@@ -397,6 +397,13 @@ figures are defined or grouped differently:
   beside it. On a dev build a single dev-only hash table can double in size
   partway through a run, and the raw total then grows by megabytes with no
   change in the app.
+- **Bounded windows are reported apart from `app_delta`.** A collection the
+  app empties on a timer (a 30-minute trace buffer, a TTL cache) fills for as
+  long as the window lasts, so on a shorter ladder it reads as linear app
+  growth. `memlab_artifact_budget({windows: [{name, edge, value_keys}]})`
+  measures what releasing each window's entries would free (counting every
+  holder, such as a cleanup timer per entry) and also states `app_delta`
+  without it. The battery passes the round's `map-size` positive controls.
 - **Source for a node comes from the snapshot.** Browser captures keep each
   script's source text, so `memlab_source_for_node({node_ids, context_lines})`
   prints the function behind a closure, or behind a context (through a closure

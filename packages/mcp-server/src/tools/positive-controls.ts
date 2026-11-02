@@ -146,6 +146,49 @@ function largestByValueShape(
   return best;
 }
 
+/**
+ * The collection a `map-size` declaration names: the largest (by retained
+ * size) countable target of an edge named `edge`, else the largest Map or Set
+ * whose values carry `valueKeys`. Null when neither resolves.
+ */
+export function findDeclaredCollection(
+  snap: IHeapSnapshot,
+  edge: string,
+  valueKeys: readonly string[],
+): {node: IHeapNode; entries: number; byShape: boolean} | null {
+  let best: {node: IHeapNode; entries: number} | null = null;
+  snap.nodes.forEach(node => {
+    for (const e of node.references) {
+      if (String(e.name_or_index) !== edge) continue;
+      const n = countEntries(e.toNode);
+      if (n == null) continue;
+      if (best == null || e.toNode.retainedSize > best.node.retainedSize) {
+        best = {node: e.toNode, entries: n};
+      }
+    }
+  });
+  if (best != null)
+    return {...(best as {node: IHeapNode; entries: number}), byShape: false};
+  if (valueKeys.length === 0) return null;
+  let byShape: {node: IHeapNode; entries: number} | null = null;
+  snap.nodes.forEach(node => {
+    if (node.type !== 'object') return;
+    if (node.name !== 'Map' && node.name !== 'Set') return;
+    const values =
+      node.name === 'Map'
+        ? enumerateMapEntries(node).map(e => e.value)
+        : enumerateSetElements(node);
+    const sample = values.find(v => v != null && v.type === 'object');
+    if (sample == null || !hasOwnProps(sample, valueKeys)) return;
+    if (byShape == null || values.length > byShape.entries) {
+      byShape = {node, entries: values.length};
+    }
+  });
+  return byShape != null
+    ? {...(byShape as {node: IHeapNode; entries: number}), byShape: true}
+    : null;
+}
+
 function hasOwnProps(node: IHeapNode, keys: readonly string[]): boolean {
   const own = new Set<string>();
   for (const e of node.references) {
