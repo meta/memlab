@@ -439,7 +439,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | --- | --- |
 | `memlab_string_prefix_census` | Strings by PREFIX (`blob:`, `data:image/`, a key scheme) on every rung, from the sidecar index — seconds, not a full-graph walk per rung. |
 | `memlab_intern_opportunities` | What an intern pool would actually reclaim, grouped by property x parent shape. Start here for an interning decision. |
-| `memlab_duplicated_strings` | The raw per-value duplication table. |
+| `memlab_duplicated_strings` | The raw per-value duplication table, plus the largest values regrouped by the object shape holding them: several duplicated fields of one shape are one object copied many times. |
 | `memlab_string_patterns` | Group strings by prefix to find families (URLs, ids, payloads). |
 | `memlab_sliced_strings` | Substrings pinning huge parents. |
 | `memlab_duplicate_objects` | The same question for objects rather than strings. |

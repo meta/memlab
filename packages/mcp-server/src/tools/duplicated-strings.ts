@@ -90,10 +90,137 @@ function concatenatedFamilies(
   );
 }
 
+const OWNER_VALUES = 200;
+const OWNER_EDGE_GUARD = 1024;
+
+/**
+ * The parent's shape: its class name, or for a plain `Object` its sorted
+ * property names (up to 12). Never `parent.references`, which materializes
+ * every edge; a parent over the edge guard is named by class alone.
+ */
+function ownerShape(parent: IHeapNode): string {
+  if (parent.name !== 'Object' || parent.edge_count > OWNER_EDGE_GUARD) {
+    return parent.name || 'Object';
+  }
+  const props: string[] = [];
+  let scanned = 0;
+  parent.forEachReference(edge => {
+    if (++scanned > 256) return {stop: true};
+    if (edge.type === 'property') {
+      props.push(String(edge.name_or_index));
+      if (props.length >= 12) return {stop: true};
+    }
+  });
+  if (props.length === 0) return 'Object';
+  props.sort();
+  return `{${props.slice(0, 6).join(', ')}${props.length > 6 ? ', …' : ''}}`;
+}
+
+/**
+ * Duplicated values regrouped by the structure that holds them. Several
+ * duplicated values held as different fields of one shape (the fields of a
+ * request's params object) are one finding: that object is copied, at least
+ * as many times as its most-copied field.
+ */
+function owningStructures(
+  snapshot: IHeapSnapshot,
+  ranked: ReadonlyArray<
+    [string, {count: number; totalSize: number; exampleIds: number[]}]
+  >,
+  limit: number,
+  includeNodeIds: boolean,
+): string {
+  const shapes = new Map<
+    string,
+    {
+      fields: Map<string, {value: string; copies: number}>;
+      savings: number;
+      example: number;
+    }
+  >();
+  for (const [value, stats] of ranked.slice(0, OWNER_VALUES)) {
+    // Each sampled copy votes for its first property holder; the value's
+    // copies are split between shapes in proportion to the votes.
+    const votes = new Map<string, {prop: string; n: number; owner: number}>();
+    let sampled = 0;
+    for (const id of stats.exampleIds) {
+      const node = snapshot.getNodeById(id);
+      if (!node) continue;
+      let holder: {prop: string; owner: IHeapNode} | null = null;
+      let seen = 0;
+      node.forEachReferrer(ref => {
+        if (++seen > 8) return {stop: true};
+        if (ref.type === 'property') {
+          holder = {prop: String(ref.name_or_index), owner: ref.fromNode};
+          return {stop: true};
+        }
+      });
+      sampled++;
+      if (holder == null) continue;
+      const {prop, owner} = holder as {prop: string; owner: IHeapNode};
+      const key = `${ownerShape(owner)}\u0000${prop}`;
+      const v = votes.get(key) ?? {prop, n: 0, owner: owner.id};
+      v.n++;
+      votes.set(key, v);
+    }
+    if (sampled === 0) continue;
+    const perCopy = stats.totalSize / stats.count;
+    for (const [key, v] of votes) {
+      const shape = key.slice(0, key.indexOf('\u0000'));
+      const copies = Math.round((stats.count * v.n) / sampled);
+      if (copies < 2) continue;
+      const s = shapes.get(shape) ?? {
+        fields: new Map(),
+        savings: 0,
+        example: v.owner,
+      };
+      const prev = s.fields.get(v.prop);
+      if (prev == null || prev.copies < copies) {
+        s.fields.set(v.prop, {value, copies});
+      }
+      s.savings += (copies - 1) * perCopy;
+      shapes.set(shape, s);
+    }
+  }
+  const top = [...shapes.entries()]
+    .filter(([, s]) => s.fields.size >= 2)
+    .sort((a, b) => b[1].savings - a[1].savings)
+    .slice(0, limit);
+  if (top.length === 0) return '';
+  const clip = (v: string) =>
+    (v.length > 40 ? `${v.slice(0, 40)}…` : v).replace(/\s+/g, ' ');
+  return (
+    `\n\n### Duplicated values by owning structure (${formatNumber(top.length)})\n\n` +
+    top
+      .map(([shape, s]) => {
+        const fields = [...s.fields.entries()].sort(
+          (a, b) => b[1].copies - a[1].copies,
+        );
+        const most = fields[0][1].copies;
+        return (
+          `- \`${shape}\`: ${formatNumber(fields.length)} duplicated fields, so at least **${formatNumber(most)} copies of this object**; savings ${formatBytes(s.savings)}` +
+          (includeNodeIds ? ` (e.g. \`@${s.example}\`)` : '') +
+          '\n  ' +
+          fields
+            .slice(0, 6)
+            .map(
+              ([prop, f]) =>
+                `\`.${prop}\` "${clip(f.value)}" ×${formatNumber(f.copies)}`,
+            )
+            .join(' · ') +
+          (fields.length > 6 ? ` · +${fields.length - 6} more` : '')
+        );
+      })
+      .join('\n') +
+    `\n\n_From the ${formatNumber(Math.min(ranked.length, OWNER_VALUES))} largest duplicated values: each sampled copy is attributed to the first object holding it as a property. A shape with several duplicated fields is one object copied many times; deduplicating the object (or the request that builds it) reclaims all its fields at once._`
+  );
+}
+
 export function registerDuplicatedStrings(server: McpServer): void {
   server.tool(
     'memlab_duplicated_strings',
     'Find duplicated string instances in the heap. Shows strings that appear multiple times, ranked by total retained size — a common source of memory waste. Use after memlab_class_histogram shows high string counts. ' +
+      'Also regroups the largest duplicated values by the object shape holding them, so several duplicated fields of one copied object read as that object. ' +
       '⚠ Full-heap scan — slow and memory-heavy on very large heaps (millions of nodes); raise min_count to bound the work.',
     {
       limit: z
@@ -327,6 +454,12 @@ export function registerDuplicatedStrings(server: McpServer): void {
         // the expensive scan is shared rather than repeated.
         const relatedNote = `\n\n_This is the raw per-VALUE duplication table. \`memlab_intern_opportunities\` groups the same strings by property x parent shape and estimates what a canonical intern pool would actually reclaim (accounting for co-retention and the length cap) — use it to decide whether to write the fix, and this to see the values. It reuses this snapshot's string scan${reused ? ', which was itself already cached' : ''}, so running both costs one pass over the string nodes, not two._`;
 
+        const ownerSection = owningStructures(
+          snapshot,
+          ranked,
+          Math.min(limit, 8),
+          include_node_ids,
+        );
         const ropeSection = concatenated
           ? concatenatedFamilies(
               snapshot,
@@ -335,7 +468,7 @@ export function registerDuplicatedStrings(server: McpServer): void {
               include_node_ids,
             )
           : '';
-        const body = `Duplicated strings (${summaryLine}):\n\n${lines.join('\n')}\n\n**${page.total > page.items.length ? 'Interning savings for the rows shown' : 'Total interning savings'}: ${formatBytes(totalSavings)}** (if each string were stored only once, harness content excluded)\n${pageLines(page, 'duplicated values').join('\n')}${harnessNote}${ropeSection}${suggestionsSuppressed('memlab_duplicated_strings') ? '' : relatedNote}`;
+        const body = `Duplicated strings (${summaryLine}):\n\n${lines.join('\n')}\n\n**${page.total > page.items.length ? 'Interning savings for the rows shown' : 'Total interning savings'}: ${formatBytes(totalSavings)}** (if each string were stored only once, harness content excluded)\n${pageLines(page, 'duplicated values').join('\n')}${harnessNote}${ownerSection}${ropeSection}${suggestionsSuppressed('memlab_duplicated_strings') ? '' : relatedNote}`;
         return structuredResult(
           withAnonymizedBanner(
             snapshot,

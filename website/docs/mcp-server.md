@@ -454,6 +454,11 @@ figures are defined or grouped differently:
   cycle or per landed step (from run.json `steps`), with the step it matches.
   A combo that opens two chats per cycle reads 2.000/cycle for one record per
   chat open; the table says `1 per open-chat`.
+- **Duplicated fields can be one duplicated object.** Besides the per-value
+  table, `memlab_duplicated_strings` regroups the largest duplicated values by
+  the object shape that holds them. Three values duplicated about 1,400 times
+  each, held as three fields of one request-parameters shape, are reported as
+  at least 1,400 copies of that object, which is the thing to deduplicate.
 - **Minified builds rename variables, not record fields.** A probe that
   looks a collection up by its variable name finds nothing on a production
   bundle. A probe stuck at -1 (its own "not found" value) at every rung, and a

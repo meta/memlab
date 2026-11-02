@@ -564,7 +564,10 @@ const GROUPS: Group[] = [
         'memlab_intern_opportunities',
         'What an intern pool would actually reclaim, grouped by property x parent shape. Start here for an interning decision.',
       ],
-      ['memlab_duplicated_strings', 'The raw per-value duplication table.'],
+      [
+        'memlab_duplicated_strings',
+        'The raw per-value duplication table, plus the largest values regrouped by the object shape holding them: several duplicated fields of one shape are one object copied many times.',
+      ],
       [
         'memlab_string_patterns',
         'Group strings by prefix to find families (URLs, ids, payloads).',
