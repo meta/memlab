@@ -218,6 +218,10 @@ const GROUPS: Group[] = [
         'Unbounded leak, or a working set whose size is just rate x window? Fits a line AND a saturating curve to one series and reports which the data supports, plus the implied plateau.',
       ],
       [
+        'memlab_build_pair_compare',
+        'A dev-build round and a production-build round of the same combo, lined up per population by property set and unmangled class: dev-only, production-real or production-only, and how much of the dev heap growth a production build keeps.',
+      ],
+      [
         'memlab_compare_rounds',
         'Compare N rounds of a sweep: per-cycle rates that land on a WHOLE NUMBER (a mechanism, not a trend) and populations that grew while app_delta was negative (invisible to the aggregate ladder).',
       ],

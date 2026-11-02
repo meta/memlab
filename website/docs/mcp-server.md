@@ -493,6 +493,13 @@ tables. Later ladder calls read the sidecar instead of parsing the rung:
 `memlab_shape_census_diff` with no filter or with `class_filter: "Object"`
 takes seconds over a ladder that already has one.
 
+`memlab_build_pair_compare({dev_run_dir, prod_run_dir})` lines up a round
+driven on a development build with one driven on a production build. Record
+fields survive minification, so populations are matched by property set, and by
+class where the name is not mangled. Each row is dev-only, production-real or
+production-only, and the summary says how much of the dev build's per-cycle
+growth the production build keeps.
+
 Ladder tools can run longer than an assistant's tool timeout. Start them with
 `memlab_start_job` and collect the result with `memlab_job_status`. A large
 snapshot can be loaded the same way with `memlab_load_snapshot({async: true})`,
