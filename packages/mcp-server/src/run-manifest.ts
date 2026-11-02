@@ -125,6 +125,12 @@ export interface PositiveControl {
    * control. A round where none of them landed cannot grow it.
    */
   requiresStep: string[];
+  /**
+   * `map-size` only: own property names every value of the collection has.
+   * Resolves the collection by shape when no edge is named `edge` (a minified
+   * build mangles the variable that binds it).
+   */
+  valueKeys: string[];
 }
 
 /** `rung_02_c375.heapsnapshot` -> 375. */
@@ -379,6 +385,7 @@ export function loadRunManifest(runDir: string): RunManifest {
                   typeof o.requires_step === 'string'
                     ? [o.requires_step]
                     : asStringArray(o.requires_step),
+                valueKeys: asStringArray(o.value_keys),
               },
             ]
           : [];

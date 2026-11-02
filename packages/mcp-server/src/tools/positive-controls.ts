@@ -19,7 +19,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {IHeapSnapshot} from '@memlab/core';
+import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {linearFit} from './ladder-probe.js';
 import {ladderShape} from '../ladder-shape.js';
@@ -37,7 +37,10 @@ import {
   withSnapshotAt,
 } from '../snapshot-borrow.js';
 import {countEntries} from './collection-trend.js';
+import {minifiedSignal} from '../minified.js';
 import {
+  enumerateMapEntries,
+  enumerateSetElements,
   errorResult,
   formatNumber,
   markdownTable,
@@ -80,7 +83,7 @@ function escapeRegExp(s: string): string {
 function measure(
   snap: IHeapSnapshot,
   c: PositiveControl,
-): {value: number; found: boolean; uncountable: boolean} {
+): {value: number; found: boolean; uncountable: boolean; byShape: boolean} {
   let best = 0;
   let matched = 0;
   let counted = 0;
@@ -104,17 +107,57 @@ function measure(
       }
     }
   });
+  if (matched === 0 && c.kind === 'map-size' && c.valueKeys.length > 0) {
+    const n = largestByValueShape(snap, c.valueKeys);
+    if (n != null) {
+      return {value: n, found: true, uncountable: false, byShape: true};
+    }
+  }
   return {
     value: best,
     found: matched > 0,
     uncountable: c.kind === 'map-size' && matched > 0 && counted === 0,
+    byShape: false,
   };
+}
+
+/**
+ * Size of the largest Map or Set whose values carry every one of `keys` as an
+ * own property, or null when none does. The fallback for a minified build,
+ * where the variable that binds the collection is renamed to one letter but
+ * the records it holds keep their property names.
+ */
+function largestByValueShape(
+  snap: IHeapSnapshot,
+  keys: readonly string[],
+): number | null {
+  let best: number | null = null;
+  snap.nodes.forEach(node => {
+    if (node.type !== 'object') return;
+    if (node.name !== 'Map' && node.name !== 'Set') return;
+    const values =
+      node.name === 'Map'
+        ? enumerateMapEntries(node).map(e => e.value)
+        : enumerateSetElements(node);
+    const sample = values.find(v => v != null && v.type === 'object');
+    if (sample == null || !hasOwnProps(sample, keys)) return;
+    best = Math.max(best ?? 0, values.length);
+  });
+  return best;
+}
+
+function hasOwnProps(node: IHeapNode, keys: readonly string[]): boolean {
+  const own = new Set<string>();
+  for (const e of node.references) {
+    if (e.type === 'property') own.add(String(e.name_or_index));
+  }
+  return keys.every(k => own.has(k));
 }
 
 export function registerPositiveControls(server: McpServer): void {
   server.tool(
     'memlab_positive_controls',
-    'Measure the round\'s POSITIVE CONTROLS (run.json `positive_controls`, written by the leak-hunt runner from the app preset): known accumulators that should grow with interaction. PASS means the measurement can see growth, so a flat result elsewhere is a clean surface; FAIL means a probe or the drive is blind, and every flat result in the round is suspect. An idle round (a combo, or the round directory, named "idle") reports n/a, and so does a control whose `requires_step` steps (names from run.json `steps`, `*` wildcard) all landed 0 times: that combo never exercises it.',
+    'Measure the round\'s POSITIVE CONTROLS (run.json `positive_controls`, written by the leak-hunt runner from the app preset): known accumulators that should grow with interaction. PASS means the measurement can see growth, so a flat result elsewhere is a clean surface; FAIL means a probe or the drive is blind, and every flat result in the round is suspect. An idle round (a combo, or the round directory, named "idle") reports n/a, and so does a control whose `requires_step` steps (names from run.json `steps`, `*` wildcard) all landed 0 times: that combo never exercises it. On a minified build, where the edge name is mangled, a `map-size` control that declares `value_keys` is found by the property names its values carry; one that cannot be found reports UNRESOLVED rather than FAIL.',
     {
       run_dir: z.string().describe("A leak-hunt round's output directory."),
       segment: segmentIndexArg(
@@ -160,6 +203,8 @@ export function registerPositiveControls(server: McpServer): void {
         // (map-size) ever on a collection?
         const found = controls.map(() => false);
         const countable = controls.map(() => false);
+        const viaShape = controls.map(() => false);
+        let minified = false;
         const unreadable: string[] = [];
         for (const rung of rungs) {
           armScanBudgetFor(scaledTimeoutMs(largestMB));
@@ -167,15 +212,17 @@ export function registerPositiveControls(server: McpServer): void {
           // than discarding every rung already measured.
           let values: Array<number | null>;
           try {
-            values = await withSnapshotAt(rung.localPath, snap =>
-              controls.map((c, i) => {
+            values = await withSnapshotAt(rung.localPath, snap => {
+              if (minifiedSignal(snap).minified) minified = true;
+              return controls.map((c, i) => {
                 if (misconfigured(c) != null) return 0;
                 const m = measure(snap, c);
                 if (m.found) found[i] = true;
                 if (m.found && !m.uncountable) countable[i] = true;
+                if (m.byShape) viaShape[i] = true;
                 return m.value;
-              }),
-            );
+              });
+            });
           } catch (err) {
             unreadable.push(
               `${rung.label.replace(/^.*\//, '')}: ${String(err)}`,
@@ -215,9 +262,14 @@ export function registerPositiveControls(server: McpServer): void {
           // expected: not a blind probe.
           const exercisedBy = landedRequiredSteps(c, manifest.stepsLanded);
           const unexercised = exercisedBy != null && exercisedBy.length === 0;
+          // A mangled name is not a broken control: report that the probe
+          // could not LOCATE its collection, which is a different fix (declare
+          // `value_keys`) from a control that was found and did not grow.
+          const unresolved =
+            minified && anyRead && !unexercised && !idle && !found[i];
           const bad =
             misconfigured(c) ??
-            (!anyRead || unexercised
+            (!anyRead || unexercised || unresolved
               ? null
               : !found[i]
                 ? idle
@@ -227,18 +279,23 @@ export function registerPositiveControls(server: McpServer): void {
                   ? `map-size edge \`${c.edge}\` is not on a Map, Set or Array`
                   : null);
           const passes = pts.length >= 3 && grows && fit.slope > 0;
+          const via = viaShape[i]
+            ? `; found by value shape {${c.valueKeys.join(', ')}}`
+            : '';
           const verdict =
             bad != null
               ? `**FAIL** (${bad})`
-              : idle
-                ? 'n/a (idle round)'
-                : passes
-                  ? `**PASS** (+${fit.slope.toFixed(3)}/cycle, ${shape})`
-                  : unexercised
-                    ? `n/a (no step that exercises it landed; needs ${c.requiresStep.join(' or ')})`
-                    : pts.length < 3
-                      ? '**FAIL** (fewer than 3 readable rungs, so a mount step cannot be told from growth)'
-                      : `**FAIL** (${shape}: no per-interaction growth)`;
+              : unresolved
+                ? `**UNRESOLVED** (minified build: no edge named \`${c.edge}\`${c.valueKeys.length > 0 ? ` and no Map/Set whose values have {${c.valueKeys.join(', ')}}` : '; declare `value_keys` so the control can be found by shape'})`
+                : idle
+                  ? 'n/a (idle round)'
+                  : passes
+                    ? `**PASS** (+${fit.slope.toFixed(3)}/cycle, ${shape}${via})`
+                    : unexercised
+                      ? `n/a (no step that exercises it landed; needs ${c.requiresStep.join(' or ')})`
+                      : pts.length < 3
+                        ? '**FAIL** (fewer than 3 readable rungs, so a mount step cannot be told from growth)'
+                        : `**FAIL** (${shape}: no per-interaction growth)`;
           return [
             c.name,
             series[i].map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
@@ -246,6 +303,10 @@ export function registerPositiveControls(server: McpServer): void {
           ];
         });
         const failed = rows.some(r => String(r[2]).includes('FAIL'));
+        const unresolvedCount = rows.filter(r =>
+          String(r[2]).includes('UNRESOLVED'),
+        ).length;
+        const anyUnresolved = unresolvedCount > 0;
         const allNA =
           rows.length > 0 && rows.every(r => String(r[2]).startsWith('n/a'));
         return toolResult(
@@ -267,13 +328,23 @@ export function registerPositiveControls(server: McpServer): void {
               : []),
             markdownTable(['Control', 'Per rung', 'Verdict'], rows),
             '',
+            ...(anyUnresolved
+              ? [
+                  '⚠ **A positive control could not be located on this minified build.** That is not a pass: until it resolves, a flat result elsewhere in the round is unproven.',
+                  '',
+                ]
+              : []),
             failed
               ? '⚠ **A positive control did not grow.** Either the probe cannot see this population or the drive did not exercise it — treat every flat result in this round as unproven until that is explained.'
               : idle
                 ? '_Idle round: controls are expected to stay flat here._'
                 : allNA
                   ? "_No control is exercised by this round's steps, so none can prove the probes see growth here: flat results are unproven, not failed. Declare a control this combo exercises to cover it._"
-                  : '_Every exercised control grew, so the measurement can see accumulation on this round._',
+                  : unresolvedCount === rows.length
+                    ? ''
+                    : anyUnresolved
+                      ? '_Every control that could be located grew._'
+                      : '_Every exercised control grew, so the measurement can see accumulation on this round._',
           ].join('\n'),
         );
       } catch (err) {

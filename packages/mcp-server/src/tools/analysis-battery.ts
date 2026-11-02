@@ -497,7 +497,7 @@ const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
       re: /^Totals:|^\*\*|\| (STEP\+LINEAR|STEP|LINEAR|ONSET)\s+\|$/,
       max: 6,
     },
-    {tool: /positive_controls/, re: /PASS|FAIL|n\/a/, max: 4},
+    {tool: /positive_controls/, re: /PASS|FAIL|UNRESOLVED|n\/a/, max: 4},
     {
       tool: /ab_compare/,
       re: /^## A\/B|^_Probe set|^\| (?!Metric)/,

@@ -386,6 +386,13 @@ figures are defined or grouped differently:
   what its first did. It is not counted as a leak candidate. A mount followed
   by steady growth reads `STEP+LINEAR`, with its post-step rate, which is the
   leak rate; the overall Δ/cycle overstates it.
+- **Minified builds rename variables, not record fields.** A probe that
+  looks a collection up by its variable name finds nothing on a production
+  bundle. A probe stuck at -1 (its own "not found" value) at every rung, and a
+  positive control whose edge is missing on a minified heap, are reported
+  UNRESOLVED, not FLAT or FAIL. A `map-size` positive control can declare
+  `value_keys`, the property names its values carry, so it is still found by
+  shape when the variable is renamed.
 - **Named dev-build patterns.** `memlab_dev_artifacts` tags the known
   development-build patterns it finds: `react-compiler-hook-guard`,
   `owner-stack-event-path`, `devtools-console` and `fast-refresh-registry`.

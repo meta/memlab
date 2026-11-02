@@ -466,6 +466,7 @@ function controlsVerdict(text: string | null): string {
   let pass = 0;
   let fail = 0;
   let na = 0;
+  let unresolved = 0;
   // Data rows only, anchored on the separator: rows above a `|---|` line are
   // the header (which may name both words).
   const blocks: string[][] = [];
@@ -505,11 +506,14 @@ function controlsVerdict(text: string | null): string {
       // FAILED / PASSED count as the verdicts they are.
       if (/\bFAIL(?:ED|S)?\b/.test(cell)) fail++;
       else if (/\bPASS(?:ED|ES)?\b/.test(cell)) pass++;
+      else if (/\bUNRESOLVED\b/.test(cell)) unresolved++;
       else if (/^n\/a\b/i.test(cell.trim())) na++;
     }
     break;
   }
-  if (pass === 0 && fail === 0) return na > 0 ? 'n/a' : '?';
+  if (pass === 0 && fail === 0) {
+    return unresolved > 0 ? 'UNRESOLVED' : na > 0 ? 'n/a' : '?';
+  }
   if (fail === 0) return 'PASS';
   return pass === 0 ? 'FAIL' : `MIXED (${pass}/${fail})`;
 }

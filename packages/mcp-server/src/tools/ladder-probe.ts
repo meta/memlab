@@ -512,9 +512,10 @@ export function extractProbedNames(code: string): string[] {
     `\\b(?:withProp|byEdgeName|allByEdgeName|byContextSlot|byContextVar|byReferrerEdge)\\s*\\(\\s*${str}`,
     'g',
   );
-  // edgeTarget(id, 'x') / getProp(id, 'x') / findWithin(id, 'x')
+  // edgeTarget(id, 'x') / getProp(id, 'x') / findWithin(id, 'x') /
+  // moduleExportProp('Module', 'x')
   const second = new RegExp(
-    `\\b(?:edgeTarget|getProp|findWithin|walkChain)\\s*\\([^,()]*,\\s*${str}`,
+    `\\b(?:edgeTarget|getProp|findWithin|walkChain|moduleExportProp)\\s*\\([^,()]*,\\s*${str}`,
     'g',
   );
   // hasShape(id, ['a','b']) / byShape(['a','b'])
@@ -523,7 +524,14 @@ export function extractProbedNames(code: string): string[] {
     let m;
     while ((m = re.exec(code)) != null) add(m[1] ?? m[2] ?? '');
   }
+  // byStableKey('Module.edge.edge'): the last edge is the name the heap
+  // must contain for the key to resolve.
+  const stable = new RegExp(`\\bbyStableKey\\s*\\(\\s*${str}`, 'g');
   let m;
+  while ((m = stable.exec(code)) != null) {
+    const key = m[1] ?? m[2] ?? '';
+    add(key.slice(key.lastIndexOf('.') + 1));
+  }
   while ((m = arrays.exec(code)) != null) {
     for (const lit of m[1].matchAll(/'([^']*)'|"([^"]*)"/g)) {
       add(lit[1] ?? lit[2] ?? '');
@@ -1382,6 +1390,10 @@ export function registerLadderProbe(server: McpServer): void {
           const delta = last - first;
           const seriesFlat = Math.min(...headerYs) === Math.max(...headerYs);
           if (!seriesFlat) allMetricsFlat = false;
+          // -1 is a probe's own "holder not found" return. Stuck there at
+          // every rung, the series is not a flat measurement, and a rate of 0
+          // with r2 = 1.0000 beside it reads as a clean pass.
+          const notFound = headerYs.length > 0 && headerYs.every(y => y === -1);
 
           const rows = rungs.map((r, i) => [
             r.label,
@@ -1416,7 +1428,11 @@ export function registerLadderProbe(server: McpServer): void {
           // tells the reader to pass `run_dir`/`cycles_per_rung`, which fixes
           // nothing if every rung shares one cycle count. Same withheld rate,
           // wrong remedy.
-          if (singleX) {
+          if (notFound) {
+            lines.push(
+              '**RATE UNAVAILABLE** — the probe returned -1 (not found) at every rung, so there is no population to fit.',
+            );
+          } else if (singleX) {
             lines.push(
               `**RATE UNAVAILABLE** — the ${formatNumber(usableXs.length)} usable rung(s) share a single cycle count (${formatNumber(fitXs[0] ?? 0)}), so there is no x-axis to fit against. A slope from one distinct x is 0 with r2 = 1.0000 and means nothing. Capture rungs at different cycle counts, or pass the real \`cycles_per_rung\`.`,
             );
@@ -1470,9 +1486,11 @@ export function registerLadderProbe(server: McpServer): void {
           );
           const shapeYs = fitYs;
           const status = visibilityFor(m.code);
-          const verdictText = singleX
-            ? 'UNMEASURABLE AXIS — every rung shares one cycle count, so the series has no shape to read. The values above are real; the trend is not derivable from them.'
-            : verdictFor(shapeYs, fit, axisAssumed, status);
+          const verdictText = notFound
+            ? 'UNRESOLVED — the probe never found its holder (-1 at every rung). On a minified build that is the expected outcome for a lookup by source name; resolve the holder by shape or through the module registry before reading this as clean.'
+            : singleX
+              ? 'UNMEASURABLE AXIS — every rung shares one cycle count, so the series has no shape to read. The values above are real; the trend is not derivable from them.'
+              : verdictFor(shapeYs, fit, axisAssumed, status);
           lines.push(`**Verdict:** ${verdictText}`);
           // `fitYs.length > 0` is not decoration: the fit series is the
           // deduped driven rungs, and a ladder whose every rung failed to

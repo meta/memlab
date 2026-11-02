@@ -247,7 +247,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_positive_controls',
-        "Measure the round's declared positive controls — known accumulators — so a flat result can be trusted as clean rather than blind.",
+        "Measure the round's declared positive controls — known accumulators — so a flat result can be trusted as clean rather than blind. Finds a control by value shape on a minified build, and says UNRESOLVED when it cannot.",
       ],
       [
         'memlab_judges',

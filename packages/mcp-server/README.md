@@ -229,6 +229,8 @@ memlab and the browser's own heap profiler read the same snapshot, but a few fig
 | Detachedness (`memlab_get_node`) | Detached flag | The snapshot's own three states: attached, detached, unknown. JS objects are always unknown. |
 | Default lists | Everything | `memlab_largest_objects` and several scans leave out engine-internal node types (arrays, code, native, synthetic) unless you ask for them by `node_type`. |
 
+On a minified build, variable names are mangled but record fields are not. A probe that returns -1 ("not found") at every rung, or a positive control whose edge is missing on a minified heap, is reported UNRESOLVED rather than FLAT or FAIL. A `map-size` positive control can declare `value_keys` (property names its values carry) so it is found by shape instead.
+
 ## Getting a Heap Snapshot
 
 Both `.heapsnapshot` files and `.heaptimeline` files (snapshots recorded with allocation tracking on) load, and either suffix may be left off a handle. `memlab_allocation_sites` reads the allocation stacks such a capture carries.
@@ -332,7 +334,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_prune_run` | Reclaim the disk a round occupies by gzipping its rungs (still analysable) or deleting them. A sweep is tens of GB. |
 | `memlab_battery_status` | Wait on a `memlab_analysis_battery({async: true})` run (`wait_ms`, up to 110 s) and collect its report when it finishes; `battery.done.json` in its output directory is written last. |
 | `memlab_start_job` | Run ANY tool in the background and get a job id at once — for ladder tools that would outlive the client tool timeout. |
-| `memlab_positive_controls` | Measure the round's declared positive controls — known accumulators — so a flat result can be trusted as clean rather than blind. |
+| `memlab_positive_controls` | Measure the round's declared positive controls — known accumulators — so a flat result can be trusted as clean rather than blind. Finds a control by value shape on a minified build, and says UNRESOLVED when it cannot. |
 | `memlab_judges` | Judge a round against its stated invariants at rest — PASS / LEAK / BACKLOG / UNSETTLED / UNVERIFIED per plain-words claim, every probe on every rung and the settle rung in one pass. |
 | `memlab_switch_matrix` | Can each judge go red? Judge rounds (or the two phases of a `--ab` round) with named fixes switched off: a judge that stays green with its fix off is BLIND. |
 | `memlab_calibrate_judges` | Prove judges against rounds KNOWN to carry the leaks they guard; records who has been seen red, so `memlab_judges` can mark every unproven PASS. |
