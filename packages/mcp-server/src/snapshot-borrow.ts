@@ -224,7 +224,12 @@ export async function withSnapshotAt<T>(
     }
     // Only once the rung is loaded: a failed load was not read.
     noteSnapshotRead(localPath);
-    const borrowed = temporaryHandle ?? (resident?.handle as string);
+    const borrowed = temporaryHandle ?? resident?.handle;
+    // Never fall back to the session's snapshot: that would answer about
+    // the wrong capture without saying so.
+    if (borrowed == null) {
+      throw new Error(`${localPath} is loaded but has no snapshot handle`);
+    }
     const rung = snapshot;
     return await runWithBorrowedHandle(borrowed, () => fn(rung));
   } finally {

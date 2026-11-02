@@ -72,6 +72,11 @@ async function loadSide(runDir: string, segment?: number): Promise<Side> {
     inputs.paths[0],
     inputs.paths[inputs.paths.length - 1],
   ]);
+  if (rungs.length < 2) {
+    throw new Error(
+      `${runDir}: its first and last rung did not resolve to two snapshots`,
+    );
+  }
   return {
     label: runDir.replace(/\/+$/, '').replace(/^.*\//, ''),
     cycles,

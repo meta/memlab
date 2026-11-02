@@ -232,10 +232,13 @@ function installUnknownParamRejection(server: McpServer): void {
               {...req, params: {...req.params, arguments: args}},
               extra,
             )) as {content?: Array<{type: string; text?: string}>};
-            result?.content?.unshift({
+            const note = {
               type: 'text',
               text: `_Read ${translated.notes.join('; ')}._`,
-            });
+            };
+            if (result == null) return toolResult(note.text);
+            if (Array.isArray(result.content)) result.content.unshift(note);
+            else result.content = [note];
             return result;
           }
         }
