@@ -411,7 +411,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | Tool | Use it when |
 | --- | --- |
 | `memlab_dom_audit` | Budget the ATTACHED DOM and rank surfaces worth virtualizing. An OPTIMIZATION tool — these elements are correctly retained, there are simply too many. |
-| `memlab_detached_dom` | Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free. |
+| `memlab_detached_dom` | Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free, and `baseline` adds each group's count at an earlier rung and sorts by the change. |
 | `memlab_event_listener_leaks` | Listeners that outlived their target. |
 | `memlab_event_registry` | What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`. |
 

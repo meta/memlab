@@ -303,7 +303,10 @@ function buildPlan(
     {tool: 'memlab_cache_analysis', args: {}},
     {tool: 'memlab_stale_collections', args: {}},
     {tool: 'memlab_growth_signals', args: {}},
-    {tool: 'memlab_detached_dom', args: {group_by: 'dominator'}},
+    {
+      tool: 'memlab_detached_dom',
+      args: {group_by: 'dominator', baseline: baseRung},
+    },
     {tool: 'memlab_event_listener_leaks', args: {}},
     // Given the ladder rather than one rung, this returns the breadth-vs-length
     // verdict instead of a census. Without it the battery prints a table of

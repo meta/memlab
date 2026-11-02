@@ -492,7 +492,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_detached_dom',
-        'Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free.',
+        'Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free, and `baseline` adds each group\'s count at an earlier rung and sorts by the change.',
       ],
       ['memlab_event_listener_leaks', 'Listeners that outlived their target.'],
       [

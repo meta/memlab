@@ -397,6 +397,12 @@ figures are defined or grouped differently:
   beside it. On a dev build a single dev-only hash table can double in size
   partway through a run, and the raw total then grows by megabytes with no
   change in the app.
+- **Detached DOM is compared by owner, not node id.** With `baseline`,
+  `memlab_detached_dom({group_by})` shows each group's count at the earlier
+  snapshot and sorts by the change, so a large group that was already there
+  at the first rung reads as a standing population, not the round's leak.
+  Node ids can change between captures, so owners are matched by class, and a
+  scope context by the names of the closures over it.
 - **Long retainer paths are folded.** `memlab_retainer_trace` prints a
   repeating multi-hop pattern (a scope chain alternating closures and
   contexts) once, with its repeat count, on the first hop outside the

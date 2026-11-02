@@ -10,6 +10,7 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {ladderShape} from '../ladder-shape.js';
+import {normalizeClassName} from '../snapshot-index.js';
 import {z} from 'zod';
 import {getSnapshot, getSnapshotEnv} from '../heap-state.js';
 import type {IHeapNode, IHeapEdge, IHeapSnapshot} from '@memlab/core';
@@ -55,6 +56,99 @@ const {NumericSet} = memlabCore;
  * Assembling the second from the first meant N calls and a hand-diff, on the
  * detector most likely to be carrying the finding.
  */
+type GroupBy = 'element' | 'retainer' | 'testid' | 'dominator';
+
+/**
+ * What identifies an owner in ANOTHER capture of the same page. Node ids do
+ * not: one round's rungs renumbered every object between captures. A scope
+ * context is named by the closures over it, since all contexts share one
+ * class name.
+ */
+function stableOwnerLabel(owner: IHeapNode | null): string {
+  if (owner == null) return '(no single owner)';
+  if (owner.name.startsWith('system / Context')) {
+    // Every closure over it, sorted: referrer order differs between captures.
+    const fns = new Set<string>();
+    owner.forEachReferrer(edge => {
+      if (
+        edge.name_or_index === 'context' &&
+        edge.fromNode.type === 'closure' &&
+        edge.fromNode.name !== ''
+      ) {
+        fns.add(edge.fromNode.name);
+      }
+    });
+    if (fns.size > 0) return `scope of ${[...fns].sort().join(', ')}`;
+  }
+  return normalizeClassName(owner.name);
+}
+
+function groupKeyOf(
+  groupBy: GroupBy,
+  node: IHeapNode,
+  owner: IHeapNode | null,
+): string {
+  switch (groupBy) {
+    case 'element':
+      return extractElementTag(node.name);
+    case 'retainer':
+      return getFirstNonFrameworkRetainer(node);
+    case 'testid':
+      return extractTestId(node);
+    case 'dominator':
+      // No owner = the dominator is the GC root itself, i.e. the node is
+      // reachable through two or more independent paths. Naming that outcome
+      // matters more than the others: it is precisely the case where "fix
+      // this retainer and X is freed" is false.
+      return owner
+        ? `@${owner.id} ${truncateNodeName(owner.name, owner.type, owner.self_size, 60)}`
+        : '(no single owner — dominated by the GC root, i.e. reachable via ≥2 independent paths)';
+  }
+}
+
+/**
+ * The label that matches a group in another capture: its key, except that a
+ * dominator group's key holds the owner's node id. Memoized per owner.
+ */
+function makeGroupLabeler(
+  groupBy: GroupBy,
+): (key: string, owner: IHeapNode | null) => string {
+  const byOwner = new Map<number, string>();
+  return (key, owner) => {
+    if (groupBy !== 'dominator') return key;
+    if (owner == null) return stableOwnerLabel(null);
+    let label = byOwner.get(owner.id);
+    if (label == null) {
+      label = stableOwnerLabel(owner);
+      byOwner.set(owner.id, label);
+    }
+    return label;
+  };
+}
+
+/** Detached nodes per group label in the snapshot at `filePath`. */
+async function detachedGroupCountsAt(
+  filePath: string,
+  groupBy: GroupBy,
+  onlyPinned: boolean,
+): Promise<Map<string, number>> {
+  const {rungs, largestMB} = resolveRungs([filePath]);
+  armScanBudgetFor(scaledTimeoutMs(largestMB));
+  return withSnapshotAt(rungs[0].localPath, snap => {
+    const resolveOwner = makeDominatorResolver();
+    const labelOf = makeGroupLabeler(groupBy);
+    const counts = new Map<string, number>();
+    snap.nodes.forEach(node => {
+      if (!isDetachedDOMNode(node)) return;
+      if (onlyPinned && !isPinned(node)) return;
+      const owner = resolveOwner(node);
+      const label = labelOf(groupKeyOf(groupBy, node, owner), owner);
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    });
+    return counts;
+  });
+}
+
 async function detachedLadder(args: {
   run_dir?: string;
   paths?: string[];
@@ -549,6 +643,8 @@ interface GroupStats {
   // freed by releasing it, which includes whatever else it holds besides this
   // group's detached DOM.
   ownerRetained: number;
+  // Matches the same group in another capture (`groupKeysOf`).
+  label: string;
   // Provenance of the accountable owner, so a dominator that is dev-only or
   // flag-gated is visible in the row rather than only after someone thinks to
   // check the gate by hand. This table is where a 116.4 MB "production leak"
@@ -617,6 +713,12 @@ export function registerDetachedDom(server: McpServer): void {
         .describe(
           'Only include detached nodes that have a retainer path to a GC root (i.e. actually pinned / leaked). When false (default) all detached nodes are included, but the summary always reports the pinned-vs-GC-eligible split so transient / weak-only detached DOM is not mistaken for a leak.',
         ),
+      baseline: z
+        .string()
+        .optional()
+        .describe(
+          'With `group_by`: an earlier snapshot of the same page session, e.g. the first rung. Each group then shows how many of its nodes were already detached there ("At baseline") and how many are new, and groups are sorted by new nodes: a group that was all there at baseline is a standing population, not what the round grew. Node ids are compared, so there must be no reload between the two.',
+        ),
     },
     async ({
       output_mode,
@@ -628,6 +730,7 @@ export function registerDetachedDom(server: McpServer): void {
       run_dir,
       paths,
       segment,
+      baseline,
     }) => {
       try {
         // Ladder mode. A single detached census is a population; the RATE is
@@ -662,8 +765,17 @@ export function registerDetachedDom(server: McpServer): void {
             : undefined;
 
         if (group_by) {
+          const baselineCounts =
+            baseline != null && baseline !== ''
+              ? await detachedGroupCountsAt(
+                  baseline,
+                  group_by,
+                  only_with_retainer_path,
+                )
+              : null;
           const groups = new Map<string, GroupStats>();
           const resolveOwner = makeDominatorResolver();
+          const labelOf = makeGroupLabeler(group_by);
           let totalDetached = 0;
           let totalRetainedAll = 0;
           let devOnlyRetained = 0;
@@ -703,27 +815,8 @@ export function registerDetachedDom(server: McpServer): void {
             // need it to report how many distinct owners they span.
             const owner = resolveOwner(node);
 
-            let key: string;
-            switch (group_by) {
-              case 'element':
-                key = extractElementTag(node.name);
-                break;
-              case 'retainer':
-                key = getFirstNonFrameworkRetainer(node);
-                break;
-              case 'testid':
-                key = extractTestId(node);
-                break;
-              case 'dominator':
-                // No owner = the dominator is the GC root itself, i.e. the node
-                // is reachable through two or more independent paths. Naming
-                // that outcome matters more than the others: it is precisely the
-                // case where "fix this retainer and X is freed" is false.
-                key = owner
-                  ? `@${owner.id} ${truncateNodeName(owner.name, owner.type, owner.self_size, 60)}`
-                  : '(no single owner — dominated by the GC root, i.e. reachable via ≥2 independent paths)';
-                break;
-            }
+            const key = groupKeyOf(group_by, node, owner);
+            const label = baselineCounts != null ? labelOf(key, owner) : key;
 
             const existing = groups.get(key);
             if (existing) {
@@ -756,6 +849,7 @@ export function registerDetachedDom(server: McpServer): void {
                 // The owner's own retained size, not the sum of the group's
                 // detached nodes: releasing it frees everything it dominates.
                 ownerRetained: owner ? owner.retainedSize : 0,
+                label,
                 provenance: owner ? moduleProvenanceOf(owner) : null,
               });
             }
@@ -776,8 +870,25 @@ export function registerDetachedDom(server: McpServer): void {
             return toolResult('No detached DOM nodes found.');
           }
 
+          // Per label, not per row: two owners of one class (two `Object`s)
+          // are one population to compare with the baseline.
+          const byLabel = new Map<string, {count: number; rows: number}>();
+          for (const st of groups.values()) {
+            const e = byLabel.get(st.label) ?? {count: 0, rows: 0};
+            e.count += st.count;
+            e.rows++;
+            byLabel.set(st.label, e);
+          }
+          const atBaselineOf = (st: GroupStats) =>
+            baselineCounts?.get(st.label) ?? 0;
+          const newOf = (st: GroupStats) =>
+            (byLabel.get(st.label)?.count ?? 0) - atBaselineOf(st);
           const sorted = [...groups.entries()]
-            .sort((a, b) => b[1].totalRetained - a[1].totalRetained)
+            .sort(
+              (a, b) =>
+                (baselineCounts != null ? newOf(b[1]) - newOf(a[1]) : 0) ||
+                b[1].totalRetained - a[1].totalRetained,
+            )
             .slice(0, limit);
 
           const groupLabel =
@@ -817,6 +928,7 @@ export function registerDetachedDom(server: McpServer): void {
           const headers = [
             groupLabel,
             'Count',
+            ...(baselineCounts != null ? ['At baseline', 'Δ since'] : []),
             ...(showDevOnly ? ['Dev-only'] : []),
             'Total Retained',
             '% of Detached',
@@ -825,7 +937,9 @@ export function registerDetachedDom(server: McpServer): void {
             'Example ID',
           ];
           const rightCols = new Set(
-            showDevOnly ? [1, 2, 3, 4, 5] : [1, 2, 3, 4],
+            headers.flatMap((h, i) =>
+              i > 0 && h !== 'Owner is' && h !== 'Example ID' ? [i] : [],
+            ),
           );
           const rows = sorted.map(([key, stats]) => {
             const pct =
@@ -836,6 +950,17 @@ export function registerDetachedDom(server: McpServer): void {
             return [
               key.length > 60 ? key.slice(0, 57) + '...' : key,
               formatNumber(stats.count),
+              ...(baselineCounts != null
+                ? (() => {
+                    const shared =
+                      (byLabel.get(stats.label)?.rows ?? 1) > 1 ? '*' : '';
+                    const d = newOf(stats);
+                    return [
+                      `${formatNumber(atBaselineOf(stats))}${shared}`,
+                      `${d >= 0 ? '+' : '−'}${formatNumber(Math.abs(d))}${shared}`,
+                    ];
+                  })()
+                : []),
               ...(showDevOnly
                 ? [
                     stats.devOnlyCount === 0
@@ -887,11 +1012,36 @@ export function registerDetachedDom(server: McpServer): void {
                 ]
               : []),
             ...formatReachabilitySplit(split, snapshot),
+            ...(baselineCounts != null
+              ? (() => {
+                  const base = [...baselineCounts.values()].reduce(
+                    (n, c) => n + c,
+                    0,
+                  );
+                  const counted = [...groups.values()].reduce(
+                    (n, st) => n + st.count,
+                    0,
+                  );
+                  return [
+                    `**${formatNumber(base)} detached node(s) at the baseline, ${formatNumber(counted)} here (${counted - base >= 0 ? '+' : '−'}${formatNumber(Math.abs(counted - base))}).** ` +
+                      'Groups are sorted by **Δ since** the baseline: a group whose nodes were all there already is a standing population, not what this round grew.',
+                  ];
+                })()
+              : []),
           ];
           if (only_with_retainer_path) {
             lines.push('_(groups below show pinned nodes only)_');
           }
           lines.push('', markdownTable(headers, rows, rightCols));
+          if (
+            baselineCounts != null &&
+            sorted.some(([, st]) => (byLabel.get(st.label)?.rows ?? 1) > 1)
+          ) {
+            lines.push(
+              '',
+              `_* Shared by several owners of the same ${isDominatorMode ? 'class' : 'key'}; the baseline figures are for all of them together. Owners are matched across snapshots by class (a scope by its closure), not node id, because ids change between captures._`,
+            );
+          }
 
           if (isDominatorMode) {
             const ownerless = sorted.find(
