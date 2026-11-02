@@ -20,13 +20,14 @@ import memlabHeapAnalysis from '@memlab/heap-analysis';
 const {getFullHeapFromFile} = memlabHeapAnalysis;
 import {
   findResidentByPath,
-  getCurrentHandle,
   pinHandle,
   getMetadataByHandle,
   getSnapshotByHandle,
   removeSnapshot,
+  getSessionHandle,
+  isPinned,
   restoreCurrentHandle,
-  setCurrentSnapshot,
+  runWithBorrowedHandle,
   unpinHandle,
   setSnapshot,
 } from './heap-state.js';
@@ -102,10 +103,11 @@ export async function runWithRungRetention<T>(
       stats: {parses: r.parses, reuses: r.reuses, evicted: r.evicted},
     };
   } finally {
-    const current = getCurrentHandle();
+    const current = getSessionHandle();
     let dropped = 0;
     for (const h of r.handles) {
-      if (h !== current && removeSnapshot(h)) dropped++;
+      // A pinned rung is in use by a call still running.
+      if (h !== current && !isPinned(h) && removeSnapshot(h)) dropped++;
     }
     r.handles.length = 0;
     if (dropped > 0) releaseMemory(1);
@@ -133,7 +135,9 @@ function retain(
     (r.handles.length > cap || !roomForAnother(snapshot))
   ) {
     const victim = r.handles.shift() as string;
-    if (victim === callerHandle) continue;
+    if (victim === callerHandle || (victim !== handle && isPinned(victim))) {
+      continue;
+    }
     removeSnapshot(victim);
     r.evicted++;
     releaseMemory(1);
@@ -166,7 +170,9 @@ export async function withSnapshotAt<T>(
   const resident = findResidentByPath(localPath);
   let snapshot: IHeapSnapshot | null =
     resident != null ? getSnapshotByHandle(resident.handle) : null;
-  const previousHandle = getCurrentHandle();
+  // The SESSION's handle, not this context's: a borrow is never restored to
+  // another borrow's rung, which is unloaded when that borrow ends.
+  const previousHandle = getSessionHandle();
   let temporaryHandle: string | null = null;
   pinHandle(previousHandle);
 
@@ -212,12 +218,15 @@ export async function withSnapshotAt<T>(
         {replace: false},
       );
       temporaryHandle = meta.handle;
-    } else if (resident != null) {
-      setCurrentSnapshot(resident.handle);
+      // `setSnapshot` made the rung the session's snapshot; it is this
+      // call's only.
+      restoreCurrentHandle(previousHandle);
     }
     // Only once the rung is loaded: a failed load was not read.
     noteSnapshotRead(localPath);
-    return await fn(snapshot);
+    const borrowed = temporaryHandle ?? (resident?.handle as string);
+    const rung = snapshot;
+    return await runWithBorrowedHandle(borrowed, () => fn(rung));
   } finally {
     // Retained: removed later by its scope (or evicted for room) instead.
     const kept =
@@ -232,9 +241,11 @@ export async function withSnapshotAt<T>(
       snapshot = null;
       releaseMemory(1);
     }
-    // Same restore as a borrowed handle: back to the saved snapshot, or, if
-    // it was unloaded meanwhile, a fallback that the next result announces.
-    restoreCurrentHandle(previousHandle);
+    // Only when the session handle is gone: a load the caller made meanwhile
+    // stays active. A fallback is announced in the next result.
+    if (previousHandle != null && getMetadataByHandle(previousHandle) == null) {
+      restoreCurrentHandle(previousHandle);
+    }
     unpinHandle(previousHandle);
   }
 }

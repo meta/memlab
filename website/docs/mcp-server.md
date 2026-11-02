@@ -495,7 +495,10 @@ that both have a `rung_00_c0`, the reply names the holder and gives the new one
 Every single-snapshot tool takes an optional `snapshot`: a resident handle, or
 a `.heapsnapshot` path that is loaded for that call only. The active snapshot
 does not move, so you can ask about two captures side by side without
-switching between calls.
+switching between calls. Ladder tools and `memlab_eval_across` borrow their
+rungs the same way: a borrowed snapshot is active only inside the call that
+borrowed it, so a background job and another call running at the same time
+each read their own snapshot, and the session's active snapshot stays put.
 
 Leak detection needs a trend, not a single capture. Pass `keep_previous: true`
 when loading so earlier snapshots stay resident: each one gets a *handle*, and

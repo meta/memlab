@@ -9,6 +9,7 @@
  */
 
 import type {IHeapSnapshot} from '@memlab/core';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import path from 'path';
 import {tickAnalysis} from './analysis-budget.js';
 
@@ -86,6 +87,42 @@ interface LoadedSnapshot {
 const loaded = new Map<string, LoadedSnapshot>();
 let currentHandle: string | null = null;
 
+// A snapshot borrowed for one call (a ladder rung, a `snapshot` argument) is
+// active only inside that call's async context. Switching the session's
+// handle instead let two overlapping calls corrupt it: the second saved the
+// first's temporary rung as "previous", which was gone when it restored.
+const borrowedHandle = new AsyncLocalStorage<string>();
+
+/** The handle tools read: this call's borrowed one, else the session's. */
+function activeHandle(): string | null {
+  const borrowed = borrowedHandle.getStore();
+  return borrowed != null && loaded.has(borrowed) ? borrowed : currentHandle;
+}
+
+/**
+ * Run `fn` with `handle` as the active snapshot for this async context only.
+ * The session's active snapshot, and concurrent calls, do not see the switch.
+ */
+export function runWithBorrowedHandle<T>(handle: string, fn: () => T): T {
+  pinHandle(handle);
+  try {
+    const out = borrowedHandle.run(handle, fn);
+    if (out instanceof Promise) {
+      return out.finally(() => unpinHandle(handle)) as T;
+    }
+    unpinHandle(handle);
+    return out;
+  } catch (err) {
+    unpinHandle(handle);
+    throw err;
+  }
+}
+
+/** The session's active handle, ignoring any borrow in this context. */
+export function getSessionHandle(): string | null {
+  return currentHandle;
+}
+
 // Monotonic access stamp per handle, for LRU eviction under memory pressure.
 // A counter rather than a clock: two snapshots can be touched inside the same
 // millisecond, and only the ORDER matters here.
@@ -114,6 +151,11 @@ export function pinHandle(handle: string | null): void {
   if (handle != null) pinned.set(handle, (pinned.get(handle) ?? 0) + 1);
 }
 
+/** True while a borrow or a saved session handle depends on `handle`. */
+export function isPinned(handle: string): boolean {
+  return pinned.has(handle);
+}
+
 export function unpinHandle(handle: string | null): void {
   if (handle == null) return;
   const left = (pinned.get(handle) ?? 0) - 1;
@@ -125,7 +167,13 @@ export function evictLeastRecentlyUsed(): SnapshotMetadata | null {
   let victim: string | null = null;
   let victimStamp = Infinity;
   for (const handle of loaded.keys()) {
-    if (handle === currentHandle || pinned.has(handle)) continue;
+    if (
+      handle === currentHandle ||
+      handle === activeHandle() ||
+      pinned.has(handle)
+    ) {
+      continue;
+    }
     const stamp = lastUsed.get(handle) ?? 0;
     if (stamp < victimStamp) {
       victimStamp = stamp;
@@ -154,7 +202,7 @@ const evalScratch = new Map<string, Record<string, unknown>>();
  * were built from, so the scratch is keyed to the active handle.
  */
 export function getEvalScratch(): Record<string, unknown> {
-  const key = currentHandle ?? '__none__';
+  const key = activeHandle() ?? '__none__';
   let s = evalScratch.get(key);
   if (!s) {
     s = {};
@@ -229,9 +277,9 @@ const sessionConfig: SessionConfig = {
   tableFormat: 'markdown',
 };
 
-// Tracks whether the header has been emitted since the current snapshot was
-// loaded/activated, so `quietHeader` can print it exactly once.
-let headerEmitted = false;
+// The handle the header was last emitted for, so `quietHeader` prints it once
+// per snapshot, and again when a call reads a different one (a borrow).
+let headerEmittedFor: string | null = null;
 
 export function getSessionConfig(): SessionConfig {
   return sessionConfig;
@@ -260,8 +308,9 @@ export function setSessionConfig(patch: Partial<SessionConfig>): SessionConfig {
  */
 export function shouldEmitHeader(): boolean {
   if (!sessionConfig.quietHeader) return true;
-  if (headerEmitted) return false;
-  headerEmitted = true;
+  const handle = activeHandle();
+  if (handle != null && headerEmittedFor === handle) return false;
+  headerEmittedFor = handle;
   return true;
 }
 
@@ -362,7 +411,8 @@ function uniqueHandle(base: string): string {
  * guardrail wrapper entirely.
  */
 export function getSnapshot(opts?: {allowLight?: boolean}): IHeapSnapshot {
-  const entry = currentHandle ? loaded.get(currentHandle) : undefined;
+  const handle = activeHandle();
+  const entry = handle ? loaded.get(handle) : undefined;
   if (!entry) {
     throw new Error('No heap snapshot loaded. Use memlab_load_snapshot first.');
   }
@@ -373,30 +423,34 @@ export function getSnapshot(opts?: {allowLight?: boolean}): IHeapSnapshot {
         `Reload for full analysis: memlab_load_snapshot({file_path: "${entry.metadata.filePath}"}).`,
     );
   }
-  touch(currentHandle);
+  touch(handle);
   instrumentSnapshot(entry.snapshot);
   return entry.snapshot;
 }
 
 /** True when the current snapshot was loaded without the dominator pass. */
 export function isLightSnapshot(): boolean {
-  if (!currentHandle) return false;
-  return loaded.get(currentHandle)?.metadata.light === true;
+  const handle = activeHandle();
+  if (!handle) return false;
+  return loaded.get(handle)?.metadata.light === true;
 }
 
 export function getFilePath(): string | null {
-  if (!currentHandle) return null;
-  return loaded.get(currentHandle)?.metadata.filePath ?? null;
+  const handle = activeHandle();
+  if (!handle) return null;
+  return loaded.get(handle)?.metadata.filePath ?? null;
 }
 
 export function getSnapshotEnv(): SnapshotEnv {
-  if (!currentHandle) return 'unknown';
-  return loaded.get(currentHandle)?.metadata.env ?? 'unknown';
+  const handle = activeHandle();
+  if (!handle) return 'unknown';
+  return loaded.get(handle)?.metadata.env ?? 'unknown';
 }
 
 export function getSnapshotMetadata(): SnapshotMetadata | null {
-  if (!currentHandle) return null;
-  return loaded.get(currentHandle)?.metadata ?? null;
+  const handle = activeHandle();
+  if (!handle) return null;
+  return loaded.get(handle)?.metadata ?? null;
 }
 
 /**
@@ -433,7 +487,7 @@ export function setSnapshot(
   loaded.set(handle, {snapshot, metadata: full});
   currentHandle = handle;
   touch(handle);
-  headerEmitted = false;
+  headerEmittedFor = null;
   return full;
 }
 
@@ -452,7 +506,7 @@ export function clearAllSnapshots(): void {
   lastUsed.clear();
   dropEvalScratch(null);
   currentHandle = null;
-  headerEmitted = false;
+  headerEmittedFor = null;
 }
 
 /**
@@ -486,12 +540,12 @@ export function retainOnlySnapshot(handle: string): boolean {
   }
   currentHandle = handle;
   touch(handle);
-  headerEmitted = false;
+  headerEmittedFor = null;
   return true;
 }
 
 export function getCurrentHandle(): string | null {
-  return currentHandle;
+  return activeHandle();
 }
 
 /**
@@ -612,7 +666,7 @@ export function setCurrentSnapshot(handle: string): boolean {
   if (!loaded.has(handle)) return false;
   currentHandle = handle;
   touch(handle);
-  headerEmitted = false;
+  headerEmittedFor = null;
   return true;
 }
 
@@ -636,7 +690,7 @@ export function restoreCurrentHandle(handle: string | null): void {
         ? `⚠ The active snapshot \`${handle}\` was unloaded during the last call; \`${next}\` is active now.`
         : `⚠ The active snapshot \`${handle}\` was unloaded during the last call; no snapshot is loaded now.`;
   }
-  if (currentHandle !== next) headerEmitted = false;
+  if (currentHandle !== next) headerEmittedFor = null;
   currentHandle = next;
 }
 
@@ -657,7 +711,7 @@ export function removeSnapshot(handle: string): boolean {
   }
   if (existed && currentHandle === handle) {
     currentHandle = loaded.size > 0 ? [...loaded.keys()][0] : null;
-    headerEmitted = false;
+    headerEmittedFor = null;
   }
   return existed;
 }

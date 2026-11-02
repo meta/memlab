@@ -274,7 +274,7 @@ Call **`memlab_tools`** first when you are not sure which tool fits. It prints t
 
 Tools are grouped by the question they answer. Within a group, try them in the order listed. A few tools appear in more than one group. The tables below are generated from `src/tools/tools-index.ts`, the same index `memlab_tools` prints (`npm run sync-catalog`; `npm run test-pkg` fails when they drift).
 
-Every single-snapshot tool takes an optional `snapshot`: a resident handle, or a `.heapsnapshot` path that is loaded for that call only and released afterwards. The active snapshot does not move, so two captures can be queried side by side without `memlab_snapshots({action: "switch"})` between calls.
+Every single-snapshot tool takes an optional `snapshot`: a resident handle, or a `.heapsnapshot` path that is loaded for that call only and released afterwards. The active snapshot does not move, so two captures can be queried side by side without `memlab_snapshots({action: "switch"})` between calls. The same holds for the ladder tools and `memlab_eval_across`: a borrowed snapshot is active only inside the call that borrowed it, so overlapping calls (a background job beside another call) each read their own snapshot and leave the session's active snapshot where it was.
 
 Every byte-size filter (`min_retained_size`, `min_self_size`, `min_bytes`, …) takes bytes or a size such as `"1MB"` or `"500KiB"` (KB = 1000 bytes, KiB = 1024). `memlab_query_objects` also takes ranges: `"1MB-"`, `"10KB-1MB"`, `"-1MB"`.
 

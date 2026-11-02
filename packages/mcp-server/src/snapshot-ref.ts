@@ -11,13 +11,9 @@
 import fs from 'fs';
 import {z} from 'zod';
 import {
-  getCurrentHandle,
   listSnapshots,
   resolveHandle,
-  pinHandle,
-  restoreCurrentHandle,
-  setCurrentSnapshot,
-  unpinHandle,
+  runWithBorrowedHandle,
 } from './heap-state.js';
 import {withSnapshotAt} from './snapshot-borrow.js';
 import {resolveSnapshotPath} from './tools/load-snapshot.js';
@@ -80,17 +76,7 @@ export async function withSnapshotRef<T>(
   fn: () => Promise<T> | T,
 ): Promise<T> {
   const handle = resolveHandle(ref);
-  if (handle != null) {
-    const previous = getCurrentHandle();
-    pinHandle(previous);
-    setCurrentSnapshot(handle);
-    try {
-      return await fn();
-    } finally {
-      restoreCurrentHandle(previous);
-      unpinHandle(previous);
-    }
-  }
+  if (handle != null) return await runWithBorrowedHandle(handle, fn);
   const {localPath} = resolveSnapshotPath(ref);
   if (!fs.existsSync(localPath)) {
     const handles = listSnapshots().map(m => m.handle);

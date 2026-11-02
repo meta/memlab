@@ -11,10 +11,9 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {
-  getCurrentHandle,
   getMetadataByHandle,
   listSnapshots,
-  setCurrentSnapshot,
+  runWithBorrowedHandle,
 } from '../heap-state.js';
 import {
   errorResult,
@@ -247,7 +246,6 @@ async function runEvalAcross({
   max_nodes?: number;
   stop_on_error: boolean;
 }) {
-  const originalHandle = getCurrentHandle();
   try {
     const given = [
       handles != null && handles.length > 0,
@@ -303,8 +301,11 @@ async function runEvalAcross({
         return {
           label: `${handle}${meta ? ` — ${meta.fileName}` : ''}`,
           run: async fn =>
-            setCurrentSnapshot(handle)
-              ? {ok: true as const, value: await fn()}
+            getMetadataByHandle(handle) != null
+              ? {
+                  ok: true as const,
+                  value: await runWithBorrowedHandle(handle, fn),
+                }
               : {ok: false as const},
         };
       });
@@ -410,9 +411,5 @@ async function runEvalAcross({
     return toolResult(lines.join('\n'));
   } catch (err) {
     return errorResult(err);
-  } finally {
-    // Restore whatever the caller had active, so a comparison run is not a
-    // hidden state change for every tool that follows it.
-    if (originalHandle != null) setCurrentSnapshot(originalHandle);
   }
 }
