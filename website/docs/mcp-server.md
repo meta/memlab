@@ -413,6 +413,11 @@ figures are defined or grouped differently:
   beside it. On a dev build a single dev-only hash table can double in size
   partway through a run, and the raw total then grows by megabytes with no
   change in the app.
+- **Explanations are printed once per session.** A tool keeps the figures of
+  a result apart from the italic note that explains them, prints the note the
+  first time in a session, and after that only says how many notes it left
+  out (`repeat_notes: true` prints them again). `memlab_leak_report`'s settle
+  and idle-floor lines, for example, carry only their counts.
 - **Bounded windows are reported apart from `app_delta`.** A collection the
   app empties on a timer (a 30-minute trace buffer, a TTL cache) fills for as
   long as the window lasts, so on a shorter ladder it reads as linear app

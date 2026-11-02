@@ -1181,9 +1181,11 @@ export function registerLeakReport(server: McpServer): void {
         if (showIdleFloor) {
           lines.push(
             '',
-            `**Idle floor subtracted** against \`${idleLabel}\`: rows are ranked by EXCESS over the control, ` +
-              `not by absolute rate, and ${formatNumber(idleFloorClasses)} class(es) sit at or below the floor — they grow ` +
-              'at least as fast with no interaction at all, so the driving did not cause them.',
+            `**Idle floor subtracted** against \`${idleLabel}\`: ${formatNumber(idleFloorClasses)} class(es) sit at or below the floor.`,
+            '',
+            // A note of its own, so a session prints it once.
+            '_Rows are ranked by EXCESS over the idle control, not by absolute rate. A class at or below the floor ' +
+              'grows at least as fast with no interaction at all, so the driving did not cause it._',
           );
         } else if (idleError != null) {
           lines.push(
@@ -1204,8 +1206,6 @@ export function registerLeakReport(server: McpServer): void {
             '',
             `**Settle: ${formatNumber(heldClasses)} class(es) HELD / ${formatNumber(drainedClasses)} DRAINED** ` +
               `(against \`${(settlePath as string).replace(/^.*\//, '')}\`). ` +
-              'A DRAINED class returned to baseline after idle + GC: it was in-flight work, and reporting it ' +
-              'as a leak is the single most common false positive this tool produces. ' +
               // One-directional, and with the candidate count beside it.
               // "Only the HELD rows are candidates" reads as "every HELD row
               // is a candidate", which is a different and false claim: HELD
@@ -1216,6 +1216,11 @@ export function registerLeakReport(server: McpServer): void {
               `No DRAINED row is a candidate; of the ${formatNumber(heldClasses)} HELD, ` +
               `**${formatNumber(heldCandidates)}** are candidates — the rest grew net but not at every step. ` +
               'Read the per-class detail with `memlab_settle_check`.',
+            '',
+            // Its own note, so a session (and a sweep's digests) print it once.
+            '_A DRAINED class returned to baseline after idle + GC: it was in-flight work, and reporting it as a leak ' +
+              'is the single most common false positive this tool produces. A HELD class is not a leak on that alone: ' +
+              'candidacy also needs the trend._',
           );
           // A class the settle histogram never mentions scores 0 and reads as
           // fully drained. One of those is ordinary. Most of them is a short

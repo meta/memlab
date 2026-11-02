@@ -538,7 +538,7 @@ Input:  { action?: "list"|"switch"|"unload", handle?, quiet?, suppress_suggestio
 Output: resident snapshots (active one marked), or switch/unload result
 ```
 
-A standing explanatory note (an italic or quoted paragraph) is printed in full the first time in a session and omitted after that, with a count of what was left out; `repeat_notes: true` prints them again. Within one `memlab_ladder_probe` call, the explanations that would repeat under every metric (how the fit treats a repeated cycle count, the settle exclusion, UNSETTLED, the retention-window caveat) are printed once.
+A standing explanatory note (an italic or quoted paragraph) is printed in full the first time in a session and omitted after that, with a count of what was left out; `repeat_notes: true` prints them again. Results keep each explanation in a note of its own, apart from the figures: `memlab_leak_report`'s settle and idle-floor lines, for example, carry only the counts, and the battery digest that lifts them stays short. Within one `memlab_ladder_probe` call, the explanations that would repeat under every metric (how the fit treats a repeated cycle count, the settle exclusion, UNSETTLED, the retention-window caveat) are printed once.
 
 ### `memlab_batch`
 
