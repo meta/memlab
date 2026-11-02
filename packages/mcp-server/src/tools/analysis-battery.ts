@@ -741,6 +741,34 @@ export function freshSuggestions(
   return out;
 }
 
+/**
+ * `round_audit` digest rows a previous round of the sweep already showed,
+ * word for word, collapsed into one line naming their checks. A row whose
+ * figures changed is new and stays.
+ */
+export function freshAuditRows(runDir: string, lines: string[]): string[] {
+  const isRow = (l: string) => /^\| [⚠✅❌]/.test(l);
+  const rows = lines.filter(isRow);
+  if (rows.length === 0) return lines;
+  const keys = rows.map(r => `audit:${r.replace(/\s+/g, ' ').trim()}`);
+  const {fresh, since} = splitRepeatedCaveats(runDir, keys, true);
+  const freshSet = new Set(fresh);
+  const unchanged: string[] = [];
+  const out = lines.filter(l => {
+    if (!isRow(l)) return true;
+    const k = `audit:${l.replace(/\s+/g, ' ').trim()}`;
+    if (freshSet.has(k)) return true;
+    unchanged.push(l.split('|')[2]?.trim() ?? '?');
+    return false;
+  });
+  if (unchanged.length > 0) {
+    out.push(
+      `_${unchanged.length} check(s) unchanged since ${since ?? 'an earlier round'}: ${unchanged.join(', ')}._`,
+    );
+  }
+  return out;
+}
+
 export function nextCalls(
   runDir: string,
   perTool: Map<string, string>,
@@ -897,7 +925,11 @@ function caveatKey(caveat: string): string {
 export function splitRepeatedCaveats(
   runDir: string,
   caveats: string[],
+  // Match the text as is, figures included; a caveat matches with its
+  // numbers masked.
+  exact = false,
 ): {fresh: string[]; repeated: number; since: string | null} {
+  const keyOf = exact ? (c: string) => c : caveatKey;
   const self = path.resolve(runDir.replace(/\/$/, ''));
   const sweep = path.dirname(self);
   const round = path.basename(self);
@@ -913,7 +945,7 @@ export function splitRepeatedCaveats(
   let repeated = 0;
   let since: string | null = null;
   for (const c of caveats) {
-    const first = seen[caveatKey(c)];
+    const first = seen[keyOf(c)];
     // Re-analysing the same round shows its caveats again.
     if (first != null && first !== round) {
       repeated++;
@@ -925,7 +957,7 @@ export function splitRepeatedCaveats(
       }
     } else {
       fresh.push(c);
-      seen[caveatKey(c)] = round;
+      seen[keyOf(c)] = round;
     }
   }
   // Re-inserted last, so the oldest sweeps are the ones dropped.
@@ -1513,7 +1545,11 @@ export function registerAnalysisBattery(server: McpServer): void {
               }
               tracked.doneSteps = finished;
 
-              const d = digestFor(step.tool, text, digest_rows, stem);
+              const lifted = digestFor(step.tool, text, digest_rows, stem);
+              const d =
+                step.tool === 'memlab_round_audit'
+                  ? freshAuditRows(run_dir, lifted)
+                  : lifted;
               if (d.length > 0) {
                 digestLines.push(`### ${stem}`, ...d, '');
               }

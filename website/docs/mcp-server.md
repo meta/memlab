@@ -537,7 +537,9 @@ and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one
 `memlab_ab_compare` verdict table. The digest ends with the next calls worth
 making for that round; a call already suggested in an earlier round of the
-same sweep, for the same class, is named once instead of repeated. You can
+same sweep, for the same class, is named once instead of repeated. Likewise a
+`memlab_round_audit` row an earlier round of the sweep showed word for word is
+folded into one "N check(s) unchanged since …" line; the verdict always shows. You can
 give a ladder in three ways:
 
 - **`paths`:** an ordered list of snapshot files. Cycle counts are read from
