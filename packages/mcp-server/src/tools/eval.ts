@@ -447,7 +447,8 @@ const HELPER_SYNONYMS: Record<string, string> = {
   sizeOf: 'arrayLen',
   retainer: 'firstRetainer',
   holderOf: 'firstRetainer',
-  keysOf: 'props',
+  // Not a helper: the per-node accessor.
+  keysOf: '`node.props`',
 };
 
 function wrapNode(node: unknown): unknown {

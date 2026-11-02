@@ -111,10 +111,13 @@ function pivotTable(
     c === undefined ? '—' : typeof c === 'number' ? formatNumber(c) : String(c);
   const body = keys.map(k => {
     const cells = rows.map(r => (r.ok ? r.value?.[k] : undefined));
-    const first = cells[0];
-    const last = cells[cells.length - 1];
+    // Between the first and last rungs that measured it: a failed end rung
+    // must not blank the growth across the rest.
+    const measured = cells.filter((c): c is number => typeof c === 'number');
+    const first = measured[0];
+    const last = measured[measured.length - 1];
     const delta =
-      typeof first === 'number' && typeof last === 'number' && rows.length > 1
+      measured.length > 1
         ? `${last - first >= 0 ? '+' : '−'}${formatNumber(Math.abs(last - first))}`
         : '';
     return [k, ...cells.map(show), ...(rows.length > 1 ? [delta] : [])];
