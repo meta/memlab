@@ -344,7 +344,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_calibrate_judges` | Prove judges against rounds KNOWN to carry the leaks they guard; records who has been seen red, so `memlab_judges` can mark every unproven PASS. |
 | `memlab_cache_inventory` | Module-scope Maps/Sets/Arrays ranked by what their entries hold, with the owning module and any clear/reset API it already has — memory-pressure candidates in one call. |
 | `memlab_module_source` | The served source of one module (`__d` span) read from the snapshot: is the fix served (`gate`), is it a dev-compile artifact (`compare_to` a prod capture), what does it do (`grep`). |
-| `memlab_source_for_node` | Which module's code a node belongs to (closure scope chain → Haste module, exact), for going from "which object" to "which file" without code search. |
+| `memlab_source_for_node` | Which module's code a node belongs to (closure scope chain → Haste module, exact), for going from "which object" to "which file" without code search. `context_lines` also prints the function's definition from the served source, and a context's variables and closures. |
 | `memlab_stale_refs` | React refs whose `.current` is detached DOM, by owner and variable, against the owner's fiber count — bounded (≤1 per instance) or accumulating. |
 | `memlab_dev_subtracted_delta` | Per-class growth between two snapshots with everything reachable only through a dev root or dev edge removed — the dev build's honest "what did the app grow". |
 | `memlab_job_status` | Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done. `wait_ms` (up to 90 s) waits for it to finish. |

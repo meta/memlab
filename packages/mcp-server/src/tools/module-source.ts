@@ -47,7 +47,7 @@ function edgeString(node: IHeapNode, name: string): string | null {
   return null;
 }
 
-function escapeRegExp(s: string): string {
+export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 

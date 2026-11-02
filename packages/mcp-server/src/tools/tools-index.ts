@@ -275,7 +275,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_source_for_node',
-        'Which module\'s code a node belongs to (closure scope chain → Haste module, exact), for going from "which object" to "which file" without code search.',
+        'Which module\'s code a node belongs to (closure scope chain → Haste module, exact), for going from "which object" to "which file" without code search. `context_lines` also prints the function\'s definition from the served source, and a context\'s variables and closures.',
       ],
       [
         'memlab_stale_refs',

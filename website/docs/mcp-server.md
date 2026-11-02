@@ -397,6 +397,13 @@ figures are defined or grouped differently:
   beside it. On a dev build a single dev-only hash table can double in size
   partway through a run, and the raw total then grows by megabytes with no
   change in the app.
+- **Source for a node comes from the snapshot.** Browser captures keep each
+  script's source text, so `memlab_source_for_node({node_ids, context_lines})`
+  prints the function behind a closure, or behind a context (through a closure
+  over it), from its module's span in the served bundle. A minified line gets a
+  character window instead of lines. A context also lists its variables and the
+  closures over it, which is usually enough to say which component's render
+  scope it is.
 - **Detached DOM is compared by owner, not node id.** With `baseline`,
   `memlab_detached_dom({group_by})` shows each group's count at the earlier
   snapshot and sorts by the change, so a large group that was already there
