@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import memlabCore from '@memlab/core';
 import {z} from 'zod';
+import {isContext} from '../context-analysis.js';
 import {getSnapshot, getSnapshotMetadata} from '../heap-state.js';
 import {
   boundedDominatorRetainedSize,
@@ -49,6 +50,29 @@ function matchesShape(node: IHeapNode, shape: string[]): boolean {
  * the same BFS with them present. It is O(N+E) twice rather than a dominator
  * pass, so it is affordable, but it is a real graph walk and not a heuristic.
  */
+function scopeInfoOf(node: IHeapNode): IHeapNode | null {
+  for (const e of node.references) {
+    if (String(e.name_or_index) === 'scope_info') return e.toNode;
+  }
+  return null;
+}
+
+/**
+ * The ScopeInfo `scope_of` names: the node itself when it is one, else the
+ * scope of the context it is (or, for a closure, the context it closes over).
+ */
+function resolveScope(node: IHeapNode): IHeapNode | null {
+  if (node.name === 'system / ScopeInfo') return node;
+  let ctx: IHeapNode | null = node;
+  if (node.type === 'closure') {
+    ctx = null;
+    for (const e of node.references) {
+      if (String(e.name_or_index) === 'context') ctx = e.toNode;
+    }
+  }
+  return ctx != null && isContext(ctx) ? scopeInfoOf(ctx) : null;
+}
+
 function findRootIds(snapshot: IHeapSnapshot): number[] {
   const roots: number[] = [];
   snapshot.nodes.forEach(node => {
@@ -148,7 +172,7 @@ export function registerWhatIf(server: McpServer): void {
     'memlab_what_if',
     'If this set of objects were freed, how many bytes would actually come back? Reports the dominator-deduped retained size of a population — the bytes that go away when it does, with nothing double-counted and nothing counted that is also reachable another way.\n\n' +
       'This is the number every fix decision needs and the one that is easiest to get wrong by hand. Summing per-object retained sizes double-counts every nested object; quoting the class total counts memory that other live code still holds; quoting a container\'s retained size includes internals that survive. `memlab_detached_dom` already reports it for detached subtrees as "Owner Frees" — this makes the same question askable about any set.\n\n' +
-      'Specify the population by ids, class name, or property shape.',
+      'Specify the population by ids, class name, property shape, or `scope_of` (every context of one function scope, which frees a whole scope chain).',
     {
       node_ids: z
         .array(z.number())
@@ -171,6 +195,12 @@ export function registerWhatIf(server: McpServer): void {
         .optional()
         .describe(
           'Free every object carrying ALL of these properties — the usable selector on a minified heap.',
+        ),
+      scope_of: z
+        .number()
+        .optional()
+        .describe(
+          'Free every context of one function scope: a context id (a chain head from `memlab_scope_chains`), a closure id (its context), or a `system / ScopeInfo` id. Frees whole same-scope chains, every call of that function that is still held.',
         ),
       breakdown: z
         .boolean()
@@ -197,6 +227,7 @@ export function registerWhatIf(server: McpServer): void {
       class_name,
       typename,
       shape,
+      scope_of,
       breakdown,
       limit,
       cascade,
@@ -208,24 +239,42 @@ export function registerWhatIf(server: McpServer): void {
           class_name != null,
           typename != null,
           shape != null && shape.length > 0,
+          scope_of != null,
         ].filter(Boolean).length;
         if (selectors === 0) {
           return errorResult(
             new Error(
-              'Pass node_ids, class_name, typename or shape to select what to free.',
+              'Pass node_ids, class_name, typename, shape or scope_of to select what to free.',
             ),
           );
         }
         if (selectors > 1) {
           return errorResult(
             new Error(
-              'Pass exactly one of node_ids / class_name / typename / shape — combining them would make the reported population ambiguous.',
+              'Pass exactly one of node_ids / class_name / typename / shape / scope_of — combining them would make the reported population ambiguous.',
             ),
           );
         }
 
         const ids: number[] = [];
-        if (node_ids != null && node_ids.length > 0) {
+        let scopeLabel: string | null = null;
+        if (scope_of != null) {
+          const start = snapshot.getNodeById(scope_of);
+          const scope = start != null ? resolveScope(start) : null;
+          if (scope == null) {
+            return errorResult(
+              new Error(
+                `@${scope_of} is not a context, a closure or a ScopeInfo in the active snapshot. Node ids are per-capture — take a head from \`memlab_scope_chains\` on this snapshot.`,
+              ),
+            );
+          }
+          snapshot.nodes.forEach(node => {
+            if (isContext(node) && scopeInfoOf(node)?.id === scope.id) {
+              ids.push(node.id);
+            }
+          });
+          scopeLabel = `every context of scope \`@${scope.id}\` (${formatNumber(ids.length)} context(s))`;
+        } else if (node_ids != null && node_ids.length > 0) {
           for (const id of node_ids) {
             if (snapshot.getNodeById(id) != null) ids.push(id);
           }
@@ -268,13 +317,15 @@ export function registerWhatIf(server: McpServer): void {
         }
 
         const label =
-          class_name != null
-            ? `class \`${class_name}\``
-            : typename != null
-              ? `typename \`${typename}\``
-              : shape != null
-                ? `shape \`{${shape.join(', ')}}\``
-                : `${formatNumber(ids.length)} explicit id(s)`;
+          scopeLabel != null
+            ? scopeLabel
+            : class_name != null
+              ? `class \`${class_name}\``
+              : typename != null
+                ? `typename \`${typename}\``
+                : shape != null
+                  ? `shape \`{${shape.join(', ')}}\``
+                  : `${formatNumber(ids.length)} explicit id(s)`;
 
         const lines: string[] = [
           `## What if ${label} were freed?`,

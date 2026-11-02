@@ -308,7 +308,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_shape_histogram` | Groups plain objects by their property set — finds record types the class name hides behind `Object`. |
 | `memlab_identify` | Name a minified structure from its property shape — listener record, LRU node, React update record, undo entry. |
 | `memlab_object_cost_breakdown` | Where one class’s bytes actually go (self vs properties vs elements). |
-| `memlab_what_if` | If this set were freed, how many bytes actually come back — dominator-deduped, no double counting. |
+| `memlab_what_if` | If this set were freed, how many bytes actually come back — dominator-deduped, no double counting. Select by ids, class, typename, shape, or `scope_of` (every context of one function scope, a whole scope chain). |
 | `memlab_trace_all` | Retainer-trace an ENTIRE population and cluster the paths server-side — finds the minority path a 10-instance sample cannot. |
 | `memlab_retainer_diff` | Did the population grow along the same retention path, or did a NEW owner appear? The question a count diff cannot answer. |
 | `memlab_identity_diff` | Same objects, or just the same count? Matches a population across two captures by CONTENT — churn and retention need different fixes. |

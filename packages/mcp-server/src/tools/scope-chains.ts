@@ -315,7 +315,7 @@ export function registerScopeChains(server: McpServer): void {
               artifacts > 0
                 ? `_${artifacts} scope(s) are linked only through compiler temporaries (\`t0\`..\`tN\`): the React Compiler dev hook guard context-allocates them, a prod compile does not. Confirm with \`memlab_module_source({module, compare_to: <prod capture>})\` before setting them aside._`
                 : '_No chain here is linked only through compiler temporaries._',
-              '_A chain that lengthens across rungs is the leak; a long but stable one is bounded. Pass `run_dir` for the per-rung lengths, and `memlab_retainer_trace` on a head for what holds it._',
+              '_A chain that lengthens across rungs is the leak; a long but stable one is bounded. Pass `run_dir` for the per-rung lengths, and `memlab_retainer_trace` on a head for what holds it. "Longest retains" is the longest chain alone; `memlab_what_if({scope_of: <head>})` frees every context of that scope._',
             ].join('\n'),
           );
         }

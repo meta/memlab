@@ -141,7 +141,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_what_if',
-        'If this set were freed, how many bytes actually come back — dominator-deduped, no double counting.',
+        'If this set were freed, how many bytes actually come back — dominator-deduped, no double counting. Select by ids, class, typename, shape, or `scope_of` (every context of one function scope, a whole scope chain).',
       ],
       [
         'memlab_trace_all',

@@ -293,6 +293,12 @@ variables and the head's id. With `run_dir` or `paths` it gives the longest
 chain at every rung, so you can tell a chain that keeps growing from one
 that stops.
 
+To size a fix, `memlab_what_if({scope_of: <head id>})` frees every Context of
+that function's scope at once, every chain and not just the longest, and
+reports the dominator-deduped bytes that come back (`cascade: true` adds what
+they were the last holder of). A closure id or a `system / ScopeInfo` id
+works as well.
+
 The React Compiler's development build makes chains on its own. It wraps each
 hook call in a guard closure that captures the hook's arguments, so the
 compiler temporaries `t0`…`tN` end up in Contexts and cached effect closures
