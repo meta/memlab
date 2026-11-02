@@ -450,6 +450,7 @@ function wrapNode(node: unknown): unknown {
       if (prop === 'references' || prop === 'referrers') {
         return wrapEdgeIterable(val);
       }
+      if (prop === 'props' && val === undefined) return propsOf(target);
       if (prop === 'dominatorNode' || prop === 'pathEdge') {
         if (val != null && typeof val === 'object' && 'fromNode' in val) {
           return wrapEdge(val);
@@ -681,10 +682,34 @@ function wrapEdge(edge: unknown): unknown {
   });
 }
 
+/** Array methods an edge list answers, from one copy made on first use. */
+const EDGE_LIST_METHODS = [
+  'filter',
+  'map',
+  'find',
+  'findIndex',
+  'some',
+  'every',
+  'forEach',
+  'reduce',
+  'slice',
+  'flatMap',
+  'at',
+] as const;
+
 function wrapEdgeIterable(iterable: unknown): unknown {
   if (iterable == null) return iterable;
   const original = iterable as Iterable<unknown>;
-  return {
+  let copy: unknown[] | null = null;
+  // `for…of` stays a lazy walk; `.filter` and friends were a TypeError, which
+  // cost a round trip per eval that wrote them.
+  const toArray = (): unknown[] =>
+    (copy ??= [...(list as unknown as Iterable<unknown>)]);
+  const list: Record<string | symbol, unknown> = {
+    get length() {
+      return toArray().length;
+    },
+    toArray,
     [Symbol.iterator]() {
       let iter: Iterator<unknown>;
       try {
@@ -717,6 +742,32 @@ function wrapEdgeIterable(iterable: unknown): unknown {
       };
     },
   };
+  for (const m of EDGE_LIST_METHODS) {
+    list[m] = (...args: unknown[]) =>
+      (toArray() as unknown as Record<string, (...a: unknown[]) => unknown>)[m](
+        ...args,
+      );
+  }
+  return list;
+}
+
+/**
+ * `{name: node}` for a node's property edges, and a context's variables, the
+ * first edge of each name.
+ */
+function propsOf(target: object): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const refs = (target as {references?: Iterable<unknown>}).references;
+  for (const e of (wrapEdgeIterable(refs) as Iterable<{
+    type: string;
+    name_or_index: unknown;
+    toNode: unknown;
+  }>) ?? []) {
+    if (e.type !== 'property' && e.type !== 'context') continue;
+    const k = String(e.name_or_index);
+    if (!(k in out)) out[k] = e.toNode;
+  }
+  return out;
 }
 
 function wrapSnapshot(snapshot: unknown, budget: VisitBudget): unknown {
@@ -1354,7 +1405,7 @@ export function registerEval(server: McpServer): void {
     'Execute arbitrary JavaScript code against the loaded heap snapshot. ' +
       'The code runs in a sandboxed VM with access to `snapshot` (IHeapSnapshot), ' +
       '`utils` (@memlab/core utils), and `helpers` (plugin utility functions). ' +
-      'Assign your result to the `result` variable. ' +
+      'Assign your result to the `result` variable (or `return` it). ' +
       'No require/process/fs/network access. Read-only heap analysis only. ' +
       'A whole-heap eval that would outlast the client tool timeout: pass `async: true` and poll memlab_job_status (memlab_start_job runs any other tool the same way).\n\n' +
       '**IHeapNode API:** Each node has: `.id`, `.name`, `.type`, `.self_size`, ' +
@@ -1401,7 +1452,7 @@ export function registerEval(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'JavaScript code to execute. Must assign the output to a `result` variable. ' +
+          'JavaScript code to execute. Assign the output to a `result` variable, or `return` it at the top level. ' +
             'Available globals: snapshot (IHeapSnapshot — use .nodes.forEach(), .getNodeById(), .edges.forEach()), ' +
             'utils (@memlab/core utils with aggregateDominatorMetrics, isFiberNode, isDetachedDOMNode), ' +
             'helpers ({ serializeNodeSummary, serializeNodeDetail, formatBytes, formatNumber, ' +
@@ -1446,7 +1497,7 @@ export function registerEval(server: McpServer): void {
             'and standard JS built-ins. ' +
             'NOTE: `helpers.byClass()` returns IDS, and not every id resolves — `snapshot.getNodeById()` returns null for many native classes (AudioContext, OpusRecorder, …), so `byClass(x).map(id => getNodeById(id).referrers)` throws on the first try. Use `helpers.nodesByClass(name)` / `helpers.iterByClass(name)`, which return node objects and skip the unresolvable ones. `helpers.props()` on an unresolvable node now returns `{__unavailable: true}` rather than `{}`, so "no properties" and "could not read properties" are distinguishable. ' +
             'NOTE: `node.retainedSize` / `node.retained_size` THROW inside eval — they can read back ~0 for every node on some loads, so a silent wrong number is refused; use helpers.retainedSize(id). `node.self_size` is reliable. ' +
-            'Node traversal: use node.references (outgoing) and node.referrers (incoming) with for-of. ' +
+            'Node traversal: use node.references (outgoing) and node.referrers (incoming) with for-of or array methods (.filter/.map/.find/.length); node.props is {name: node}. A top-level `return` sets result. ' +
             'Edge properties: .name_or_index, .type, .toNode, .fromNode.',
         ),
       timeout_ms: z
@@ -1573,12 +1624,45 @@ async function prewarmEvalIndexes(code: string): Promise<void> {
   }
 }
 
+function hasTopLevelReturn(code: string): boolean {
+  try {
+    new vm.Script(code);
+    return false;
+  } catch (err) {
+    return err instanceof Error && /Illegal return/.test(err.message);
+  }
+}
+
+/**
+ * Compile eval source. Code with a top-level `return` runs as a function body,
+ * and a value it returns becomes `result`.
+ */
+export function compileEvalSource(source: string, filename: string): vm.Script {
+  try {
+    return new vm.Script(source, {filename});
+  } catch (err) {
+    if (
+      !(err instanceof Error) ||
+      err.name !== 'SyntaxError' ||
+      !/Illegal return/.test(err.message)
+    ) {
+      throw err;
+    }
+    return new vm.Script(
+      `{ const __memlabReturned = (() => {\n${source}\n})();\n` +
+        'if (__memlabReturned !== undefined) result = __memlabReturned; }',
+      {filename},
+    );
+  }
+}
+
 function startEvalJob(args: Parameters<typeof runEval>[0]) {
   if ((args.mode ?? 'eval') === 'eval') {
     try {
-      new vm.Script(`${args.prelude ?? ''}\n;\n${args.code ?? ''}`, {
-        filename: 'memlab_eval',
-      });
+      compileEvalSource(
+        `${args.prelude ?? ''}\n;\n${args.code ?? ''}`,
+        'memlab_eval',
+      );
     } catch (err) {
       return errorResult(err);
     }
@@ -4584,7 +4668,7 @@ export async function runEval({
     // Late-bound rather than passed, so `helpers.fn` can compile a stored
     // source INSIDE this context; `fn` only runs during execution, which is
     // after this point.
-    const script = new vm.Script(source, {filename: 'memlab_eval'});
+    const script = compileEvalSource(source, 'memlab_eval');
     evalContext = context;
     // A budget abort is a controlled stop, not a failure: whatever the code
     // had already assigned to `result` is still returned, annotated below.
@@ -4636,7 +4720,7 @@ export async function runEval({
     ) {
       return toolResult(
         'Your code ran without error but never assigned to `result`, so there is nothing to return.\n' +
-          'Assign the value you want back to `result` (do NOT use `return` at the top level), e.g.:\n' +
+          'Assign the value you want back to `result`, or `return` it, e.g.:\n' +
           '  `result = someValue;`\n' +
           // Worth spelling out: when this code is a PROBE (memlab_ladder_probe,
           // memlab_replicate, memlab_eval_across), the missing assignment is not
@@ -4909,9 +4993,6 @@ function actionableEvalError(err: unknown, code: string | undefined): string {
   if (isScriptTimeout(err)) {
     return `Execution timed out. Increase timeout_ms, or narrow the scan (filter earlier, use a dedicated tool like memlab_find_by_property/memlab_property_distribution instead of a full snapshot.nodes walk).`;
   }
-  if (msg.includes('Illegal return statement')) {
-    return `Illegal return statement: you cannot \`return\` at the top level here. Assign the value to \`result\` instead — e.g. \`result = ...;\`. (Use mode:"describe_env" for the convention.)`;
-  }
   if (msg.includes('is not iterable')) {
     return `${msg}\nHint: \`snapshot.nodes\` is not a for-of iterable. Use \`snapshot.nodes.forEach(node => { ... })\` (and \`snapshot.edges.forEach(...)\`). \`node.references\`/\`node.referrers\` ARE for-of iterable.`;
   }
@@ -5085,22 +5166,16 @@ function lintEval(code: string, knownHelpers: string[] | null): string {
   let syntaxOk = true;
   try {
     // Compiling does not run anything; it is the same parse the real call does.
-    new vm.Script(code, {filename: 'memlab_eval_lint'});
+    compileEvalSource(code, 'memlab_eval_lint');
     lines.push('- **Syntax:** parses cleanly.');
   } catch (err) {
     syntaxOk = false;
     lines.push(
       `- **Syntax ERROR:** ${err instanceof Error ? err.message : String(err)}`,
     );
-    if (
-      err instanceof SyntaxError &&
-      /Illegal return/.test(err.message ?? '')
-    ) {
-      lines.push('  Assign to `result` instead of using a top-level `return`.');
-    }
   }
 
-  if (!/\bresult\s*=/.test(code)) {
+  if (!/\bresult\s*=/.test(code) && !hasTopLevelReturn(code)) {
     lines.push(
       '- ⚠ **No assignment to `result`** — the call will run and return nothing. This is the single most common eval mistake.',
     );
@@ -5248,9 +5323,10 @@ function describeEnvLines(): string[] {
     '# memlab_eval environment',
     '',
     '## Calling conventions (REQUIRED)',
-    '- Assign your output to `result` — do NOT use `return` at the top level (that throws "Illegal return statement").',
+    '- Assign your output to `result`, or `return` it: code with a top-level `return` runs as a function body, and the value it returns becomes `result`.',
     '- Iterate all nodes with `snapshot.nodes.forEach(node => { ... })` and all edges with `snapshot.edges.forEach(...)`. `snapshot.nodes` is NOT a for-of iterable.',
-    '- `node.references` (outgoing) and `node.referrers` (incoming) ARE for-of iterable.',
+    '- `node.references` (outgoing) and `node.referrers` (incoming) ARE for-of iterable, and also take `.filter`, `.map`, `.find`, `.some`, `.every`, `.reduce`, `.slice`, `.flatMap`, `.at`, `.forEach` and `.length` (`.toArray()` for a plain array).',
+    '- `node.props` is `{name: node}` for its property edges and, on a context, its variables (the first edge of each name).',
     '',
     '## In-scope globals',
     '- `snapshot` — IHeapSnapshot: `.nodes.forEach(cb)`, `.edges.forEach(cb)`, `.getNodeById(id)`.',

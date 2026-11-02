@@ -312,6 +312,14 @@ example. `helpers.scripts()` lists every script with its source string and
 `helpers.stringsBySize({minLen})` the longest strings, so a search over source
 text reads a hundred scripts instead of every string node.
 
+### Custom queries
+
+In `memlab_eval`, code may assign its answer to `result` or `return` it at the
+top level. A node's `references` and `referrers` take array methods
+(`.filter`, `.map`, `.find`, `.length`, …) as well as `for…of`, and
+`node.props` maps an object's property names, or a context's variable names,
+to nodes.
+
 ### Saved probes
 
 A hunt on one app measures the same few populations every round. Save each

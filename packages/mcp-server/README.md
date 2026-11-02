@@ -559,7 +559,7 @@ Input:  memlab_start_job { tool, args }    memlab_job_status { job_id? }
 
 ### `memlab_eval`
 
-The escape hatch when no fixed-shape tool matches the question. It runs JavaScript against the loaded snapshot with access to `snapshot`, `utils` and `helpers`; assign the answer to `result`. The helpers are indexed and memoized per snapshot, for example `helpers.byClass`, `helpers.hasShape`, `helpers.rootPath`, `helpers.mapEntries` and `helpers.retainedSize`. `mode: "describe_env"` prints the full helper surface and its gotchas.
+The escape hatch when no fixed-shape tool matches the question. It runs JavaScript against the loaded snapshot with access to `snapshot`, `utils` and `helpers`; assign the answer to `result`, or `return` it at the top level. `node.references` and `node.referrers` iterate lazily with `for…of` and also take the usual array methods (`.filter`, `.map`, `.find`, `.some`, `.length`, …), and `node.props` is `{name: node}` for an object's properties or a context's variables. The helpers are indexed and memoized per snapshot, for example `helpers.byClass`, `helpers.hasShape`, `helpers.rootPath`, `helpers.mapEntries` and `helpers.retainedSize`. `mode: "describe_env"` prints the full helper surface and its gotchas.
 
 - **`save_as`:** keeps a result set server-side, and `helpers.load(name)` reads it back in a later call. To compare two snapshots, save counts keyed by `helpers.stableKey` rather than node ids, and read them back with `{allowCrossSnapshot: true}`.
 - **`max_nodes`:** bounds a full-heap walk.
