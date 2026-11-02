@@ -1300,6 +1300,14 @@ export function registerLadderProbe(server: McpServer): void {
           number,
           {name: string; keys: string[]; body: number}
         >();
+        // Explanations repeated under every metric of one call (seven per
+        // battery) are said in full once, then shortened.
+        const said = new Set<string>();
+        const once = (key: string, full: string, short: string): string => {
+          if (said.has(key)) return short;
+          said.add(key);
+          return full;
+        };
         for (let mi = 0; mi < reportedCount; mi++) {
           const m = metricList[mi];
           const rungs = perMetric[mi];
@@ -1460,7 +1468,11 @@ export function registerLadderProbe(server: McpServer): void {
             lines.push(
               `**Rate: ${fit.slope >= 0 ? '+' : ''}${fit.slope.toFixed(3)} per cycle**, r2 = ${fit.r2.toFixed(4)}.` +
                 (droppedRepeatedX > 0
-                  ? ` _(fitted on ${fitXs.length} rung(s) at distinct cycle counts; ${droppedRepeatedX} rung(s) repeat a cycle count already present and are excluded from the fit and the verdict. Usually that is the settle rung — read it with \`memlab_settle_check\` — but a hand-supplied \`cycles_per_rung\` with a duplicate drops a DRIVEN rung the same way.)_`
+                  ? once(
+                      'fit',
+                      ` _(fitted on ${fitXs.length} rung(s) at distinct cycle counts; ${droppedRepeatedX} rung(s) repeat a cycle count already present and are excluded from the fit and the verdict. Usually that is the settle rung — read it with \`memlab_settle_check\` — but a hand-supplied \`cycles_per_rung\` with a duplicate drops a DRIVEN rung the same way.)_`,
+                      ` _(fitted on ${fitXs.length} rung(s); ${droppedRepeatedX} repeated-count rung(s) excluded, as above)_`,
+                    )
                   : ''),
             );
           } else {
@@ -1561,7 +1573,11 @@ export function registerLadderProbe(server: McpServer): void {
               }${
                 settleInFit
                   ? " ⚠️ **NOT excluded from the rate above**: this rung was listed in `paths` at a cycle count of its own, so the fit treated it as a driven rung. Remove it from `paths` and let `include_settle` append it, or give it the last driven rung's count in `cycles_per_rung`."
-                  : ' Excluded from the rate and the shape verdict: the settle drives no cycles.'
+                  : once(
+                      'settle-excluded',
+                      ' Excluded from the rate and the shape verdict: the settle drives no cycles.',
+                      '',
+                    )
               }`,
             );
           } else if (settleMissingPath != null) {
@@ -1576,7 +1592,11 @@ export function registerLadderProbe(server: McpServer): void {
           ) {
             lines.push(
               '',
-              '> ⚠️ **UNSETTLED** — this round captured no settle rung, so the rate above cannot be told apart from in-flight backlog. Re-drive with the runner default (`--settle-minutes 7`).',
+              once(
+                'unsettled',
+                '> ⚠️ **UNSETTLED** — this round captured no settle rung, so the rate above cannot be told apart from in-flight backlog. Re-drive with the runner default (`--settle-minutes 7`).',
+                '> ⚠️ **UNSETTLED** (no settle rung; see above).',
+              ),
             );
           }
           // `every`, not `Math.max(...) === 0`. Spreading an empty array
@@ -1629,7 +1649,8 @@ export function registerLadderProbe(server: McpServer): void {
           // LINEAR is the verdict most often read as "unbounded leak". Over a
           // ladder shorter than the app's retention window it is equally
           // consistent with a bounded working set.
-          if (/LINEAR/.test(verdictText)) {
+          if (/LINEAR/.test(verdictText) && !said.has('window')) {
+            said.add('window');
             lines.push('');
             lines.push(retentionWindowCaveat(ladderSpanS));
           }

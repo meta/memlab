@@ -536,6 +536,8 @@ Input:  { action?: "list"|"switch"|"unload", handle?, quiet?, suppress_suggestio
 Output: resident snapshots (active one marked), or switch/unload result
 ```
 
+A standing explanatory note (an italic or quoted paragraph) is printed in full the first time in a session and omitted after that, with a count of what was left out; `repeat_notes: true` prints them again. Within one `memlab_ladder_probe` call, the explanations that would repeat under every metric (how the fit treats a repeated cycle count, the settle exclusion, UNSETTLED, the retention-window caveat) are printed once.
+
 ### `memlab_batch`
 
 Runs several tools against ONE snapshot load and returns all their outputs together, so you don't pay the multi-minute parse on every call. Steps run in order against the resident snapshot, and each step sees earlier steps' side effects. Every step's tool name and arguments are validated before step 0 runs. The whole batch shares one wall-clock budget, so size `timeout_ms` for all of it.
