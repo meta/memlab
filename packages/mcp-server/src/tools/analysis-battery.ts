@@ -72,8 +72,66 @@ interface BatteryRun {
   totalSteps: number;
   doneSteps: number;
   currentTool: string | null;
+  /** Digest rows of each step finished so far, for a status poll mid-run. */
+  partial: Array<{tool: string; ms: number; digest: string[]}>;
   result: string | null;
   error: string | null;
+}
+
+/** Digest lines a RUNNING status reply quotes at most. */
+const MAX_PARTIAL_STATUS_LINES = 60;
+
+const PARTIAL_FILE = 'battery.partial.json';
+
+/**
+ * Rewrite `battery.partial.json` after a step, so the digest of the steps
+ * already done can be read while a slow step still runs. Atomic, and never
+ * fatal: the per-tool `.txt` files are the record.
+ */
+function writePartial(run: BatteryRun): void {
+  const file = path.join(run.outDir, PARTIAL_FILE);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify(
+        {
+          battery_id: run.id,
+          run_dir: run.runDir,
+          steps_processed: run.doneSteps,
+          steps_total: run.totalSteps,
+          updated_at: new Date().toISOString(),
+          steps: run.partial,
+        },
+        null,
+        2,
+      ),
+    );
+    fs.renameSync(tmp, file);
+  } catch {
+    fs.rmSync(tmp, {force: true});
+  }
+}
+
+/** The digest rows of the finished steps, newest last, capped. */
+function partialDigestText(run: BatteryRun): string {
+  const lines = run.partial.flatMap(p =>
+    p.digest.length > 0
+      ? [
+          `### ${p.tool} (${formatNumber(Math.round(p.ms / 1000))}s)`,
+          ...p.digest,
+        ]
+      : [],
+  );
+  if (lines.length === 0) return '';
+  const shown =
+    lines.length > MAX_PARTIAL_STATUS_LINES
+      ? [
+          `_… ${formatNumber(lines.length - MAX_PARTIAL_STATUS_LINES)} earlier line(s) in \`${PARTIAL_FILE}\`_`,
+          ...lines.slice(-MAX_PARTIAL_STATUS_LINES),
+        ]
+      : lines;
+  return `**Digest so far**\n\n${shown.join('\n')}\n\n`;
 }
 
 const batteries = new Map<string, BatteryRun>();
@@ -1309,6 +1367,7 @@ export function registerAnalysisBattery(server: McpServer): void {
           totalSteps: plan.length,
           doneSteps: 0,
           currentTool: null,
+          partial: [],
           result: null,
           error: null,
         };
@@ -1445,6 +1504,8 @@ export function registerAnalysisBattery(server: McpServer): void {
               if (d.length > 0) {
                 digestLines.push(`### ${stem}`, ...d, '');
               }
+              tracked.partial.push({tool: stem, ms, digest: d});
+              writePartial(tracked);
             }
           });
 
@@ -1666,6 +1727,7 @@ export function registerAnalysisBattery(server: McpServer): void {
         const doneFile = path.join(outDir, 'battery.done.json');
         const reportFile = path.join(outDir, 'battery.md');
         fs.rmSync(doneFile, {force: true});
+        fs.rmSync(path.join(outDir, PARTIAL_FILE), {force: true});
         const mark = (status: 'done' | 'failed', error?: string): void => {
           const finishedAt = Date.now();
           try {
@@ -1889,7 +1951,8 @@ export function registerAnalysisBattery(server: McpServer): void {
               ? `, now running \`${run.currentTool}\``
               : '') +
             `. Output so far is in \`${run.outDir}/\`.\n\n` +
-            `_Status as of ${statusTime()}; a reply that arrives late is stale, so call again. Pass \`wait_ms\` (up to ${MAX_STATUS_WAIT_MS}) to wait for it, or watch \`${path.join(run.outDir, 'battery.done.json')}\`, which is written last. Each completed tool has already written its full output to disk._`,
+            partialDigestText(run) +
+            `_Status as of ${statusTime()}; a reply that arrives late is stale, so call again. Pass \`wait_ms\` (up to ${MAX_STATUS_WAIT_MS}) to wait for it, or watch \`${path.join(run.outDir, 'battery.done.json')}\`, which is written last (\`${PARTIAL_FILE}\` holds the digest of each step as it finishes). Each completed tool has already written its full output to disk._`,
         );
       }
       if (run.error != null) {
