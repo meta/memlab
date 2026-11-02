@@ -229,6 +229,8 @@ memlab and the browser's own heap profiler read the same snapshot, but a few fig
 | Detachedness (`memlab_get_node`) | Detached flag | The snapshot's own three states: attached, detached, unknown. JS objects are always unknown. |
 | Default lists | Everything | `memlab_largest_objects` and several scans leave out engine-internal node types (arrays, code, native, synthetic) unless you ask for them by `node_type`. |
 
+Dev-only figures (the `Dev-only` column of `memlab_leak_report`, production-only totals in `memlab_explain_delta` and `memlab_dev_subtracted_delta`) leave out memory reachable only through a dev root or a dev edge. Dev edges include React `_debug*` fields, Fast Refresh registries and the React Compiler's dev hook-guard links: a compiler temporary `tN` holding a closure into an earlier context of the same scope, which a production compile never creates.
+
 On a minified build, variable names are mangled but record fields are not. A probe that returns -1 ("not found") at every rung, or a positive control whose edge is missing on a minified heap, is reported UNRESOLVED rather than FLAT or FAIL. A `map-size` positive control can declare `value_keys` (property names its values carry) so it is found by shape instead.
 
 ## Getting a Heap Snapshot

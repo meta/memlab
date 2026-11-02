@@ -375,7 +375,9 @@ figures are defined or grouped differently:
   code, native, synthetic) unless you ask for them by `node_type`.
 - **Production-only totals** leave out memory a development build holds only
   through a dev root or dev edge (React Fast Refresh registries, React
-  `_debug*` fields, devtools globals). `memlab_explain_delta` and
+  `_debug*` fields, devtools globals, and the React Compiler's dev hook-guard
+  links: a compiler temporary `tN` holding a closure into an earlier context
+  of the same scope). `memlab_explain_delta` and
   `memlab_ab_compare` report growth this way by default, with the raw figure
   beside it. On a dev build a single dev-only hash table can double in size
   partway through a run, and the raw total then grows by megabytes with no

@@ -488,6 +488,14 @@ const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
       max: 2,
     },
     {tool: /census_diff/, re: /^Totals:/, max: 4},
+    // The named dev-build patterns. A digest without them listed every row a
+    // dev-only chain pinned as a leak candidate, and the pattern was
+    // re-identified by hand from the per-tool file.
+    {
+      tool: /dev_artifacts/,
+      re: /^- `(react-compiler-hook-guard|owner-stack-event-path|devtools-console|fast-refresh-registry)`/,
+      max: 4,
+    },
     {tool: /cache_analysis/, re: /^\| @|dev-only/, max: 8},
     {tool: /stale_collections/, re: /^\| @/, max: 5},
     {tool: /growth_signals/, re: /^\| @/, max: 5},

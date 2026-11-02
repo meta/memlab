@@ -214,6 +214,46 @@ function propertyCellReason(edge: IHeapEdge, holder: IHeapNode): string | null {
   return null;
 }
 
+const COMPILER_TEMP_EDGE = /^t\d+$/;
+
+function scopeInfoOf(node: IHeapNode): IHeapNode | null {
+  for (const e of node.references) {
+    if (e.name_or_index === 'scope_info') return e.toNode;
+  }
+  return null;
+}
+
+/**
+ * A React Compiler DEV hook-guard link: a context variable named like a
+ * compiler temporary (`t0`..`tN`) holding a closure whose own context has the
+ * SAME scope as the holder. The dev compile wraps each hook call in a guard
+ * that context-allocates these temporaries, so every render's scope pins the
+ * previous render's through one of them; a production compile keeps them in
+ * registers and cannot form the chain. Measured: 2,355 linked contexts on a
+ * dev ladder, 0 on the production capture of the same interaction.
+ */
+function hookGuardLinkReason(
+  edge: IHeapEdge,
+  holder: IHeapNode,
+): string | null {
+  if (edge.type !== 'context') return null;
+  if (!COMPILER_TEMP_EDGE.test(String(edge.name_or_index))) return null;
+  const closure = edge.toNode;
+  if (closure.type !== 'closure') return null;
+  let next: IHeapNode | null = null;
+  for (const e of closure.references) {
+    if (e.name_or_index === 'context') {
+      next = e.toNode;
+      break;
+    }
+  }
+  if (next == null || next.id === holder.id) return null;
+  const a = scopeInfoOf(holder);
+  return a != null && scopeInfoOf(next)?.id === a.id
+    ? 'React Compiler DEV hook-guard link (compiler temporary into a context of the same scope)'
+    : null;
+}
+
 /** Why following `edge` from `holder` leaves production, or null. */
 export function devStepReason(
   edge: IHeapEdge,
@@ -224,6 +264,7 @@ export function devStepReason(
     devEdgeReason(edge.name_or_index, holder) ??
     devModules.get(edge.toNode.nodeIndex) ??
     propertyCellReason(edge, holder) ??
+    hookGuardLinkReason(edge, holder) ??
     null
   );
 }
