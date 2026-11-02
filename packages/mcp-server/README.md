@@ -212,6 +212,7 @@ To auto-approve the read-only tools while keeping the rest on manual approval, a
 - **Light loads.** `light: true` skips the dominator, retained-size and shortest-path pass, which roughly halves load time. Tools that need those values return an error that names the light-safe tools, instead of reporting zeros.
 - **Wall-clock guardrail.** Every tool call runs under a wall-clock budget: 90 s by default. You can override it per call with `timeout_ms`, or globally with `MEMLAB_ANALYSIS_TIMEOUT_MS`; a value of 0 or less disables it. When a heap scan runs past the budget, the tool returns a clean "analysis stopped" result instead of wedging the server. The dominator pass inside a load is synchronous, so the guardrail can't interrupt it. That is why the load ceilings exist.
 - **Background jobs.** A tool that would outlast the client's tool timeout can run in the background with `memlab_start_job`, or with `async: true` on `memlab_eval`, `memlab_eval_across` and `memlab_analysis_battery`. Collect the result with `memlab_job_status` or `memlab_battery_status`; both take `wait_ms`, capped at 90 s so the call stays under a 120 s client tool timeout, and a RUNNING reply says when it was written.
+- **Parameter names.** A parameter a tool does not declare is refused with the closest name it does, never dropped silently. A few names are read as the one they mean, and the reply says so: `path` and `file` as `file_path`, `snapshots` as `paths`, and on a tool that takes `baseline` and `target` but no `run_dir`, `run_dir` (with optional `rungs: [baseline, target]`, default first and last) as those two rung paths.
 - **Compressed snapshots.** Snapshots may be gzipped. The loader resolves `<file>.gz` transparently, decompressing into a private per-user cache directory under the OS temp dir.
 
 ## Reading the numbers
@@ -505,7 +506,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 Load and parse a `.heapsnapshot` (or `.heapsnapshot.gz`) file. Builds indexes, computes the dominator tree and retained sizes, and returns a quick diagnosis.
 
 - **Snapshot resolution:** `file_path` is a local absolute path. If only `<file_path>.gz` exists, it is decompressed automatically.
-- **Multiple snapshots:** pass `keep_previous: true` to keep earlier snapshots resident for diffing. Each gets a handle (`alias`, defaulting to the file name).
+- **Multiple snapshots:** pass `keep_previous: true` to keep earlier snapshots resident for diffing. Each gets a handle (`alias`, defaulting to the file name). When that handle is already taken (two rounds have a `rung_00_c0`), the new one becomes `name#2` and the reply names the resident snapshot that holds `name`.
 - **Size ceilings:** `max_file_size_mb`, `max_nodes` and `max_edges` override the defaults, and `force: true` bypasses the ceilings and the headroom guard (see [Prerequisites](#prerequisites)).
 - **Light loads:** `light: true` skips the dominator / retained-size / shortest-path pass.
 - **Session output controls:** `quiet` and `suppress_suggestions` trim repeated boilerplate.

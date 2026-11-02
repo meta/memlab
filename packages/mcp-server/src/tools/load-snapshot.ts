@@ -1671,6 +1671,13 @@ export function registerLoadSnapshot(server: McpServer): void {
         if (fetchedFrom) {
           lines.push(`Fetched from Manifold: ${fetchedFrom}`);
         }
+        const taken = /^(.*)#\d+$/.exec(meta.handle)?.[1];
+        if (taken != null) {
+          const holder = listSnapshots().find(m => m.handle === taken);
+          lines.push(
+            `⚠ Handle \`${taken}\` is taken${holder != null ? ` by \`${holder.filePath}\`` : ''}, so this snapshot is \`${meta.handle}\`. Pass a distinct \`alias\` (e.g. the round name plus the rung) to name it.`,
+          );
+        }
         if (evicted.length > 0) {
           lines.push(
             `⚠ Unloaded ${evicted.length} cold snapshot(s) to make room: ${evicted.join(', ')}`,

@@ -31,6 +31,7 @@ import {
 } from './analysis-budget.js';
 import {toolResult} from './utils.js';
 import {getRegisteredTool, recordToolHandler} from './tool-registry.js';
+import {loadRunManifest} from './run-manifest.js';
 
 type AnyFn = (...a: unknown[]) => unknown;
 
@@ -96,6 +97,83 @@ function closestKey(key: string, known: string[]): string | null {
 }
 
 /**
+ * Parameter names that mean another parameter: `{alias: canonical}`, applied
+ * when the tool declares the canonical name but not the alias. Six calls of one
+ * sweep failed on these alone.
+ */
+const PARAM_ALIASES: Record<string, string> = {
+  path: 'file_path',
+  file: 'file_path',
+  snapshots: 'paths',
+};
+
+/**
+ * Read aliased parameters as the ones they mean, and `run_dir` (+ `rungs`,
+ * default first and last) as `baseline`/`target` on a tool that takes those
+ * two but no `run_dir`. Returns the rewritten arguments and what was read how,
+ * or an error message.
+ */
+export function translateAliases(
+  args: unknown,
+  shape: Record<string, unknown>,
+): {args: Record<string, unknown>; notes: string[]} | {error: string} | null {
+  if (args == null || typeof args !== 'object' || Array.isArray(args)) {
+    return null;
+  }
+  const out = {...(args as Record<string, unknown>)};
+  const notes: string[] = [];
+  for (const [alias, canon] of Object.entries(PARAM_ALIASES)) {
+    if (!(alias in out) || alias in shape || !(canon in shape)) continue;
+    if (canon in out) continue;
+    out[canon] = out[alias];
+    delete out[alias];
+    notes.push(`\`${alias}\` as \`${canon}\``);
+  }
+  if (
+    typeof out.run_dir === 'string' &&
+    !('run_dir' in shape) &&
+    'baseline' in shape &&
+    'target' in shape &&
+    out.baseline == null &&
+    out.target == null
+  ) {
+    const runDir = out.run_dir;
+    const rungs =
+      !('rungs' in shape) && Array.isArray(out.rungs) ? out.rungs : [0, -1];
+    if (rungs.length !== 2 || !rungs.every(r => Number.isInteger(r))) {
+      return {
+        error:
+          '`rungs` with `run_dir` here must be two rung indexes, [baseline, target].',
+      };
+    }
+    let paths: string[];
+    try {
+      paths = loadRunManifest(runDir).paths;
+    } catch (e) {
+      return {
+        error: `\`run_dir\`: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+    const pick = (i: number) => paths[i < 0 ? paths.length + i : i];
+    const [b, t] = (rungs as number[]).map(pick);
+    if (b == null || t == null || b === t) {
+      return {
+        error: `\`run_dir\` ${runDir} has ${paths.length} rung(s); rungs ${JSON.stringify(rungs)} do not name two of them.`,
+      };
+    }
+    out.baseline = b;
+    out.target = t;
+    delete out.run_dir;
+    if (!('rungs' in shape)) delete out.rungs;
+    const base = (p: string) => p.replace(/^.*\//, '');
+    notes.push(
+      `\`run_dir\` as \`baseline: ${base(b)}\`, \`target: ${base(t)}\``,
+    );
+  }
+  return {args: out, notes};
+}
+
+/**
  * Refuse a tool call that passes a parameter the tool does not declare.
  *
  * This has to sit at the REQUEST level, not around the handler: the SDK builds
@@ -138,11 +216,27 @@ function installUnknownParamRejection(server: McpServer): void {
         const registered = getRegisteredTool(String(req.params.name));
         const shape = registered?.shape;
         if (shape != null) {
-          const unknown = unknownParamNames(req.params.arguments, shape);
+          const translated = translateAliases(req.params.arguments, shape);
+          if (translated != null && 'error' in translated) {
+            return toolResult(`⚠ ${translated.error}`);
+          }
+          const args = translated?.args ?? req.params.arguments;
+          const unknown = unknownParamNames(args, shape);
           if (unknown.length > 0) {
             return toolResult(
               unknownParamMessage(req.params.name, unknown, shape),
             );
+          }
+          if (translated != null && translated.notes.length > 0) {
+            const result = (await call(
+              {...req, params: {...req.params, arguments: args}},
+              extra,
+            )) as {content?: Array<{type: string; text?: string}>};
+            result?.content?.unshift({
+              type: 'text',
+              text: `_Read ${translated.notes.join('; ')}._`,
+            });
+            return result;
           }
         }
       }

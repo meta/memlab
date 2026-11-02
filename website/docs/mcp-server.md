@@ -464,6 +464,13 @@ figures are defined or grouped differently:
 
 ## Working with more than one snapshot
 
+A tool that compares two snapshots by `baseline` and `target` also takes a
+round's `run_dir` (and `rungs: [i, j]`, default the first and last rung), and
+`path` / `snapshots` are read as `file_path` / `paths`. Each load gets a handle,
+by default its file name; when that name is already resident, say two rounds
+that both have a `rung_00_c0`, the reply names the holder and gives the new one
+`rung_00_c0#2`, so pass `alias` to tell them apart.
+
 Every single-snapshot tool takes an optional `snapshot`: a resident handle, or
 a `.heapsnapshot` path that is loaded for that call only. The active snapshot
 does not move, so you can ask about two captures side by side without
