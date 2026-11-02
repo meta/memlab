@@ -720,10 +720,17 @@ const ENGINE_HELD_CLASS_RE =
 /** The tool a suggestion calls, and its class argument, as one stable key. */
 function suggestionKey(s: string): string {
   const tool = /`(memlab_\w+)\(/.exec(s)?.[1] ?? s.slice(0, 40);
-  const cls =
-    /class_(?:name|filter): "([^"]*)"/.exec(s)?.[1] ??
-    /top candidate `([^`]+)`/.exec(s)?.[1] ??
-    '';
+  // The class is a JSON string literal; read it whole, escapes included, so
+  // names that differ after an embedded quote stay apart.
+  const literal = /class_(?:name|filter): ("(?:[^"\\]|\\.)*")/.exec(s)?.[1];
+  let cls = /top candidate `([^`]+)`/.exec(s)?.[1] ?? '';
+  if (literal != null) {
+    try {
+      cls = String(JSON.parse(literal));
+    } catch {
+      cls = literal;
+    }
+  }
   return `next:${tool}:${cls}`;
 }
 
