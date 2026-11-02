@@ -343,7 +343,9 @@ function buildPlan(
     {tool: 'memlab_event_registry', args: {}},
     {tool: 'memlab_weakref_census', args: {}},
     {tool: 'memlab_global_variables', args: {}},
-    {tool: 'memlab_react_owners', args: {}},
+    // The tool needs a population; the update-record shape is the one a
+    // battery can name without knowing the app.
+    {tool: 'memlab_react_owners', args: {update_records: true}},
     {tool: 'memlab_dom_audit', args: {}},
     {tool: 'memlab_id_space_audit', args: {}},
     {tool: 'memlab_class_histogram', args: {limit: 40}},
