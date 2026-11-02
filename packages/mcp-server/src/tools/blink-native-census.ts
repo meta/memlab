@@ -203,6 +203,13 @@ function shapeOf(node: IHeapNode): string {
  * root through native objects only is browser-internal. `js: null` when the
  * walk gave up (hop limit or a loop) before either: unresolved, not native.
  */
+/**
+ * Browser objects that own what they hold whatever references them: a script
+ * holding `performance` (a minified build aliases it to a global) does not
+ * make the timeline's entries releasable.
+ */
+const BROWSER_OWNER_RE = /^(Performance|blink::WindowPerformance)$/;
+
 function classifyHolder(node: IHeapNode): {js: boolean | null; label: string} {
   let cur: IHeapNode | null = node;
   let firstNative: string | null = null;
@@ -214,6 +221,9 @@ function classifyHolder(node: IHeapNode): {js: boolean | null; label: string} {
     const from: IHeapNode = edge.fromNode;
     if (seen.has(from.id)) return {js: null, label: '(path loops)'};
     seen.add(from.id);
+    if (BROWSER_OWNER_RE.test(from.name) && from.type === 'native') {
+      return {js: false, label: from.name};
+    }
     if (isJsHolder(from)) {
       // Element indices are folded so one array holding many is one holder.
       const slot =
@@ -484,7 +494,10 @@ export function registerBlinkNativeCensus(server: McpServer): void {
                 ? `bounded: ${buf.what} (${capText}) — not a leak`
                 : `bounded: ${buf.what} (${capText}), but ${r.split.js}/${sampled} are JS-held (${r.split.topJs}) and outlive its eviction — trace one`;
           } else if (buf != null && r.split.js === 0) {
-            note = `${buf.what} past its ${capText} — something else holds them`;
+            note =
+              r.name === 'PerformanceResourceTiming'
+                ? `${buf.what} past its default ${capText}: the page raised it with \`performance.setResourceTimingBufferSize\`, or something else holds them`
+                : `${buf.what} past its ${capText} — something else holds them`;
           } else if (r.split.js > 0) {
             note =
               `mostly browser-held; ${r.split.js}/${sampled} via JS (${r.split.topJs})` +
