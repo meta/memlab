@@ -14,7 +14,8 @@ import {artifactLabel} from '../artifact-classes.js';
 import {computeHeapBudget, devFamilyBytes} from '../heap-budget.js';
 import type {IHeapSnapshot} from '@memlab/core';
 import {findDeclaredCollection} from './positive-controls.js';
-import {freedByReleasing} from './what-if.js';
+import {freedByReleasing, reachabilityOf} from './what-if.js';
+import type {Reachability} from './what-if.js';
 import {enumerateMapEntries, enumerateSetElements} from '../utils.js';
 import type {HeapBudget} from '../heap-budget.js';
 import {
@@ -126,36 +127,46 @@ export function registerArtifactBudget(server: McpServer): void {
         const scanBudgetMs = scaledTimeoutMs(largestMB);
 
         const declared = windows ?? [];
-        const measure = (snap: IHeapSnapshot) => ({
-          budget: computeHeapBudget(snap),
-          windows: declared.map(w => {
-            const hit = findDeclaredCollection(
-              snap,
-              w.edge,
-              w.value_keys ?? [],
-            );
-            if (hit == null) return null;
-            // The entries, not the collection: an entry with a cleanup timer
-            // has two holders, so the Map alone dominates almost nothing.
-            const values =
-              hit.node.name === 'Map'
-                ? enumerateMapEntries(hit.node).map(e => e.value)
-                : hit.node.name === 'Set'
-                  ? enumerateSetElements(hit.node)
-                  : [];
-            const ids = values.flatMap(v =>
-              v != null && v.type === 'object' ? [v.id] : [],
-            );
-            return {
-              bytes:
-                ids.length > 0
-                  ? freedByReleasing(snap, ids).bytes
-                  : hit.node.retainedSize,
-              entries: hit.entries,
-              byShape: hit.byShape,
-            };
-          }),
-        });
+        const measure = (snap: IHeapSnapshot) => {
+          // The unremoved reachability walk is the same for every window.
+          let reach: Reachability | null = null;
+          return {
+            budget: computeHeapBudget(snap),
+            windows: declared.map(w => {
+              const hit = findDeclaredCollection(
+                snap,
+                w.edge,
+                w.value_keys ?? [],
+              );
+              if (hit == null) return null;
+              // The entries, not the collection: an entry with a cleanup timer
+              // has two holders, so the Map alone dominates almost nothing.
+              const values =
+                hit.node.name === 'Map'
+                  ? enumerateMapEntries(hit.node).map(e => e.value)
+                  : hit.node.name === 'Set'
+                    ? enumerateSetElements(hit.node)
+                    : hit.node.references
+                        .filter(e => e.type === 'element')
+                        .map(e => e.toNode);
+              const ids = values.flatMap(v =>
+                v != null && v.type === 'object' ? [v.id] : [],
+              );
+              return {
+                bytes:
+                  ids.length > 0
+                    ? freedByReleasing(
+                        snap,
+                        ids,
+                        (reach ??= reachabilityOf(snap)),
+                      ).bytes
+                    : hit.node.retainedSize,
+                entries: hit.entries,
+                byShape: hit.byShape,
+              };
+            }),
+          };
+        };
         let base: ReturnType<typeof measure> | null = null;
         if (baseRung != null) {
           armScanBudgetFor(scanBudgetMs);
@@ -246,10 +257,13 @@ export function registerArtifactBudget(server: McpServer): void {
           const windowRows = declared.map((w, i) => {
             const b = base?.windows[i] ?? null;
             const t = measured.windows[i];
+            // Found one way on one rung and the other way on the other,
+            // the two ends may be different collections: not a delta.
+            const paired = b != null && t != null && b.byShape === t.byShape;
             return {
               name: w.name,
-              delta: b != null && t != null ? t.bytes - b.bytes : null,
-              entries: b != null && t != null ? t.entries - b.entries : null,
+              delta: paired ? t.bytes - b.bytes : null,
+              entries: paired ? t.entries - b.entries : null,
               byShape: t?.byShape === true,
             };
           });
@@ -274,7 +288,7 @@ export function registerArtifactBudget(server: McpServer): void {
           if (unresolved.length > 0) {
             lines.push(
               '',
-              `_Bounded window(s) not found in both rungs, so not subtracted: ${unresolved.map(r => `\`${r.name}\``).join(', ')}._`,
+              `_Bounded window(s) not found the same way (by edge, or by shape) in both rungs, so not subtracted: ${unresolved.map(r => `\`${r.name}\``).join(', ')}._`,
             );
           }
           if (totalDelta !== 0 && sameDirection && !shareIsMeaningful) {

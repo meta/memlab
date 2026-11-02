@@ -142,20 +142,34 @@ function reachableFrom(
  * nodes themselves included: what releasing those objects frees, however many
  * holders they have.
  */
+export interface Reachability {
+  roots: number[];
+  maxId: number;
+  before: Uint8Array;
+}
+
+/**
+ * Everything reachable from the GC roots with nothing removed. One walk per
+ * snapshot, shared by every `freedByReleasing` call against it.
+ */
+export function reachabilityOf(snapshot: IHeapSnapshot): Reachability {
+  const maxId = maxNodeId(snapshot);
+  const roots = findRootIds(snapshot);
+  return {
+    roots,
+    maxId,
+    before: reachableFrom(snapshot, roots, new Uint8Array(maxId + 1), maxId),
+  };
+}
+
 export function freedByReleasing(
   snapshot: IHeapSnapshot,
   ids: readonly number[],
+  reach: Reachability = reachabilityOf(snapshot),
 ): {bytes: number; nodes: number} {
-  const maxId = maxNodeId(snapshot);
+  const {roots, maxId, before} = reach;
   const removed = new Uint8Array(maxId + 1);
   for (const id of ids) if (id <= maxId) removed[id] = 1;
-  const roots = findRootIds(snapshot);
-  const before = reachableFrom(
-    snapshot,
-    roots,
-    new Uint8Array(maxId + 1),
-    maxId,
-  );
   const after = reachableFrom(snapshot, roots, removed, maxId);
   let bytes = 0;
   let nodes = 0;
