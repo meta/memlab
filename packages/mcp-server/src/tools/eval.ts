@@ -430,6 +430,26 @@ function baselineClassCounts(
   return counts;
 }
 
+/** Names people reach for, mapped to the helper that already does it. */
+const HELPER_SYNONYMS: Record<string, string> = {
+  groupBy: 'histogram',
+  countBy: 'histogram',
+  newestOf: 'newest',
+  closureInfo: 'sourceOf',
+  moduleOf: 'sourceOf',
+  scopeOf: 'contextOf',
+  scopeInfoOf: 'contextOf',
+  contextVars: 'ctxVars',
+  scopeVars: 'ctxVars',
+  findContextsWithVar: 'byContextVar',
+  contextsWithVar: 'byContextVar',
+  mapSize: 'arrayLen',
+  sizeOf: 'arrayLen',
+  retainer: 'firstRetainer',
+  holderOf: 'firstRetainer',
+  keysOf: 'props',
+};
+
 function wrapNode(node: unknown): unknown {
   if (node == null) return node;
   return new Proxy(node as object, {
@@ -3067,6 +3087,13 @@ export async function runEval({
       }
     };
 
+    // Entries of an Array, Map, Set or object — not backing-store slots,
+    // which count a Map's keys and values separately and include holes.
+    const arrayLen = (nodeOrId: number | {id: number}): number | null => {
+      const n = resolveNode(nodeOrId);
+      return n == null ? null : safeEntryCount(n);
+    };
+
     /**
      * The GC-root path for one node, as `retainer_trace` walks it — but callable
      * from inside an eval.
@@ -3251,6 +3278,54 @@ export async function runEval({
         }
       }
       return null;
+    };
+
+    // A scope's variables, read from a context or through a closure over it.
+    const ctxVars = (nodeOrId: number | {id: number}) => {
+      let n = resolveNode(nodeOrId);
+      if (n != null && n.type === 'closure') {
+        const c = contextOf(n) as {id: number} | null;
+        n = c == null ? null : resolveNode(c.id);
+      }
+      if (n == null) return null;
+      const out: Record<string, ReturnType<typeof nodeBrief>> = {};
+      for (const e of n.references) {
+        if (e.type !== 'context') continue;
+        const k = String(e.name_or_index);
+        if (!(k in out)) out[k] = nodeBrief(e.toNode);
+      }
+      return out;
+    };
+
+    // The holder one hop up on the node's shortest path to the roots, else
+    // its first other referrer; weak edges skipped unless `skipWeak: false`.
+    const firstRetainer = (
+      nodeOrId: number | {id: number},
+      opts: {skipWeak?: boolean; skipInternal?: boolean} = {},
+    ) => {
+      const n = resolveNode(nodeOrId);
+      if (n == null) return null;
+      const skipWeak = opts.skipWeak ?? true;
+      const ok = (e: IHeapEdge) =>
+        !(skipWeak && (e.type === 'weak' || e.type === 'shortcut')) &&
+        !(opts.skipInternal === true && e.type === 'internal');
+      let pick: IHeapEdge | null =
+        n.pathEdge != null && ok(n.pathEdge) ? n.pathEdge : null;
+      if (pick == null) {
+        for (const e of n.referrers) {
+          if (ok(e)) {
+            pick = e;
+            break;
+          }
+        }
+      }
+      return pick == null
+        ? null
+        : {
+            edge: String(pick.name_or_index),
+            edgeType: pick.type,
+            holder: nodeBrief(pick.fromNode),
+          };
     };
 
     /**
@@ -4553,6 +4628,9 @@ export async function runEval({
       allByEdgeName,
       aggregateRetained,
       contextOf,
+      ctxVars,
+      arrayLen,
+      firstRetainer,
       byContextSlot,
       byContextVar,
       contextSlotCensus,
@@ -4599,12 +4677,17 @@ export async function runEval({
       get(target, prop, receiver) {
         if (typeof prop === 'string' && !(prop in target)) {
           const lower = prop.toLowerCase();
-          const near = helperNames.filter(
-            n =>
-              n.toLowerCase().includes(lower) ||
-              lower.includes(n.toLowerCase()) ||
-              editDistanceWithin(n.toLowerCase(), lower, 2),
-          );
+          const synonym = HELPER_SYNONYMS[prop];
+          const near = [
+            ...(synonym != null ? [synonym] : []),
+            ...helperNames.filter(
+              n =>
+                n !== synonym &&
+                (n.toLowerCase().includes(lower) ||
+                  lower.includes(n.toLowerCase()) ||
+                  editDistanceWithin(n.toLowerCase(), lower, 2)),
+            ),
+          ];
           throw new Error(
             `helpers.${prop} does not exist.` +
               (near.length > 0
@@ -5206,12 +5289,17 @@ function lintEval(code: string, knownHelpers: string[] | null): string {
       } else {
         for (const name of unknown) {
           const lower = name.toLowerCase();
-          const near = table.filter(
-            n =>
-              n.toLowerCase().includes(lower) ||
-              lower.includes(n.toLowerCase()) ||
-              editDistanceWithin(n.toLowerCase(), lower, 2),
-          );
+          const synonym = HELPER_SYNONYMS[name];
+          const near = [
+            ...(synonym != null ? [synonym] : []),
+            ...table.filter(
+              n =>
+                n !== synonym &&
+                (n.toLowerCase().includes(lower) ||
+                  lower.includes(n.toLowerCase()) ||
+                  editDistanceWithin(n.toLowerCase(), lower, 2)),
+            ),
+          ];
           lines.push(
             `  - ❌ \`helpers.${name}\` does not exist.` +
               (near.length > 0
@@ -5378,7 +5466,10 @@ function describeEnvLines(): string[] {
     '',
     '## Age by node id (same isolate only)',
     "V8 gives a heap object an ODD snapshot id the first time the heap profiler sees it, and those ids only grow within one isolate (one tab session, no reload). So a larger id was first seen later. Across two rungs of one isolate, ids above the earlier rung's `maxObjectId()` were allocated after it. Within the objects first seen by ONE capture, id order is heap-walk order, not allocation order (unless allocation tracking was on). Native and synthetic nodes have EVEN ids derived from an address or hash: they carry no age, and a plain max over all ids picks one of them.",
-    '- `helpers.newest(ids, n = 10) -> ids[]` — the n largest heap-object ids, newest first (even ids are dropped).',
+    '- `helpers.newest(ids, n = 10) -> ids[]` — the n largest heap-object ids, newest first (even ids are dropped). `helpers.newest(helpers.byClass(name), n)` is the newest n of a class.',
+    "- `helpers.ctxVars(contextOrClosure) -> {variable: brief}` — a scope's captured variables, from a context or through a closure over it.",
+    "- `helpers.arrayLen(nodeOrId) -> number | null` — entries of an Array, Map, Set or object, not backing-store slots (a Map's table holds each key and value, so counting slots doubles it).",
+    '- `helpers.firstRetainer(nodeOrId, {skipWeak = true, skipInternal = false}) -> {edge, edgeType, holder} | null` — the holder one hop up on the shortest path to the roots, else the first other referrer.',
     "- `helpers.ageRank(nodeOrId) -> number | null` — the share of this snapshot's heap objects with a smaller id: 0 is the oldest, 1 the newest. Null for an even id or one not in this snapshot. The sorted id list is built once per snapshot.",
     '- `helpers.maxObjectId() -> id` — the largest heap-object id in this snapshot. To split a population into "existed at the earlier rung" and "allocated since", save it on the earlier rung (`helpers.save("maxId", helpers.maxObjectId())`) and compare ids against it on the later rung with `helpers.load("maxId", {allowCrossSnapshot: true})` — only for rungs of the same isolate.',
     '',

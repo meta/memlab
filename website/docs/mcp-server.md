@@ -319,6 +319,11 @@ top level. A node's `references` and `referrers` take array methods
 (`.filter`, `.map`, `.find`, `.length`, …) as well as `for…of`, and
 `node.props` maps an object's property names, or a context's variable names,
 to nodes.
+`helpers.ctxVars(closureOrContext)` lists a scope's variables,
+`helpers.arrayLen(node)` counts a collection's entries rather than its table
+slots, and `helpers.firstRetainer(node)` names the holder one hop up. Asking
+for a helper that does not exist suggests the one that does the job, such as
+`histogram` for `groupBy`.
 
 ### Saved probes
 
