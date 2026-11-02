@@ -271,6 +271,48 @@ export function hooksOfFiber(fiber: IHeapNode, maxHooks = 200): HookInfo[] {
  * reachable. Falls back to a `set*`/`on*` property holding it (a prop passed
  * down). `context` is the scope holding the variable, null for a property.
  */
+/**
+ * The fiber a state queue belongs to, read from its `dispatch` function.
+ *
+ * React creates the setter as `dispatchSetState.bind(null, fiber, queue)`, so
+ * the bound function's first argument IS the fiber. That is exact where the
+ * referrer walk (`nearestFiber`) is a search, and it is the only route when
+ * the hook list between the queue and its fiber is longer than the hop
+ * budget: those queues were reported as "(no fiber)" while their fiber was
+ * mounted.
+ */
+export function boundFiber(queue: IHeapNode): IHeapNode | null {
+  const dispatch = edgeTo(queue, 'dispatch');
+  if (dispatch == null || dispatch.type !== 'closure') return null;
+  const first =
+    edgeTo(dispatch, 'bound_argument_0') ??
+    (() => {
+      const args = edgeTo(dispatch, 'bindings');
+      if (args == null) return null;
+      for (const e of args.references) {
+        if (e.name_or_index === 0 || String(e.name_or_index) === '0') {
+          return e.toNode;
+        }
+      }
+      return null;
+    })();
+  return first != null && isFiberNode(first) ? first : null;
+}
+
+/**
+ * The function a fiber renders (`elementType`, unwrapped through memo /
+ * forwardRef / lazy), or null for a host or class component.
+ */
+export function fiberRenderFunction(fiber: IHeapNode): IHeapNode | null {
+  let node = edgeTo(fiber, 'elementType');
+  for (let depth = 0; node != null && depth <= 2; depth++) {
+    if (node.type === 'closure') return node;
+    if (node.type !== 'object') return null;
+    node = edgeTo(node, 'render') ?? edgeTo(node, 'type');
+  }
+  return null;
+}
+
 export function dispatchSetter(
   queue: IHeapNode,
 ): {variable: string; context: IHeapNode | null} | null {

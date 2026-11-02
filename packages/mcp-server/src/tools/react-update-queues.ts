@@ -10,7 +10,12 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
-import {describeQueue, dispatchSetter} from '../react-shapes.js';
+import {
+  boundFiber,
+  describeQueue,
+  dispatchSetter,
+  fiberRenderFunction,
+} from '../react-shapes.js';
 import {sourceOfNode} from './module-attribution.js';
 import {findModuleSpans} from './module-source.js';
 import {z} from 'zod';
@@ -113,6 +118,35 @@ export function setterLabel(
   return `(no fiber) ${setter.variable}${module != null ? ` @ ${module}` : ''}`;
 }
 
+/** The queue's fiber: exact from its setter's bound arguments, else searched. */
+function queueFiber(queue: IHeapNode, maxHops: number): IHeapNode | null {
+  return boundFiber(queue) ?? nearestFiber(queue, maxHops);
+}
+
+/**
+ * The component name, with its module when the name is minified.
+ *
+ * A production bundle names components `C`, `r`, `b`; several components in
+ * one table then share a name and none of them can be looked up. The module
+ * is read from the render function's scope chain, which minification keeps.
+ */
+function componentLabel(
+  snapshot: IHeapSnapshot,
+  fiber: IHeapNode,
+  moduleCache: Map<number, string | null>,
+): string | null {
+  const name = fiberComponentName(fiber);
+  if (name == null || name.replace(/[<>]/g, '').length > 2) return name;
+  const fn = fiberRenderFunction(fiber);
+  if (fn == null) return name;
+  let module = moduleCache.get(fn.id);
+  if (module === undefined) {
+    module = sourceOfNode(snapshot, fn).module;
+    moduleCache.set(fn.id, module);
+  }
+  return module != null ? `${name} [${module}]` : name;
+}
+
 function scanUpdateQueues(
   snapshot: IHeapSnapshot,
   maxChain: number,
@@ -135,6 +169,7 @@ function scanUpdateQueues(
   });
 
   const reports: QueueReport[] = [];
+  const moduleCache = new Map<number, string | null>();
   for (const queue of queues) {
     let head: IHeapNode | null = null;
     for (const edge of queue.references) {
@@ -145,8 +180,9 @@ function scanUpdateQueues(
     }
     if (head == null) continue;
     const {length, terminated} = chainLength(head, maxChain);
-    const fiber = nearestFiber(queue, maxHops);
-    const name = fiber != null ? fiberComponentName(fiber) : null;
+    const fiber = queueFiber(queue, maxHops);
+    const name =
+      fiber != null ? componentLabel(snapshot, fiber, moduleCache) : null;
     reports.push({
       queueId: queue.id,
       // With no fiber in reach, the setter's variable (and the module whose
@@ -626,8 +662,31 @@ export function registerReactUpdateQueues(server: McpServer): void {
         const details = shown.slice(0, 10).flatMap(b => {
           const queue = snapshot.getNodeById(b.example);
           if (queue == null) return [];
-          return [{b, d: describeQueue(queue, nearestFiber(queue, max_hops))}];
+          return [{b, d: describeQueue(queue, queueFiber(queue, max_hops))}];
         });
+        const bailouts = details.filter(({d}) => d.bailout === true);
+        if (bailouts.length > 0) {
+          lines.push(
+            `### Eager-state bailout sites (${bailouts.length})`,
+            '',
+            ...bailouts.map(({b, d}) => {
+              const queue = snapshot.getNodeById(b.example);
+              const setter = queue != null ? dispatchSetter(queue) : null;
+              const module =
+                setter?.context != null
+                  ? sourceOfNode(snapshot, setter.context).module
+                  : null;
+              const call = `${setter?.variable ?? 'setState'}(${d.lastRenderedState})`;
+              return (
+                `- \`eager-bailout: ${call} @ ${b.component}\`${module != null ? ` (setter in \`${module}\`)` : ''}: ` +
+                `${formatNumber(b.records)} pending record(s) on ${formatNumber(b.queues)} queue(s), every one the value already rendered.`
+              );
+            }),
+            '',
+            '_Each no-op `setState(sameValue)` that misses the eager-state fast path leaves its record on the queue until the component next renders. Guard the call site, or keep the value in a ref._',
+            '',
+          );
+        }
         if (details.length > 0) {
           lines.push(
             '### Hook detail (longest chain per component)',

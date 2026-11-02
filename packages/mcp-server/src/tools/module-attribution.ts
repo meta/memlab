@@ -14,6 +14,7 @@ import {sizeInput, withSizeHint} from '../byte-size.js';
 import {attributeByShortestPath} from '../heap-families.js';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
+import {moduleRecords, moduleScopes} from '../module-registry.js';
 import {
   errorResult,
   formatBytes,
@@ -131,17 +132,50 @@ export function findModuleScopes(snapshot: IHeapSnapshot): Map<number, string> {
       if (String(e.name_or_index) === 'factory') out.set(e.fromNode.id, name);
     }
   });
-  if (moduleByScopeInfo.size === 0) return out;
-  snapshot.nodes.forEach((node: IHeapNode) => {
-    if (!node.name.startsWith('system / Context')) return;
-    for (const e of node.references) {
-      if (String(e.name_or_index) !== 'scope_info') continue;
-      const mod = moduleByScopeInfo.get(e.toNode.id);
-      if (mod != null) out.set(node.id, mod);
-      break;
-    }
-  });
+  if (moduleByScopeInfo.size > 0) {
+    snapshot.nodes.forEach((node: IHeapNode) => {
+      if (!node.name.startsWith('system / Context')) return;
+      for (const e of node.references) {
+        if (String(e.name_or_index) !== 'scope_info') continue;
+        const mod = moduleByScopeInfo.get(e.toNode.id);
+        if (mod != null) out.set(node.id, mod);
+        break;
+      }
+    });
+  }
+  addExportScopes(snapshot, out);
   return out;
+}
+
+/**
+ * Module scopes reached through each registry record's exports, for the
+ * contexts the factory-name pass could not name.
+ *
+ * A minified bundle has no `$module_<Name>` closure, so that pass finds
+ * nothing there and every closure resolved to "no module". The registry
+ * records still carry the module name in `id`, and the functions a module
+ * exports close over its scope. A scope reached from two modules' exports
+ * (one re-exporting the other's function) is left unnamed rather than
+ * guessed.
+ */
+function addExportScopes(
+  snapshot: IHeapSnapshot,
+  out: Map<number, string>,
+): void {
+  const claims = new Map<number, string | null>();
+  for (const rec of moduleRecords(snapshot).values()) {
+    for (const scope of moduleScopes(rec)) {
+      if (out.has(scope.id)) continue;
+      const prev = claims.get(scope.id);
+      claims.set(
+        scope.id,
+        prev === undefined || prev === rec.name ? rec.name : null,
+      );
+    }
+  }
+  for (const [id, name] of claims) {
+    if (name != null) out.set(id, name);
+  }
 }
 
 interface ModuleStat {
@@ -359,7 +393,7 @@ export function registerModuleAttribution(server: McpServer): void {
                   `\`${r.edgeName}\` (${formatNumber(r.moduleByNodeId.size)} modules)`,
               )
               .join(', ') || 'none'
-          } · module scopes matched to a factory: ${formatNumber(scopes.size)}`,
+          } · module scopes named: ${formatNumber(scopes.size)}`,
           `Attributed to a module: **${formatBytes(attributed)}**` +
             (total > 0
               ? ` (${((attributed / total) * 100).toFixed(1)}%)`

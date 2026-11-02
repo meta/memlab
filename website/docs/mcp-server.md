@@ -393,6 +393,11 @@ figures are defined or grouped differently:
   UNRESOLVED, not FLAT or FAIL. A `map-size` positive control can declare
   `value_keys`, the property names its values carry, so it is still found by
   shape when the variable is renamed.
+- **Minified component names.** A production bundle names components `C`
+  or `r`. `memlab_react_update_queues` adds the module that defines the
+  render function (`C [ChatListItem.react]`), read from the module
+  registry, and takes a queue's fiber from its setter's bound arguments, so
+  a mounted component is not reported as "(no fiber)".
 - **Named dev-build patterns.** `memlab_dev_artifacts` tags the known
   development-build patterns it finds: `react-compiler-hook-guard`,
   `owner-stack-event-path`, `devtools-console` and `fast-refresh-registry`.
