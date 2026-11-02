@@ -1337,8 +1337,17 @@ export function registerLadderProbe(server: McpServer): void {
           const usableXs: number[] = [];
           const usableYs: number[] = [];
           const usableIsSettle: boolean[] = [];
+          // A -1 on SOME rungs is the probe losing its holder there, not a
+          // reading of -1: fitted, it drags the rate. Those rungs leave the
+          // fit; -1 at every rung is UNRESOLVED below.
+          const resolvedSomewhere = rungs.some(
+            r => r.value != null && r.value !== -1,
+          );
+          const lostAt = resolvedSomewhere
+            ? rungs.filter(r => r.value === -1).map(r => r.label)
+            : [];
           rungs.forEach((r, i) => {
-            if (r.value != null) {
+            if (r.value != null && !(resolvedSomewhere && r.value === -1)) {
               usableXs.push(xs[i]);
               usableYs.push(r.value);
               usableIsSettle.push(isSettleRungFilename(r.label));
@@ -1426,7 +1435,7 @@ export function registerLadderProbe(server: McpServer): void {
           );
           lines.push('');
           lines.push(
-            `**${formatNumber(first)} → ${formatNumber(last)}** (Δ ${delta >= 0 ? '+' : ''}${formatNumber(delta)}) across ${usable.length} usable rung(s).`,
+            `**${formatNumber(first)} → ${formatNumber(last)}** (Δ ${delta >= 0 ? '+' : ''}${formatNumber(delta)}) across ${usableXs.length} usable rung(s).`,
           );
           const expectation = judgeExpectation(headerYs, m.expect, m.cap);
           if (expectation != null) {
@@ -1504,6 +1513,11 @@ export function registerLadderProbe(server: McpServer): void {
               ? 'UNMEASURABLE AXIS — every rung shares one cycle count, so the series has no shape to read. The values above are real; the trend is not derivable from them.'
               : verdictFor(shapeYs, fit, axisAssumed, status);
           lines.push(`**Verdict:** ${verdictText}`);
+          if (lostAt.length > 0) {
+            lines.push(
+              `_Left out of the fit: ${formatNumber(lostAt.length)} rung(s) where the probe returned -1 (holder not found): ${lostAt.join(', ')}._`,
+            );
+          }
           // `fitYs.length > 0` is not decoration: the fit series is the
           // deduped driven rungs, and a ladder whose every rung failed to
           // measure leaves it empty. `base` is then undefined, `grew` is NaN,

@@ -127,6 +127,23 @@ function measure(
  * where the variable that binds the collection is renamed to one letter but
  * the records it holds keep their property names.
  */
+const SHAPE_SAMPLE = 5;
+
+/**
+ * Whether a collection's object values carry every one of `keys`, judged on
+ * several of them: one coincidental first value would otherwise hand a
+ * declaration to an unrelated, larger collection.
+ */
+function valuesCarry(
+  values: ReadonlyArray<IHeapNode | null>,
+  keys: readonly string[],
+): boolean {
+  const sample = values
+    .filter((v): v is IHeapNode => v != null && v.type === 'object')
+    .slice(0, SHAPE_SAMPLE);
+  return sample.length > 0 && sample.every(v => hasOwnProps(v, keys));
+}
+
 function largestByValueShape(
   snap: IHeapSnapshot,
   keys: readonly string[],
@@ -139,8 +156,7 @@ function largestByValueShape(
       node.name === 'Map'
         ? enumerateMapEntries(node).map(e => e.value)
         : enumerateSetElements(node);
-    const sample = values.find(v => v != null && v.type === 'object');
-    if (sample == null || !hasOwnProps(sample, keys)) return;
+    if (!valuesCarry(values, keys)) return;
     best = Math.max(best ?? 0, values.length);
   });
   return best;
@@ -178,8 +194,7 @@ export function findDeclaredCollection(
       node.name === 'Map'
         ? enumerateMapEntries(node).map(e => e.value)
         : enumerateSetElements(node);
-    const sample = values.find(v => v != null && v.type === 'object');
-    if (sample == null || !hasOwnProps(sample, valueKeys)) return;
+    if (!valuesCarry(values, valueKeys)) return;
     if (byShape == null || values.length > byShape.entries) {
       byShape = {node, entries: values.length};
     }
@@ -247,6 +262,9 @@ export function registerPositiveControls(server: McpServer): void {
         const found = controls.map(() => false);
         const countable = controls.map(() => false);
         const viaShape = controls.map(() => false);
+        // Not found on a rung that is NOT minified: a real miss, which a
+        // minified rung elsewhere in the ladder must not excuse.
+        const missedUnminified = controls.map(() => false);
         let minified = false;
         const unreadable: string[] = [];
         for (const rung of rungs) {
@@ -256,11 +274,13 @@ export function registerPositiveControls(server: McpServer): void {
           let values: Array<number | null>;
           try {
             values = await withSnapshotAt(rung.localPath, snap => {
-              if (minifiedSignal(snap).minified) minified = true;
+              const rungMinified = minifiedSignal(snap).minified;
+              if (rungMinified) minified = true;
               return controls.map((c, i) => {
                 if (misconfigured(c) != null) return 0;
                 const m = measure(snap, c);
                 if (m.found) found[i] = true;
+                else if (!rungMinified) missedUnminified[i] = true;
                 if (m.found && !m.uncountable) countable[i] = true;
                 if (m.byShape) viaShape[i] = true;
                 return m.value;
@@ -309,7 +329,12 @@ export function registerPositiveControls(server: McpServer): void {
           // could not LOCATE its collection, which is a different fix (declare
           // `value_keys`) from a control that was found and did not grow.
           const unresolved =
-            minified && anyRead && !unexercised && !idle && !found[i];
+            minified &&
+            anyRead &&
+            !unexercised &&
+            !idle &&
+            !found[i] &&
+            !missedUnminified[i];
           const bad =
             misconfigured(c) ??
             (!anyRead || unexercised || unresolved
