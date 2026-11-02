@@ -638,7 +638,47 @@ function textOf(result: unknown): string {
  * output and carries the argument already filled in. A suggestion that would
  * be true of any round is left out.
  */
-function nextCalls(runDir: string, perTool: Map<string, string>): string[] {
+const ENGINE_HELD_CLASS_RE =
+  /^(heap number|smi number|internal|system \/|\((object|unnamed|compiled|concatenated|sliced)|\(array\)|\(string\)|\(closure\)|(object|array) (elements|properties)$)/;
+
+/** The tool a suggestion calls, and its class argument, as one stable key. */
+function suggestionKey(s: string): string {
+  const tool = /`(memlab_\w+)\(/.exec(s)?.[1] ?? s.slice(0, 40);
+  const cls =
+    /class_(?:name|filter): "([^"]*)"/.exec(s)?.[1] ??
+    /top candidate `([^`]+)`/.exec(s)?.[1] ??
+    '';
+  return `next:${tool}:${cls}`;
+}
+
+/**
+ * Suggestions this sweep has not been given yet, plus a one-line pointer for
+ * the rest. The same five suggestions followed every battery of one sweep, so
+ * they stopped being read; a repeated one is still named, not dropped.
+ */
+export function freshSuggestions(
+  runDir: string,
+  suggestions: string[],
+): string[] {
+  const keys = suggestions.map(suggestionKey);
+  const {fresh} = splitRepeatedCaveats(runDir, keys);
+  const freshSet = new Set(fresh);
+  const out = suggestions.filter((_, i) => freshSet.has(keys[i]));
+  const repeated = suggestions
+    .filter((_, i) => !freshSet.has(keys[i]))
+    .map(sug => /`(memlab_\w+)\(/.exec(sug)?.[1] ?? 'a suggestion');
+  if (repeated.length > 0) {
+    out.push(
+      `_Also suggested in an earlier round of this sweep, unchanged: ${repeated.map(t => `\`${t}\``).join(', ')}._`,
+    );
+  }
+  return out;
+}
+
+export function nextCalls(
+  runDir: string,
+  perTool: Map<string, string>,
+): string[] {
   const out: string[] = [];
   // Resolved once, and used in every emitted call. The suggestions are meant
   // to be copy-pasted, and a relative `run_dir` resolves against whatever cwd
@@ -652,8 +692,11 @@ function nextCalls(runDir: string, perTool: Map<string, string>): string[] {
   //    only door, or one of several?
   const exampleId = /memlab_retainer_trace\(\{node_id: (\d+)\}\)/.exec(leak);
   if (exampleId != null && /LEAK candidate/.test(leak)) {
+    // The class rather than the node id keys novelty across rounds: the id
+    // changes every round while the candidate usually does not.
+    const top = /^\| ([^|]+?)\s+\|[^|]+\|.*LEAK candidate/m.exec(leak)?.[1];
     out.push(
-      `\`memlab_retainer_layers({node_id: ${exampleId[1]}})\` — the leak report names ONE retainer for the top candidate. ` +
+      `\`memlab_retainer_layers({node_id: ${exampleId[1]}})\` — the leak report names ONE retainer for the top candidate${top != null ? ` \`${top}\`` : ''}. ` +
         'A population with several independent holders does not shrink when the nearest one is fixed.',
     );
   }
@@ -677,10 +720,15 @@ function nextCalls(runDir: string, perTool: Map<string, string>): string[] {
     // a rendered table and a JS class name can legally contain a quote or a
     // backslash — raw interpolation then produced a call that does not
     // parse, which defeats the point of filling the argument in at all.
-    const heldRow = /^\|\s*([^|]+?)\s*\([a-z]+\)\s*\|.*\|\s*held\s+—/m.exec(
-      settle,
-    );
-    const heldClass = heldRow?.[1];
+    // The first HELD class a trace can say something about. `heap number`,
+    // backing stores and `system /` internals are held BY the growth, and a
+    // trace of one names its holder's holder at best: one sweep was told to
+    // trace `heap number` after every round.
+    const heldClass = [
+      ...settle.matchAll(/^\|\s*([^|]+?)\s*\([a-z ]+\)\s*\|.*\|\s*held\s+—/gm),
+    ]
+      .map(m => m[1])
+      .find(c => !ENGINE_HELD_CLASS_RE.test(c));
     out.push(
       heldClass != null
         ? `\`memlab_trace_all({class_name: ${JSON.stringify(heldClass)}, sample_target: 40})\` — ${held[1]} class(es) survived the settle, this one among them. ` +
@@ -1560,7 +1608,10 @@ export function registerAnalysisBattery(server: McpServer): void {
             // already stands on its own and a failed re-read is not worth
             // discarding it for.
           }
-          const suggestions = nextCalls(run_dir, perToolText);
+          const suggestions = freshSuggestions(
+            run_dir,
+            nextCalls(run_dir, perToolText),
+          );
           if (suggestions.length > 0) {
             lines.push('', '## Next', '');
             for (const sug of suggestions) lines.push(`- ${sug}`);

@@ -478,7 +478,9 @@ side, and `wait_for_rungs: "all"` queues a battery until the round's
 `round.done` marker appears. On an A/B round (run.json has an `ab` section
 and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one
-`memlab_ab_compare` verdict table. You can
+`memlab_ab_compare` verdict table. The digest ends with the next calls worth
+making for that round; a call already suggested in an earlier round of the
+same sweep, for the same class, is named once instead of repeated. You can
 give a ladder in three ways:
 
 - **`paths`:** an ordered list of snapshot files. Cycle counts are read from
