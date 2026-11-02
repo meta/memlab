@@ -1785,6 +1785,7 @@ export async function runEval({
   dry_run,
   max_result_bytes,
   ownsScanBudget,
+  onResult,
 }: {
   mode?: 'eval' | 'describe_env' | 'recipes' | 'list_saved' | 'lint';
   code?: string;
@@ -1808,6 +1809,8 @@ export async function runEval({
    * ONE MCP call and each re-arm would reset the shared wall clock.
    */
   ownsScanBudget?: boolean;
+  /** Receives the run's `result` value, for an in-process caller that tabulates it. */
+  onResult?: (value: unknown) => void;
 }): Promise<ReturnType<typeof toolResult>> {
   // Schema defaults are applied by the MCP layer for tool calls; a direct
   // caller (memlab_eval_across) gets them here so both paths behave alike.
@@ -4834,6 +4837,7 @@ export async function runEval({
       setSavedResult(save_as, sandbox.result, currentHandle);
     }
 
+    onResult?.(sandbox.result);
     const budgetBytes = max_result_bytes ?? MAX_OUTPUT_SIZE;
     const shrunk = shrinkResult(sandbox.result, budgetBytes);
 

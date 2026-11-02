@@ -324,6 +324,9 @@ to nodes.
 slots, and `helpers.firstRetainer(node)` names the holder one hop up. Asking
 for a helper that does not exist suggests the one that does the job, such as
 `histogram` for `groupBy`.
+`memlab_eval_across({run_dir, code, format: "table"})` runs one query on every
+rung; when each returns a number or a flat object of scalars, the answer is
+one key × rung table with a first-to-last Δ.
 
 ### Saved probes
 

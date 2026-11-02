@@ -16,7 +16,12 @@ import {
   listSnapshots,
   setCurrentSnapshot,
 } from '../heap-state.js';
-import {errorResult, toolResult} from '../utils.js';
+import {
+  errorResult,
+  formatNumber,
+  markdownTable,
+  toolResult,
+} from '../utils.js';
 import {runEval} from './eval.js';
 import {startJob} from './jobs.js';
 import {runWithReadScope} from '../read-scope.js';
@@ -67,6 +72,63 @@ function textOf(result: unknown): string {
     .map(c => (typeof c?.text === 'string' ? c.text : ''))
     .join('\n')
     .trim();
+}
+
+type Cell = string | number | boolean | null;
+
+/**
+ * A result as table cells: a scalar is one `result` cell, a flat object of
+ * scalars one cell per key. Anything nested is not tabulated (null).
+ */
+function tableCells(v: unknown): Record<string, Cell> | null {
+  const scalar = (x: unknown): x is Cell =>
+    x === null || ['string', 'number', 'boolean'].includes(typeof x);
+  if (scalar(v)) return {result: v};
+  if (v == null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const out: Record<string, Cell> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+    if (!scalar(x)) return null;
+    out[k] = x;
+  }
+  return out;
+}
+
+const MAX_TABLE_KEYS = 60;
+
+/** One key × rung table, with a first-to-last Δ for numeric rows; null if any rung is not tabular. */
+function pivotTable(
+  values: Array<{label: string; value: unknown; ok: boolean}>,
+): string | null {
+  if (values.length === 0) return null;
+  const rows = values as Array<{
+    label: string;
+    value: Record<string, Cell> | null;
+    ok: boolean;
+  }>;
+  if (rows.some(r => r.ok && r.value == null)) return null;
+  const keys = [...new Set(rows.flatMap(r => Object.keys(r.value ?? {})))];
+  if (keys.length === 0 || keys.length > MAX_TABLE_KEYS) return null;
+  const show = (c: Cell | undefined): string =>
+    c === undefined ? '—' : typeof c === 'number' ? formatNumber(c) : String(c);
+  const body = keys.map(k => {
+    const cells = rows.map(r => (r.ok ? r.value?.[k] : undefined));
+    const first = cells[0];
+    const last = cells[cells.length - 1];
+    const delta =
+      typeof first === 'number' && typeof last === 'number' && rows.length > 1
+        ? `${last - first >= 0 ? '+' : '−'}${formatNumber(Math.abs(last - first))}`
+        : '';
+    return [k, ...cells.map(show), ...(rows.length > 1 ? [delta] : [])];
+  });
+  return markdownTable(
+    [
+      '',
+      ...rows.map(r => (r.ok ? r.label : `${r.label} (error)`)),
+      ...(rows.length > 1 ? ['Δ'] : []),
+    ],
+    body,
+    new Set(Array.from({length: rows.length + 1}, (_, i) => i + 1)),
+  );
 }
 
 export function registerEvalAcross(server: McpServer): void {
@@ -140,6 +202,13 @@ export function registerEvalAcross(server: McpServer): void {
         .describe(
           'Run as a background job and return a job id at once; collect the result with `memlab_job_status({job_id, wait_ms})`. A full-heap walk over four multi-million-node rungs takes longer than the client tool timeout (~120 s), and a call that runs past it is backgrounded with no handle.',
         ),
+      format: z
+        .enum(['sections', 'table'])
+        .optional()
+        .default('sections')
+        .describe(
+          '"table": when every rung\'s `result` is a scalar or a flat object of scalars (e.g. `{maps: 12, entries: 340}`), print ONE key × rung table with a first-to-last Δ column instead of a block per rung. Results of any other shape fall back to "sections" (the default).',
+        ),
     },
     async args => {
       if (args.async === true) {
@@ -166,7 +235,9 @@ async function runEvalAcross({
   timeout_ms,
   max_nodes,
   stop_on_error,
+  format = 'sections',
 }: {
+  format?: 'sections' | 'table';
   code: string;
   handles?: string[];
   paths?: string[];
@@ -246,12 +317,23 @@ async function runEvalAcross({
     }
 
     const sections: string[] = [];
+    const values: Array<{label: string; value: unknown; ok: boolean}> = [];
+    // What a table would hide: a failed rung's error, a rung's warnings.
+    const notes: string[] = [];
     let failures = 0;
     for (const target of targets) {
       const header = `### ${target.label}`;
+      let value: unknown;
       try {
         const ran = await target.run(() =>
-          runEval({code, timeout_ms, max_nodes}),
+          runEval({
+            code,
+            timeout_ms,
+            max_nodes,
+            onResult: v => {
+              value = tableCells(v);
+            },
+          }),
         );
         if (!ran.ok) {
           sections.push(`${header}\n\n(could not switch to this snapshot)`);
@@ -261,7 +343,21 @@ async function runEvalAcross({
         // The section title names the snapshot; runEval's own header would
         // list every rung this call has read so far.
         const body = textOf(ran.value).replace(/^> Snapshots?: .*\n+/, '');
-        if (/^Error:/m.test(body)) failures++;
+        const failed = /^Error:/m.test(body);
+        if (failed) failures++;
+        values.push({
+          label: target.label.replace(/ — .*$/, ''),
+          value,
+          ok: !failed,
+        });
+        const warnings = body
+          .split('\n')
+          .filter(l => (failed ? /^Error:/.test(l) : /^[_>*\s]*⚠/.test(l)));
+        if (warnings.length > 0) {
+          notes.push(
+            `- \`${target.label.replace(/ — .*$/, '')}\`: ${warnings.join(' ')}`,
+          );
+        }
         sections.push(`${header}\n\n${body}`);
         if (stop_on_error && /^Error:/m.test(body)) {
           sections.push(
@@ -273,6 +369,9 @@ async function runEvalAcross({
         failures++;
         const msg = err instanceof Error ? err.message : String(err);
         sections.push(`${header}\n\nError: ${msg}`);
+        const label = target.label.replace(/ — .*$/, '');
+        values.push({label, value: undefined, ok: false});
+        notes.push(`- \`${label}\`: Error: ${msg}`);
         if (stop_on_error) {
           sections.push(
             '_Stopped here: stop_on_error is set and this rung failed._',
@@ -282,6 +381,7 @@ async function runEvalAcross({
       }
     }
 
+    const table = format === 'table' ? pivotTable(values) : null;
     const lines = [
       `## eval across ${targets.length} snapshot(s)`,
       '',
@@ -293,7 +393,17 @@ async function runEvalAcross({
             '',
           ]
         : []),
-      sections.join('\n\n'),
+      ...(table != null
+        ? [table, ...(notes.length > 0 ? ['', ...notes] : [])]
+        : [
+            ...(format === 'table'
+              ? [
+                  '_`format: "table"` needs every rung to return a scalar or a flat object of scalars; showing each rung instead._',
+                  '',
+                ]
+              : []),
+            sections.join('\n\n'),
+          ]),
       '',
       '_Values are comparable across rungs. Node ids are only comparable between captures of ONE isolate (same tab, no reload) — memlab_diff_snapshots detects that and matches objects by id; otherwise compare counts, sizes, shapes and string values._',
     ];
