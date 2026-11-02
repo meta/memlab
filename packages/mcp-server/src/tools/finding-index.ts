@@ -9,7 +9,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import {execSync} from 'child_process';
+import {exec} from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -1202,29 +1202,40 @@ export function possibleSameFinding(
  * a code-review CLI that prints whether a change landed); its first output
  * line is shown per diff. Unset, nothing is run.
  */
-function fixStatusLines(f: Finding): string[] {
+async function fixStatusLines(findings: readonly Finding[]): Promise<string[]> {
   const template = process.env.MEMLAB_FIX_STATUS_CMD;
-  if (template == null || template === '' || f.fixed_by_diffs == null) {
-    return [];
-  }
-  return f.fixed_by_diffs.slice(0, 4).flatMap(diff => {
-    // Only an identifier reaches the shell.
-    if (!/^[A-Za-z]{0,4}\d+$/.test(diff)) return [];
-    try {
-      const out = execSync(template.split('{diff}').join(diff), {
-        timeout: 8000,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-        .toString()
-        .trim()
-        .split('\n')[0]
-        ?.slice(0, 200);
-      return out ? [`- Fix status of ${diff}: ${out}`] : [];
-    } catch {
-      return [`- Fix status of ${diff}: (lookup failed)`];
-    }
-  });
+  if (template == null || template === '') return [];
+  // Only an identifier reaches the shell; each diff is looked up once.
+  const diffs = [
+    ...new Set(findings.flatMap(f => (f.fixed_by_diffs ?? []).slice(0, 4))),
+  ]
+    .filter(diff => /^[A-Za-z]{0,4}\d+$/.test(diff))
+    .slice(0, MAX_FIX_LOOKUPS);
+  // In parallel and off the event loop: a slow CLI costs one timeout, not
+  // one per diff, and other calls keep being served meanwhile.
+  const lines = await Promise.all(
+    diffs.map(
+      diff =>
+        new Promise<string | null>(resolve => {
+          exec(
+            template.split('{diff}').join(diff),
+            {timeout: 8000},
+            (err, stdout) => {
+              if (err != null) {
+                resolve(`- Fix status of ${diff}: (lookup failed)`);
+                return;
+              }
+              const out = String(stdout).trim().split('\n')[0]?.slice(0, 200);
+              resolve(out ? `- Fix status of ${diff}: ${out}` : null);
+            },
+          );
+        }),
+    ),
+  );
+  return lines.filter((l): l is string => l != null);
 }
+
+const MAX_FIX_LOOKUPS = 8;
 
 export function registerFindingIndex(server: McpServer): void {
   server.tool(
@@ -1959,10 +1970,11 @@ export function registerFindingIndex(server: McpServer): void {
               },
             ];
             saveIndex(indexPath, index);
+            const reconfirmStatus = await fixStatusLines([entry]);
             return result(
               [
                 `Re-confirmed \`${target}\` in ${round}${rate ? ` at ${rate}` : ''} — **${entry.status}**, \`${entry.signature}\`, first seen ${entry.first_seen_round}, now seen ${formatNumber(entry.seen_count)}×.`,
-                ...fixStatusLines(entry),
+                ...reconfirmStatus,
               ].join('\n'),
             );
           }
@@ -2154,6 +2166,7 @@ export function registerFindingIndex(server: McpServer): void {
               growing_classes,
               fingerprint,
             );
+            const nearStatus = await fixStatusLines(near.map(({f}) => f));
             const nearLines =
               near.length === 0
                 ? []
@@ -2168,7 +2181,7 @@ export function registerFindingIndex(server: McpServer): void {
                           ? `; fix: ${f.fixed_by_diffs.join(', ')}`
                           : ''),
                     ),
-                    ...near.flatMap(({f}) => fixStatusLines(f)),
+                    ...nearStatus,
                     '',
                     'A path that differs only in a class or an edge is usually the same finding seen again. If it is, attach this sighting with `action: "reconfirm", fingerprint: "<id>"` instead of recording a new entry.',
                   ];
@@ -2228,6 +2241,7 @@ export function registerFindingIndex(server: McpServer): void {
                   'allocated AND its code still exists — verify both before treating this as fixed ' +
                   'or planning an A/B against it.'
               : '';
+          const existingStatus = await fixStatusLines([existing]);
           const label =
             existing.status === 'artifact'
               ? `ARTIFACT — NOT PRODUCTION MEMORY (${existing.first_seen_round})`
@@ -2255,7 +2269,7 @@ export function registerFindingIndex(server: McpServer): void {
               existing.fixed_by_diffs.length > 0
                 ? `Fixed by: ${existing.fixed_by_diffs.join(', ')}${existing.verified_by_ab === true ? ' (A/B verified)' : ' (NOT A/B verified — the fix is a claim, not a measured result)'}`
                 : '',
-              ...fixStatusLines(existing),
+              ...existingStatus,
               existing.status === 'artifact'
                 ? '**Stop here — this population is NOT production memory.** A previous round ' +
                   'identified it as a measurement artifact (an automation bridge, a DevTools ' +
