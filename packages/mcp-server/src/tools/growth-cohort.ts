@@ -225,8 +225,9 @@ async function jointTable(opts: {
   top: number;
   baselinePath?: string;
 }): Promise<string[]> {
+  // NUL-joined: either label can contain any printable separator.
   const keyOf = (n: IHeapNode): string =>
-    `${referrerEdgeLabel(n)} · ${shapePrefixLabel(n, opts.shapeKeys)}`;
+    `${referrerEdgeLabel(n)}\u0000${shapePrefixLabel(n, opts.shapeKeys)}`;
   const groups = new Map<string, IHeapNode[]>();
   for (const n of opts.newest) {
     const k = keyOf(n);
@@ -249,19 +250,27 @@ async function jointTable(opts: {
   const totalNow = countIn(opts.all);
   let baseline: Map<string, number> | null = null;
   let baselineLabel = '';
+  let baselineError: string | null = null;
   if (opts.baselinePath != null && opts.baselinePath !== '') {
     // The header lists the files read; without this it names only the
     // baseline, as if the table were about it.
     const active = getFilePath();
     if (active != null) noteSnapshotRead(active);
-    const {rungs} = resolveRungs([opts.baselinePath]);
-    baselineLabel = rungs[0].label.replace(/^.*\//, '');
-    baseline = await withSnapshotAt(rungs[0].localPath, snap =>
-      countIn(selectNodes(snap, opts.selector)),
-    );
+    // A bad baseline costs the baseline columns, not the cohort table.
+    try {
+      const {rungs} = resolveRungs([opts.baselinePath]);
+      if (rungs.length === 0) throw new Error('no snapshot at that path');
+      baselineLabel = rungs[0].label.replace(/^.*\//, '');
+      baseline = await withSnapshotAt(rungs[0].localPath, snap =>
+        countIn(selectNodes(snap, opts.selector)),
+      );
+    } catch (err) {
+      baselineError = `\`baseline_path\` could not be read (${err instanceof Error ? err.message : String(err)}), so the table has no baseline columns.`;
+      baseline = null;
+    }
   }
   const rows = ranked.map(([key, nodes]) => {
-    const [holder, shapeText] = key.split(' · ');
+    const [holder, shapeText] = key.split('\u0000');
     const now = totalNow.get(key) ?? 0;
     return [
       holder,
@@ -285,6 +294,7 @@ async function jointTable(opts: {
     '',
     `_Shape = the first ${opts.shapeKeys} sorted property names. "now" counts the whole population with that key on this rung, not just the cohort${baseline != null ? `; "baseline" counts it on \`${baselineLabel}\`` : ''}._`,
     '',
+    ...(baselineError != null ? [`> ⚠️ ${baselineError}`, ''] : []),
     markdownTable(
       [
         'Referrer edge',
