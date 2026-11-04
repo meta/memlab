@@ -759,23 +759,27 @@ function exitStatus(results, flags) {
 async function callDirect(client, specs, flags) {
   const tools = flags.readOnly ? await client.listTools() : [];
   const results = [];
-  for (const spec of specs) {
-    const refusal = flags.readOnly ? readOnlyRefusal(tools, spec.tool) : null;
-    let result;
-    if (refusal != null) {
-      result = {tool: spec.tool, is_error: true, text: refusal};
-    } else {
-      // Sequential by construction: JSON-RPC over ONE stdio socket to a
-      // stateful server (a loaded snapshot). These cannot be parallelised —
-      // the server answers one request at a time and later calls depend on
-      // earlier ones.
-      // eslint-disable-next-line no-await-in-loop
-      const res = await client.callTool(spec.tool, spec.args ?? {});
-      result = {tool: spec.tool, is_error: res.isError, text: res.text};
-    }
-    results.push(result);
-    printResult(flags.json, result);
-  }
+  // One call at a time, chained: JSON-RPC over ONE stdio socket to a stateful
+  // server (a loaded snapshot). The server answers one request at a time and
+  // later calls depend on earlier ones.
+  await specs.reduce(
+    (prev, spec) =>
+      prev.then(async () => {
+        const refusal = flags.readOnly
+          ? readOnlyRefusal(tools, spec.tool)
+          : null;
+        let result;
+        if (refusal != null) {
+          result = {tool: spec.tool, is_error: true, text: refusal};
+        } else {
+          const res = await client.callTool(spec.tool, spec.args ?? {});
+          result = {tool: spec.tool, is_error: res.isError, text: res.text};
+        }
+        results.push(result);
+        printResult(flags.json, result);
+      }),
+    Promise.resolve(),
+  );
   if (flags.json) {
     console.log(JSON.stringify(results));
   }
