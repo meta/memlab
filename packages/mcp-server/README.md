@@ -154,6 +154,18 @@ memlab-cli stop --socket /tmp/memlab.sock
 
 `script` output is terse, with no "Next:" suggestions. Set `MEMLAB_CLI_VERBOSE=1` for the full text. The CLI runs `dist/index.js` next to itself unless `MEMLAB_MCP_SERVER` points at a different server entry point.
 
+Two flags, placed right after the command, are for a program that wraps the CLI:
+
+- **`--json`:** `doctor`, `list`, `call` and `script` print one JSON value. `call` and `script` print an array with one `{"tool", "is_error", "text"}` entry per call, where `is_error` is the tool's own report of a failure.
+- **`--read-only`:** `call` and `script` refuse every tool whose `readOnlyHint` annotation is not true (see [Tool Safety and Auto-Approval](#tool-safety-and-auto-approval)), answering that call with an error instead of running it.
+
+With either flag, the exit status is 1 when any call reports `is_error`, a refusal included. Without them it stays 0 for a tool error, as before, and is 1 only when the CLI could not run a call at all.
+
+```bash
+memlab-cli call --json --read-only memlab_load_snapshot '{"file_path":"/tmp/a.heapsnapshot"}' \
+                memlab_largest_objects '{"limit":5}'
+```
+
 ## Tool Safety and Auto-Approval
 
 By default, Claude Code prompts you to approve each MCP tool call. **No tool ever modifies the heap snapshot it analyzes.** Most tools are read-only analysis that is safe to auto-approve. The exceptions fall into two groups.

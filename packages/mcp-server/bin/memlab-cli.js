@@ -36,6 +36,10 @@
  * `call` / `script` with `--socket <path>` run against it, so loaded snapshots
  * survive between shell scripts. The server evicts cold snapshots itself when
  * its heap runs short.
+ *
+ * `--json` makes `doctor`, `list`, `call` and `script` print one JSON value,
+ * for a program that wraps this CLI. `--read-only` makes `call` and `script`
+ * refuse any tool whose `readOnlyHint` annotation is not true.
  */
 
 import {spawn} from 'child_process';
@@ -292,24 +296,28 @@ class Client {
     );
   }
 
+  /** The server's `serverInfo`. */
   async init() {
-    await this.request('initialize', {
+    const res = await this.request('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: {name: 'memlab-cli', version: '1.0'},
     });
     this.notify('notifications/initialized', {});
+    return res?.serverInfo ?? {};
   }
 
   async listTools() {
     return (await this.request('tools/list', {})).tools ?? [];
   }
 
+  /** `{text, isError}`; `isError` is the tool's own report of a failure. */
   async callTool(name, args) {
     const res = await this.request('tools/call', {name, arguments: args});
-    return (res.content ?? [])
+    const text = (res.content ?? [])
       .map(c => (c.type === 'text' ? c.text : JSON.stringify(c)))
       .join('\n');
+    return {text, isError: res.isError === true};
   }
 
   close() {
@@ -317,21 +325,46 @@ class Client {
   }
 }
 
-async function doctor(serverPath) {
+async function doctor(serverPath, json) {
   const major = Number(process.versions.node.split('.')[0]);
   const nodeBin = resolveNodeBin();
-  const lines = [
-    `cli node: ${process.versions.node}${major >= 18 ? '' : ' (below the >= 18 engine requirement)'}`,
-    `server node: ${nodeBin}${nodeBin === process.execPath && major < 18 ? ' — NO >= 18 interpreter found; the server will fail to load' : ''}`,
-  ];
-  lines.push(`server path: ${serverPath}`);
-  const exists = fs.existsSync(serverPath);
-  lines.push(`server present: ${exists ? 'yes' : 'NO'}`);
-  if (!exists) {
-    lines.push(
-      'Fix: build the package (`npm run build-pkg`), or set MEMLAB_MCP_SERVER to a built dist/index.js.',
-    );
+  const report = {
+    cli_node: process.versions.node,
+    server_node: nodeBin,
+    server_path: serverPath,
+    server_present: fs.existsSync(serverPath),
+    handshake: null,
+    server_version: null,
+    tools_registered: null,
+    fix: null,
+  };
+  const print = () => {
+    if (json) {
+      console.log(JSON.stringify(report));
+      return;
+    }
+    const lines = [
+      `cli node: ${report.cli_node}${major >= 18 ? '' : ' (below the >= 18 engine requirement)'}`,
+      `server node: ${nodeBin}${nodeBin === process.execPath && major < 18 ? ' — NO >= 18 interpreter found; the server will fail to load' : ''}`,
+      `server path: ${serverPath}`,
+      `server present: ${report.server_present ? 'yes' : 'NO'}`,
+    ];
+    if (report.handshake === 'OK') {
+      lines.push('handshake: OK');
+      lines.push(`server version: ${report.server_version ?? 'unknown'}`);
+      lines.push(`tools registered: ${report.tools_registered}`);
+    } else if (report.handshake != null) {
+      lines.push(`handshake: FAILED — ${report.handshake}`);
+    }
+    if (report.fix != null) {
+      lines.push(`Fix: ${report.fix}`);
+    }
     console.log(lines.join('\n'));
+  };
+  if (!report.server_present) {
+    report.fix =
+      'build the package (`npm run build-pkg`), or set MEMLAB_MCP_SERVER to a built dist/index.js.';
+    print();
     return 1;
   }
   // The decisive check: can the server actually start and answer? A corrupted
@@ -339,19 +372,19 @@ async function doctor(serverPath) {
   const client = new Client(serverPath);
   const timer = setTimeout(() => client.proc.kill('SIGKILL'), 60000);
   try {
-    await client.init();
+    const info = await client.init();
     const tools = await client.listTools();
-    lines.push(`handshake: OK`);
-    lines.push(`tools registered: ${tools.length}`);
-    console.log(lines.join('\n'));
+    report.handshake = 'OK';
+    report.server_version = info.version ?? null;
+    report.tools_registered = tools.length;
+    print();
     return 0;
   } catch (err) {
-    lines.push(`handshake: FAILED — ${err.message}`);
-    lines.push(
-      'Fix: check the install dir for build-errors.log / deps-check-errors.log, ' +
-        'then rebuild (the plugin start.sh does a clean rebuild when dependencies fail to load).',
-    );
-    console.log(lines.join('\n'));
+    report.handshake = err.message;
+    report.fix =
+      'check the install dir for build-errors.log / deps-check-errors.log, ' +
+      'then rebuild (the plugin start.sh does a clean rebuild when dependencies fail to load).';
+    print();
     return 1;
   } finally {
     clearTimeout(timer);
@@ -359,24 +392,71 @@ async function doctor(serverPath) {
   }
 }
 
-/** Remove `--socket <path>` from argv; the path, or null. */
-function takeSocketFlag(args) {
-  // Only right after the command, so a tool argument is never taken for it.
-  if (args[0] !== '--socket') {
-    if (args.includes('--socket')) {
-      throw new Error('--socket must come right after the command');
+/**
+ * Remove the leading `--socket <path>`, `--json` and `--read-only` flags from
+ * argv, in any order.
+ */
+function takeLeadingFlags(args) {
+  const flags = {socketPath: null, json: false, readOnly: false};
+  // Only right after the command, so a tool argument is never taken for one.
+  for (;;) {
+    if (args[0] === '--json') {
+      flags.json = true;
+      args.shift();
+    } else if (args[0] === '--read-only') {
+      flags.readOnly = true;
+      args.shift();
+    } else if (args[0] === '--socket') {
+      if (flags.socketPath != null) {
+        throw new Error('--socket given twice');
+      }
+      if (args[1] == null) {
+        throw new Error('--socket needs a path');
+      }
+      flags.socketPath = args[1];
+      args.splice(0, 2);
+    } else {
+      break;
     }
+  }
+  for (const flag of ['--socket', '--json', '--read-only']) {
+    if (args.includes(flag)) {
+      throw new Error(`${flag} must come right after the command`);
+    }
+  }
+  return flags;
+}
+
+/**
+ * The refusal `--read-only` gives instead of calling `tool`, or null when the
+ * tool may run. `tools` is the server's `tools/list` answer.
+ */
+function readOnlyRefusal(tools, tool) {
+  const def = tools.find(t => t.name === tool);
+  if (def == null) {
+    // The server reports an unknown tool itself.
     return null;
   }
-  const value = args[1];
-  if (value == null) {
-    throw new Error('--socket needs a path');
+  if (def.annotations?.readOnlyHint === true) {
+    return null;
   }
-  args.splice(0, 2);
-  if (args.includes('--socket')) {
-    throw new Error('--socket given twice');
+  return `${tool} is not a read-only tool, and --read-only refuses it`;
+}
+
+/**
+ * Print one answer as text, as it arrives. With `--json` nothing is printed
+ * here: the caller prints every answer as one array at the end.
+ */
+function printResult(json, result) {
+  if (json) {
+    return;
   }
-  return value;
+  console.log(`\n===== ${result.tool} =====`);
+  if (result.error != null) {
+    console.log(`ERROR: ${result.error}`);
+  } else {
+    console.log(result.text);
+  }
 }
 
 /**
@@ -402,9 +482,10 @@ async function enableTerse(client) {
 
 /**
  * One resident server behind a Unix socket. Each connection sends one
- * `{"tool":..,"args":{..}}` per line and gets one `{"text":..}` or
- * `{"error":..}` per line back; calls from all connections run one at a time,
- * in arrival order, because the server is stateful.
+ * `{"tool":..,"args":{..},"read_only":..}` per line and gets one
+ * `{"text":..,"is_error":..}` or `{"error":..}` per line back; calls from all
+ * connections run one at a time, in arrival order, because the server is
+ * stateful.
  */
 async function serve(serverPath, socketPath) {
   if (fs.existsSync(socketPath)) {
@@ -443,8 +524,10 @@ async function serve(serverPath, socketPath) {
     }
   }
   const client = new Client(serverPath);
+  let tools;
   try {
     await client.init();
+    tools = await client.listTools();
   } catch (err) {
     client.close();
     throw err;
@@ -493,7 +576,16 @@ async function serve(serverPath, socketPath) {
               );
               return;
             }
-            reply = {text: await client.callTool(spec.tool, spec.args ?? {})};
+            const refusal =
+              spec.read_only === true
+                ? readOnlyRefusal(tools, spec.tool)
+                : null;
+            if (refusal != null) {
+              reply = {text: refusal, is_error: true};
+            } else {
+              const res = await client.callTool(spec.tool, spec.args ?? {});
+              reply = {text: res.text, is_error: res.isError};
+            }
           } catch (err) {
             reply = {error: err?.message ?? String(err)};
           }
@@ -549,7 +641,7 @@ async function serve(serverPath, socketPath) {
 }
 
 /** Send tool calls to a `serve` process and print each answer in order. */
-async function callViaSocket(socketPath, specs) {
+async function callViaSocket(socketPath, specs, flags) {
   if (!fs.existsSync(socketPath)) {
     throw new Error(
       `no memlab-cli server at ${socketPath}; start one with \`memlab-cli serve --socket ${socketPath}\``,
@@ -608,7 +700,7 @@ async function callViaSocket(socketPath, specs) {
       waiters.push({resolve, reject});
       conn.write(JSON.stringify(spec) + '\n');
     });
-  let failed = 0;
+  const results = [];
   // One call at a time, chained, so output order matches the script and a
   // failing call does not race the next one.
   await specs.reduce(
@@ -616,23 +708,78 @@ async function callViaSocket(socketPath, specs) {
       prev.then(async () => {
         let reply;
         try {
-          reply = await send(spec);
+          reply = await send(
+            flags.readOnly && spec.tool != null
+              ? {...spec, read_only: true}
+              : spec,
+          );
         } catch (err) {
           // A lost connection fails every remaining call, each reported.
           reply = {error: err?.message ?? String(err)};
         }
-        console.log(`\n===== ${spec.tool ?? spec.cmd} =====`);
-        if (reply.error != null) {
-          failed++;
-          console.log(`ERROR: ${reply.error}`);
-        } else {
-          console.log(reply.text);
-        }
+        const result =
+          reply.error != null
+            ? {tool: spec.tool ?? spec.cmd, is_error: true, error: reply.error}
+            : {
+                tool: spec.tool ?? spec.cmd,
+                is_error: reply.is_error === true,
+                text: reply.text,
+              };
+        results.push(result);
+        printResult(flags.json, result);
       }),
     Promise.resolve(),
   );
   conn.end();
-  return failed > 0 ? 1 : 0;
+  if (flags.json) {
+    console.log(JSON.stringify(results));
+  }
+  return exitStatus(results, flags);
+}
+
+/**
+ * 1 when a call never reached the server. With `--json` or `--read-only`, also
+ * 1 when any call reports `is_error` (a refusal included), so a wrapper can
+ * trust the exit status. Without either flag a tool error still exits 0, which
+ * scripts written before the flags rely on: a nonzero `script` reads as a
+ * failed run to them.
+ */
+function exitStatus(results, flags) {
+  if (results.some(r => r.error != null)) {
+    return 1;
+  }
+  const strict = flags.json || flags.readOnly;
+  return strict && results.some(r => r.is_error) ? 1 : 0;
+}
+
+/**
+ * Run `specs` in the session `client` holds; one result per spec. The exit
+ * status, as exitStatus() decides it.
+ */
+async function callDirect(client, specs, flags) {
+  const tools = flags.readOnly ? await client.listTools() : [];
+  const results = [];
+  for (const spec of specs) {
+    const refusal = flags.readOnly ? readOnlyRefusal(tools, spec.tool) : null;
+    let result;
+    if (refusal != null) {
+      result = {tool: spec.tool, is_error: true, text: refusal};
+    } else {
+      // Sequential by construction: JSON-RPC over ONE stdio socket to a
+      // stateful server (a loaded snapshot). These cannot be parallelised —
+      // the server answers one request at a time and later calls depend on
+      // earlier ones.
+      // eslint-disable-next-line no-await-in-loop
+      const res = await client.callTool(spec.tool, spec.args ?? {});
+      result = {tool: spec.tool, is_error: res.isError, text: res.text};
+    }
+    results.push(result);
+    printResult(flags.json, result);
+  }
+  if (flags.json) {
+    console.log(JSON.stringify(results));
+  }
+  return exitStatus(results, flags);
 }
 
 function readScript(file) {
@@ -661,7 +808,8 @@ function readScript(file) {
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const serverPath = resolveServerPath();
-  const socketPath = takeSocketFlag(rest);
+  const flags = takeLeadingFlags(rest);
+  const {socketPath} = flags;
 
   if (!cmd || cmd === '--help' || cmd === '-h') {
     console.log(
@@ -678,6 +826,11 @@ async function main() {
         '  call|script --socket <path> ...   run against a `serve` process (snapshots stay loaded)',
         '  stop --socket <path>        shut a `serve` process down',
         '',
+        'Flags, right after the command:',
+        '  --json                      doctor, list, call, script: print one JSON value',
+        '                              (call and script: [{"tool","is_error","text"}, ...])',
+        '  --read-only                 call, script: refuse tools not annotated readOnlyHint',
+        '',
         'Server is resolved from $MEMLAB_MCP_SERVER, else dist/index.js next to this script.',
       ].join('\n'),
     );
@@ -685,7 +838,7 @@ async function main() {
   }
 
   if (cmd === 'doctor') {
-    return doctor(serverPath);
+    return doctor(serverPath, flags.json);
   }
   if (cmd === 'serve') {
     if (socketPath == null) {
@@ -712,7 +865,7 @@ async function main() {
         }
         specs.push({tool: rest[i], args});
       }
-      return callViaSocket(socketPath, specs);
+      return callViaSocket(socketPath, specs, flags);
     }
     if (cmd === 'script') {
       if (rest[0] == null) {
@@ -720,10 +873,10 @@ async function main() {
           'usage: memlab-cli script --socket <path> <file.jsonl>',
         );
       }
-      return callViaSocket(socketPath, readScript(rest[0]));
+      return callViaSocket(socketPath, readScript(rest[0]), flags);
     }
     if (cmd === 'stop') {
-      return callViaSocket(socketPath, [{cmd: 'shutdown'}]);
+      return callViaSocket(socketPath, [{cmd: 'shutdown'}], flags);
     }
     throw new Error(`--socket works with call, script and stop, not ${cmd}`);
   }
@@ -732,8 +885,13 @@ async function main() {
   try {
     await client.init();
     if (cmd === 'list') {
-      for (const t of await client.listTools()) {
-        console.log(`${t.name}\t${(t.description ?? '').slice(0, 150)}`);
+      const tools = await client.listTools();
+      if (flags.json) {
+        console.log(JSON.stringify(tools));
+      } else {
+        for (const t of tools) {
+          console.log(`${t.name}\t${(t.description ?? '').slice(0, 150)}`);
+        }
       }
     } else if (cmd === 'schema') {
       const want = rest[0];
@@ -744,36 +902,22 @@ async function main() {
       }
       console.log(JSON.stringify(tool.inputSchema ?? {}, null, 2));
     } else if (cmd === 'call') {
+      const specs = [];
       for (let i = 0; i < rest.length; i += 2) {
-        const tool = rest[i];
-        const args = rest[i + 1] ? JSON.parse(rest[i + 1]) : {};
-        console.log(`\n===== ${tool} =====`);
-        // Sequential by construction: JSON-RPC over ONE stdio socket to a
-        // stateful server (a loaded snapshot). These cannot be parallelised —
-        // the server answers one request at a time and later calls depend on
-        // earlier ones.
-        // eslint-disable-next-line no-await-in-loop
-        console.log(await client.callTool(tool, args));
+        specs.push({
+          tool: rest[i],
+          args: rest[i + 1] ? JSON.parse(rest[i + 1]) : {},
+        });
       }
+      return await callDirect(client, specs, flags);
     } else if (cmd === 'script') {
-      const file = rest[0];
+      // Parsed before any call, so a bad line fails the script up front.
+      const specs = readScript(rest[0]);
       // A script is a whole investigation read by an agent, so explanatory
       // notes are cut to their first sentence for the session (repeats are
       // dropped by the server regardless). MEMLAB_CLI_VERBOSE=1 keeps them.
       await enableTerse(client);
-      // Sequential by construction: these are JSON-RPC calls over ONE stdio
-      // socket to a stateful server, so they cannot be parallelised — the next
-      // request depends on the previous one having been answered.
-
-      for (const spec of readScript(file)) {
-        console.log(`\n===== ${spec.tool} =====`);
-        // Sequential by construction: JSON-RPC over ONE stdio socket to a
-        // stateful server (a loaded snapshot). These cannot be parallelised —
-        // the server answers one request at a time and later calls depend on
-        // earlier ones.
-        // eslint-disable-next-line no-await-in-loop
-        console.log(await client.callTool(spec.tool, spec.args ?? {}));
-      }
+      return await callDirect(client, specs, flags);
     } else {
       console.error(`Unknown command: ${cmd}. Try --help.`);
       return 1;
@@ -784,13 +928,22 @@ async function main() {
   }
 }
 
-// Terminal by construction: both arms call process.exit, so there is nothing
-// left to chain and no rejection can escape.
+/**
+ * Exit once stdout has drained. Writes to a pipe are asynchronous, and
+ * process.exit() drops whatever the pipe has not taken yet, which cut a
+ * program reading the output off after the first 64 KB.
+ */
+function exitAfterFlush(code) {
+  process.stdout.write('', () => process.exit(code));
+}
+
+// Terminal by construction: both arms exit, so there is nothing left to chain
+// and no rejection can escape.
 // eslint-disable-next-line fb-www/promise-termination
 main().then(
-  code => process.exit(code ?? 0),
+  code => exitAfterFlush(code ?? 0),
   err => {
     console.error(err.message ?? String(err));
-    process.exit(1);
+    exitAfterFlush(1);
   },
 );
