@@ -43,7 +43,7 @@ export class NodeRecord implements IHeapNode {
     return utils.isStringNode(this);
   }
   set isString(b: boolean) {
-    throw new Error('NodeRecord.string cannot be assigned');
+    throw new Error('NodeRecord.isString cannot be assigned');
   }
   set snapshot(s: IHeapSnapshot) {
     throw new Error('NodeRecord.snapshot cannot be assigned.');
@@ -103,10 +103,10 @@ export class NodeRecord implements IHeapNode {
     throw new Error('NodeRecord.pathEdge cannot be read');
   }
   set dominatorNode(r: IHeapNode) {
-    throw new Error('NodeRecord.pathEdge cannot be assigned');
+    throw new Error('NodeRecord.dominatorNode cannot be assigned');
   }
   get dominatorNode(): IHeapNode {
-    throw new Error('NodeRecord.pathEdge cannot be read');
+    throw new Error('NodeRecord.dominatorNode cannot be read');
   }
   set location(r: IHeapLocation) {
     throw new Error('NodeRecord.location cannot be assigned');
@@ -124,11 +124,11 @@ export class NodeRecord implements IHeapNode {
   }
 
   getAnyReferrer(): Nullable<IHeapEdge> {
-    throw new Error('NodeRecord.getReferrer is not implemented');
+    throw new Error('NodeRecord.getAnyReferrer is not implemented');
   }
 
   getAnyReferrerNode(): Nullable<IHeapNode> {
-    throw new Error('NodeRecord.getReferrerNode is not implemented');
+    throw new Error('NodeRecord.getAnyReferrerNode is not implemented');
   }
 
   getReferrers(): IHeapEdge[] {
