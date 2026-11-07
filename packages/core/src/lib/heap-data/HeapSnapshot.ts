@@ -484,31 +484,28 @@ export default class HeapSnapshot implements IHeapSnapshot {
     const visited = new Uint8Array(this._nodeCount);
     const attached: number[] = [];
     const detached: number[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-
-    const setNodeDetachState = function (
+    const setNodeDetachState = (
       snapshot: RawHeapSnapshot,
       nodeIndex: number,
       detachedness: number,
-    ) {
+    ) => {
       if (visited[nodeIndex] === 1) {
         return;
       }
 
-      const nodePointer = nodeIndex * self._nodeFieldsCount;
+      const nodePointer = nodeIndex * this._nodeFieldsCount;
       // Do not propagate the state (and name change) through JavaScript.
       // From V8: Every entry point into embedder code is a node that knows
       // its own state. All embedder nodes have their node type set to native.
       if (
-        snapshot.nodes[nodePointer + self._nodeTypeOffset] !==
-        self._nodeNativeType
+        snapshot.nodes[nodePointer + this._nodeTypeOffset] !==
+        this._nodeNativeType
       ) {
         visited[nodeIndex] = 1;
         return;
       }
 
-      snapshot.nodes[nodePointer + self._nodeDetachednessOffset] = detachedness;
+      snapshot.nodes[nodePointer + this._nodeDetachednessOffset] = detachedness;
 
       if (detachedness === NodeDetachState.Attached) {
         attached.push(nodeIndex);
@@ -520,20 +517,20 @@ export default class HeapSnapshot implements IHeapSnapshot {
     };
 
     const hiddenEdgeTypes = [
-      self._edgeHiddenType,
-      self._edgeInvisibleType,
-      self._edgeWeakType,
+      this._edgeHiddenType,
+      this._edgeInvisibleType,
+      this._edgeWeakType,
     ];
     const filterEdge = function (edgeType: number) {
       return hiddenEdgeTypes.indexOf(edgeType) < 0;
     };
 
-    const propagate = function (
+    const propagate = (
       snapshot: RawHeapSnapshot,
       nodeIndex: number,
       detachedness: number,
-    ) {
-      self._iterateDirectChildren(nodeIndex, filterEdge, childNodeIndex =>
+    ) => {
+      this._iterateDirectChildren(nodeIndex, filterEdge, childNodeIndex =>
         setNodeDetachState(snapshot, childNodeIndex, detachedness),
       );
     };
