@@ -459,13 +459,6 @@ export function cachedModuleScopes(
   return m;
 }
 
-function edgeNamed(node: IHeapNode, name: string): IHeapNode | null {
-  for (const e of node.references) {
-    if (String(e.name_or_index) === name) return e.toNode;
-  }
-  return null;
-}
-
 export interface NodeSource {
   module: string | null;
   /** The closure (or context) the answer was read from. */
@@ -496,7 +489,7 @@ export function sourceOfNode(
     for (let i = 0; ctx != null && i < 64; i++) {
       const hit = scopes.get(ctx.id);
       if (hit != null) return hit;
-      ctx = edgeNamed(ctx, 'previous');
+      ctx = ctx.getReferenceNode('previous');
     }
     return null;
   };
@@ -509,11 +502,11 @@ export function sourceOfNode(
       const module =
         direct ??
         (isClosure
-          ? moduleOfContext(edgeNamed(cur, 'context'))
+          ? moduleOfContext(cur.getReferenceNode('context'))
           : moduleOfContext(cur));
       if (module != null || isClosure) {
-        const sfi = isClosure ? edgeNamed(cur, 'shared') : null;
-        const script = sfi != null ? edgeNamed(sfi, 'script') : null;
+        const sfi = isClosure ? cur.getReferenceNode('shared') : null;
+        const script = sfi != null ? sfi.getReferenceNode('script') : null;
         const loc = cur.location;
         return {
           module,

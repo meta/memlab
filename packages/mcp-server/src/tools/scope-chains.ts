@@ -68,13 +68,6 @@ export interface ScopeChainGroup {
   retained: number;
 }
 
-function ref(node: IHeapNode, name: string): IHeapNode | null {
-  for (const e of node.references) {
-    if (String(e.name_or_index) === name) return e.toNode;
-  }
-  return null;
-}
-
 /** Every same-ScopeInfo chain of at least `minLength` contexts, by scope. */
 export function scopeChains(
   snapshot: IHeapSnapshot,
@@ -87,7 +80,7 @@ export function scopeChains(
   const pointedAt = new Set<number>();
   snapshot.nodes.forEach((node: IHeapNode) => {
     if (!isContext(node)) return;
-    const info = ref(node, 'scope_info');
+    const info = node.getReferenceNode('scope_info');
     if (info == null) return;
     scopeOf.set(node.id, info.id);
   });
@@ -98,7 +91,7 @@ export function scopeChains(
       if (e.type !== 'context') continue;
       const closure = e.toNode;
       if (closure.type !== 'closure') continue;
-      const next = ref(closure, 'context');
+      const next = closure.getReferenceNode('context');
       if (next == null || next.id === node.id) continue;
       if (scopeOf.get(next.id) !== scope) continue;
       const list = links.get(node.id) ?? [];
