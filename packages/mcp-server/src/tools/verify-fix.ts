@@ -27,6 +27,11 @@ import {countEntries, parseLocator, resolvePath} from './collection-trend.js';
 import {resolveLadderPaths} from './ladder.js';
 import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
 import {fitSlope, rateVerdict} from '../slope-stats.js';
+import {
+  NOISE_FLOOR_MAX_AGE_DAYS,
+  readNoiseFloor,
+  recordNoiseFloor,
+} from '../noise-ledger.js';
 import type {SlopeFit} from '../slope-stats.js';
 
 const {utils: memlabUtils} = memlabCore;
@@ -212,6 +217,7 @@ export function registerVerifyFix(server: McpServer): void {
       'Compares RATES, not levels: a build difference, a warmer cache or a longer session all shift the absolute level, and only the slope per interaction says whether the thing still accumulates. Each arm therefore needs at least 2 rungs — a single snapshot per arm is refused rather than compared, because that comparison is confounded. ' +
       "Each rate is a least-squares slope over every rung, with a 95% interval from the residuals. The verdict is FIX CONFIRMED (the fixed arm's whole interval is at or under the residual rate expected_reduction allows), FIX FALLS SHORT (its whole interval is above it) or INCONCLUSIVE, with the reason: fewer than 3 rungs in an arm (a two-point slope has no error bar), a before arm whose own interval reaches zero, or an interval that crosses the threshold, in which case it also prints the largest reduction this run can confirm. More rungs on the same ladders narrow the interval; no extra ladders are needed. " +
       "Optional `before_repeat_paths`: a second, independently driven ladder of the UNFIXED build. Residuals within one ladder cannot see run-to-run drift; the two unfixed slopes can. Their spread widens the fixed arm's interval on both sides, and a spread as large as the reduction under test makes the verdict INCONCLUSIVE (run-to-run noise as large as the effect). Costs one more ladder parse, only when given. " +
+      'Optional `setup_name` (a name you choose for the app, build mode and machine, e.g. "example.com prod-like devbox-1"): with `before_repeat_paths`, the spread is recorded for that setup and metric; without, a spread recorded for it in the last 14 days is reused, so the extra ladder is paid once per setup rather than once per fix. ' +
       'Returns both series, both rates and intervals, the reduction and the verdict. Loads rungs transiently in LIGHT mode, one graph at a time.',
     {
       metric_kind: z
@@ -243,6 +249,12 @@ export function registerVerifyFix(server: McpServer): void {
         .describe(
           'Optional same-build check: ordered rungs of a SECOND, independently driven ladder of the UNFIXED build (a separate run, not more rungs of the same session), same cycles between rungs.',
         ),
+      setup_name: z
+        .string()
+        .optional()
+        .describe(
+          'Optional name for where the ladders were driven (app, build mode, machine). Records the run-to-run spread for it when `before_repeat_paths` is given, and reuses a recent one when it is not.',
+        ),
       cycles: z
         .number()
         .describe(
@@ -273,6 +285,7 @@ export function registerVerifyFix(server: McpServer): void {
       before_paths,
       after_paths,
       before_repeat_paths,
+      setup_name,
       cycles,
       expected_reduction,
       chain_edge,
@@ -342,7 +355,7 @@ export function registerVerifyFix(server: McpServer): void {
         const beforeRate = beforeFit.slope;
         const afterRate = afterFit.slope;
         const repeatFit = repeatArm ? armSlope(repeatArm.values, cycles) : null;
-        const repeatSpread = repeatFit
+        let repeatSpread = repeatFit
           ? Math.abs(repeatFit.slope - beforeRate)
           : 0;
 
@@ -435,6 +448,39 @@ export function registerVerifyFix(server: McpServer): void {
           return toolResult(lines.join('\n'), armsHeader);
         }
 
+        const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
+        const setupName = setup_name?.trim() || null;
+        if (setupName != null && repeatFit) {
+          const relative = repeatSpread / beforeRate;
+          const err = await recordNoiseFloor({
+            setup: setupName,
+            metric_kind,
+            locator,
+            relative_spread: relative,
+            recorded_at: new Date().toISOString(),
+          });
+          lines.push(
+            err == null
+              ? `- run-to-run spread recorded for setup "${setupName}": ${pct(relative)} of the before rate. Checks on this setup and metric reuse it for ${NOISE_FLOOR_MAX_AGE_DAYS} days.`
+              : `- run-to-run spread NOT recorded for setup "${setupName}": ${err}`,
+            '',
+          );
+        } else if (setupName != null) {
+          const floor = readNoiseFloor(setupName, metric_kind, locator);
+          if (floor != null) {
+            repeatSpread = floor.relative_spread * beforeRate;
+            lines.push(
+              `- run-to-run spread from the noise ledger for setup "${setupName}": ${pct(floor.relative_spread)} of the before rate (${fmtRate(repeatSpread)} per cycle here), recorded ${floor.recorded_at.slice(0, 10)}. The fixed arm's interval is widened by that on both sides.`,
+              '',
+            );
+          } else {
+            lines.push(
+              `- No run-to-run spread on record for setup "${setupName}" and this metric in the last ${NOISE_FLOOR_MAX_AGE_DAYS} days, so the interval covers scatter within each ladder only. Pass \`before_repeat_paths\` once to record one.`,
+              '',
+            );
+          }
+        }
+
         const reduction = (beforeRate - afterRate) / beforeRate;
         const v = rateVerdict(
           beforeFit,
@@ -448,7 +494,6 @@ export function registerVerifyFix(server: McpServer): void {
             : // Widened down to zero, not past it, unless the arm's own
               // interval already reached below zero.
               `${fmtRate(Math.max(afterFit.lo - repeatSpread, Math.min(afterFit.lo, 0)))} … ${fmtRate(afterFit.hi + repeatSpread)}, with the run-to-run spread`;
-        const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
         lines.push(
           `**Reduction: ${pct(reduction)}** of the before-rate (${fmtRate(beforeRate)} → ${fmtRate(afterRate)} per cycle), against an expected ${(expected_reduction * 100).toFixed(0)}%, so the fixed arm may keep at most ${fmtRate(v.threshold)} per cycle.`,
           '',

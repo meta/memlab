@@ -145,17 +145,21 @@ function reclaimStale(lock: string): boolean {
 }
 
 /**
- * Hold a cross-process lock around the ledger's read-modify-write: two servers
- * (a session's and a CLI's) recording at once would otherwise each write back
- * the ledger they read, and the last rename would drop the other's sightings.
+ * Hold a cross-process lock around a ledger file's read-modify-write: two
+ * servers (a session's and a CLI's) recording at once would otherwise each
+ * write back the ledger they read, and the last rename would drop the other's
+ * entries.
  *
  * Waits asynchronously, so a contended lock never blocks the server's event
  * loop. Reclaims only a lock older than LOCK_STALE_MS (its holder died), never
  * a fresh one just because this waiter ran out of patience; then it returns
- * false and the caller says the sightings were not recorded.
+ * false and the caller says the entries were not recorded.
  */
-async function withLedgerLock(fn: () => void): Promise<boolean> {
-  const lock = `${ledgerPath()}.lock`;
+export async function withFileLock(
+  file: string,
+  fn: () => void,
+): Promise<boolean> {
+  const lock = `${file}.lock`;
   fs.mkdirSync(path.dirname(lock), {recursive: true});
   const deadline = Date.now() + LOCK_WAIT_MS;
   // Who holds the lock: the release removes it only if it is still ours, in
@@ -212,7 +216,7 @@ export async function recordSightings(
   let writeError: string | null = null;
   let locked: boolean;
   try {
-    locked = await withLedgerLock(() => {
+    locked = await withFileLock(ledgerPath(), () => {
       const ledger = load(true);
       for (const {fingerprint, name, sighting} of entries) {
         const slot = (ledger.judges[fingerprint] ??= {name, sightings: []});
