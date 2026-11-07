@@ -30,7 +30,7 @@ import {
   pathsHeader,
 } from '../utils.js';
 import {isCheckpointRef, resolveCheckpointRef} from '../checkpoints.js';
-import {splitClassKey} from './sequence-analysis.js';
+import {isValueNamedStringClass, splitClassKey} from './sequence-analysis.js';
 import {
   churnObjects,
   classChurn,
@@ -60,15 +60,6 @@ function buildHistogram(snapshot: IHeapSnapshot): Map<string, ClassStats> {
     }
   });
   return map;
-}
-
-// Value-named string "classes" (literal values used as the class name, e.g.
-// "554", "1780525701808.81", "o:10,add") are noise in a diff (§10).
-function isValueNamedStringClass(type: string, name: string): boolean {
-  if (type !== 'string' && type !== 'concatenated string') return false;
-  if (name.length < 8) return true;
-  if (/^[\s\d.,:+-]*$/.test(name)) return true;
-  return false;
 }
 
 interface ResolvedSnapshot {

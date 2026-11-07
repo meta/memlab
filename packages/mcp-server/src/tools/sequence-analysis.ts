@@ -65,8 +65,8 @@ interface ClassStats {
 
 // A class key is "<type>::<name>". Value-named string "classes" (literal
 // values used as the name, e.g. "554", "1780525701808.81", "o:10,add") are
-// noise across a sequence — drop them like diff_snapshots does (§10).
-function isNoiseClass(type: string, name: string): boolean {
+// noise in a diff or across a sequence (§10); diff_snapshots drops them too.
+export function isValueNamedStringClass(type: string, name: string): boolean {
   if (type !== 'string' && type !== 'concatenated string') return false;
   if (name.length < 8) return true;
   if (/^[\s\d.,:+-]*$/.test(name)) return true;
@@ -370,7 +370,7 @@ export async function computeSequenceTrends(
       const sep = k.indexOf('::');
       const type = k.slice(0, sep);
       const name = k.slice(sep + 2);
-      if (!isNoiseClass(type, name)) keys.add(k);
+      if (!isValueNamedStringClass(type, name)) keys.add(k);
     }
   }
 
