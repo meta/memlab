@@ -69,7 +69,7 @@ MemLab found 46 leak(s)
 ```
 
 One way to reduce the verbosity is to apply a
-[leak filter](../api/core/src/interfaces/ILeakFilter) or use `--trace-object-size-above`.
+[leak filter](../api/core/src/interfaces/ILeakFilter.md) or use `--trace-object-size-above`.
 The following command shows only traces whose `retainedSize` is greater than `1MB`:
 ```bash
 memlab find-leaks --trace-object-size-above 1000000

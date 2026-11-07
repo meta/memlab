@@ -6,11 +6,11 @@ id: 'integration-and-file-structure'
 
 Setting up a continuous testing service to find memory leaks with memlab
 involves three steps:
- 1. Prepare [test scenarios](../api/core/src/interfaces/IScenario) that
+ 1. Prepare [test scenarios](../api/core/src/interfaces/IScenario.md) that
  cover the key interactions of the web app under test.
  2. Trigger test runs through the
 [memlab command line interface](../cli/CLI-commands.md#memlab-run) or
-through the [memlab API](../api/api/src/functions/run).
+through the [memlab API](../api/api/src/functions/run.md).
  3. Collect the memory leak results saved to disk.
 
 ## Write Test Scenarios
@@ -75,7 +75,7 @@ specified working directory, with the following directory structure:
 ```
 
 To read results, use the
-[built-in result reader](../api/api/src/classes/BrowserInteractionResultReader)
+[built-in result reader](../api/api/src/classes/BrowserInteractionResultReader.md)
 or write your own script or library if the test job is running on a different
 runtime.
 
@@ -97,4 +97,4 @@ result.cleanup();
 ```
 
 For more APIs on the built-in result reader, click
-[here](../api/api/src/classes/BrowserInteractionResultReader).
+[here](../api/api/src/classes/BrowserInteractionResultReader.md).

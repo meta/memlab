@@ -34,7 +34,7 @@ module.exports = { action, back, url };
 ```
 
 For more details, check out the
-[IScenario API doc](./api/core/src/interfaces/IScenario).
+[IScenario API doc](./api/core/src/interfaces/IScenario.md).
 :::note
 Feel free to save the scenario file anywhere. We will be running memlab
 with this file shortly.

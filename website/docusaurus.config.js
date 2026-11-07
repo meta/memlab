@@ -15,8 +15,9 @@ const config = {
   title: 'memlab',
   tagline:
     'Analyzes JavaScript heap and finds memory leaks in browser and node.js',
-  url: 'https://meta.github.io/',
+  url: 'https://meta.github.io',
   baseUrl: '/memlab/',
+  trailingSlash: true,
   organizationName: 'meta',
   projectName: 'memlab',
   onBrokenLinks: 'warn',
