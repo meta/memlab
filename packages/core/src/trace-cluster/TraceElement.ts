@@ -11,7 +11,6 @@
 import type {
   AnyRecord,
   AnyValue,
-  EdgeIterationCallback,
   IHeapEdge,
   IHeapLocation,
   IHeapNode,
@@ -58,10 +57,7 @@ export class NodeRecord implements IHeapNode {
   get references(): IHeapEdge[] {
     throw new Error('NodeRecord.references cannot be read');
   }
-  forEachReference(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _callback: EdgeIterationCallback,
-  ): void {
+  forEachReference(): void {
     throw new Error('NodeRecord.forEachReference is not implemented');
   }
   set referrers(r: IHeapEdge[]) {
@@ -76,10 +72,7 @@ export class NodeRecord implements IHeapNode {
   toStringNode(): IHeapStringNode {
     throw new Error('NodeRecord.toStringNode is not implemented');
   }
-  forEachReferrer(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _callback: EdgeIterationCallback,
-  ): void {
+  forEachReferrer(): void {
     throw new Error('NodeRecord.forEachReferrer is not implemented');
   }
   findAnyReference(): Nullable<IHeapEdge> {
@@ -122,57 +115,27 @@ export class NodeRecord implements IHeapNode {
     throw new Error('NodeRecord.location cannot be read');
   }
 
-  getReference(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeName: string | number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeType?: string,
-  ): Nullable<IHeapEdge> {
+  getReference(): Nullable<IHeapEdge> {
     throw new Error('NodeRecord.getReference is not implemented');
   }
 
-  getReferenceNode(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeName: string | number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeType?: string,
-  ): Nullable<IHeapNode> {
+  getReferenceNode(): Nullable<IHeapNode> {
     throw new Error('NodeRecord.getReferenceNode is not implemented');
   }
 
-  getAnyReferrer(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeName: string | number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeType?: string,
-  ): Nullable<IHeapEdge> {
+  getAnyReferrer(): Nullable<IHeapEdge> {
     throw new Error('NodeRecord.getReferrer is not implemented');
   }
 
-  getAnyReferrerNode(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeName: string | number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeType?: string,
-  ): Nullable<IHeapNode> {
+  getAnyReferrerNode(): Nullable<IHeapNode> {
     throw new Error('NodeRecord.getReferrerNode is not implemented');
   }
 
-  getReferrers(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeName: string | number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeType?: string,
-  ): IHeapEdge[] {
+  getReferrers(): IHeapEdge[] {
     throw new Error('NodeRecord.getReferrers is not implemented');
   }
 
-  getReferrerNodes(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeName: string | number,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _edgeType?: string,
-  ): IHeapNode[] {
+  getReferrerNodes(): IHeapNode[] {
     throw new Error('NodeRecord.getReferrerNodes is not implemented');
   }
 
