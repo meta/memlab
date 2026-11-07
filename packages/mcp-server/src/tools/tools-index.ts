@@ -339,7 +339,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_verify_fix',
-        'Did the fix work? Compares per-cycle growth RATES between a before ladder and an after ladder — from two sets of snapshot FILES, so no runtime gate is needed and an ungated or build-only fix is verified the same way. Each rate is a slope over every rung with a 95% interval, and the verdict is FIX CONFIRMED, FIX FALLS SHORT or INCONCLUSIVE (with the reason and the reduction the run could confirm).',
+        'Did the fix work? Compares per-cycle growth RATES between a before ladder and an after ladder — from two sets of snapshot FILES, so no runtime gate is needed and an ungated or build-only fix is verified the same way. Each rate is a slope over every rung with a 95% interval, and the verdict is FIX CONFIRMED, FIX FALLS SHORT or INCONCLUSIVE (with the reason and the reduction the run could confirm). `before_repeat_paths` adds a second ladder of the unfixed build, whose spread widens the interval.',
       ],
       [
         'memlab_ladder',

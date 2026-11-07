@@ -104,3 +104,24 @@ test('rateVerdict: two rungs, or a before arm not shown growing, decide nothing'
     'before_not_growing',
   );
 });
+
+test('rateVerdict: a run-to-run spread widens the after interval, and a large one decides nothing', () => {
+  const before = fitSlope(axis(4, 25), [100, 150, 200, 250]);
+  const after = fitSlope(axis(4, 25), [100, 101, 100, 101]);
+  // The threshold is 2 * 0.1 = 0.2/cycle and the removal under test 1.8/cycle.
+  const small = rateVerdict(before, after, 0.9, 0.1);
+  assert.equal(small.verdict, 'FIX_CONFIRMED');
+  const mid = rateVerdict(before, after, 0.9, 1);
+  assert.equal(mid.verdict, 'INCONCLUSIVE');
+  assert.equal(mid.reason, 'interval_crosses_threshold');
+  const big = rateVerdict(before, after, 0.9, 1.8);
+  assert.equal(big.reason, 'run_to_run_noise');
+});
+
+test('rateVerdict: with no spread, expected_reduction 0 still reaches a verdict', () => {
+  const before = fitSlope(axis(4, 25), [100, 150, 200, 250]);
+  const after = fitSlope(axis(4, 25), [100, 101, 100, 101]);
+  const v = rateVerdict(before, after, 0, 0);
+  assert.equal(v.verdict, 'FIX_CONFIRMED');
+  assert.equal(v.reason, null);
+});

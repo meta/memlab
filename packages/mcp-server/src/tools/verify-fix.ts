@@ -211,6 +211,7 @@ export function registerVerifyFix(server: McpServer): void {
       'Note "retained_size" forces a FULL parse of every rung on both arms because retained sizes need the dominator pass; the other metrics load LIGHT. ' +
       'Compares RATES, not levels: a build difference, a warmer cache or a longer session all shift the absolute level, and only the slope per interaction says whether the thing still accumulates. Each arm therefore needs at least 2 rungs — a single snapshot per arm is refused rather than compared, because that comparison is confounded. ' +
       "Each rate is a least-squares slope over every rung, with a 95% interval from the residuals. The verdict is FIX CONFIRMED (the fixed arm's whole interval is at or under the residual rate expected_reduction allows), FIX FALLS SHORT (its whole interval is above it) or INCONCLUSIVE, with the reason: fewer than 3 rungs in an arm (a two-point slope has no error bar), a before arm whose own interval reaches zero, or an interval that crosses the threshold, in which case it also prints the largest reduction this run can confirm. More rungs on the same ladders narrow the interval; no extra ladders are needed. " +
+      "Optional `before_repeat_paths`: a second, independently driven ladder of the UNFIXED build. Residuals within one ladder cannot see run-to-run drift; the two unfixed slopes can. Their spread widens the fixed arm's interval on both sides, and a spread as large as the reduction under test makes the verdict INCONCLUSIVE (run-to-run noise as large as the effect). Costs one more ladder parse, only when given. " +
       'Returns both series, both rates and intervals, the reduction and the verdict. Loads rungs transiently in LIGHT mode, one graph at a time.',
     {
       metric_kind: z
@@ -236,6 +237,12 @@ export function registerVerifyFix(server: McpServer): void {
       after_paths: z
         .array(z.string())
         .describe('Ordered rungs of the FIXED arm, oldest first.'),
+      before_repeat_paths: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Optional same-build check: ordered rungs of a SECOND, independently driven ladder of the UNFIXED build (a separate run, not more rungs of the same session), same cycles between rungs.',
+        ),
       cycles: z
         .number()
         .describe(
@@ -265,6 +272,7 @@ export function registerVerifyFix(server: McpServer): void {
       locator,
       before_paths,
       after_paths,
+      before_repeat_paths,
       cycles,
       expected_reduction,
       chain_edge,
@@ -273,16 +281,23 @@ export function registerVerifyFix(server: McpServer): void {
       try {
         const before = resolveLadderPaths(before_paths).paths;
         const after = resolveLadderPaths(after_paths).paths;
+        const repeatPaths = before_repeat_paths
+          ? resolveLadderPaths(before_repeat_paths).paths
+          : null;
         // Name BOTH arms: this tool never reads the resident snapshot, and a
         // fix-validation result labelled with an unrelated capture is the
         // worst place to leave a reader guessing which build was measured.
         const armsHeader = pathsHeader([
           ...before.map(p => `before:${p.replace(/^.*\//, '')}`),
           ...after.map(p => `after:${p.replace(/^.*\//, '')}`),
+          ...(repeatPaths ?? []).map(p => `repeat:${p.replace(/^.*\//, '')}`),
         ]);
         for (const [label, arm] of [
           ['before_paths', before],
           ['after_paths', after],
+          ...(repeatPaths
+            ? [['before_repeat_paths', repeatPaths] as const]
+            : []),
         ] as const) {
           if (arm.length < 2) {
             return errorResult(
@@ -312,10 +327,24 @@ export function registerVerifyFix(server: McpServer): void {
           max_file_size_mb,
         );
 
+        const repeatArm = repeatPaths
+          ? await measureArm(
+              repeatPaths,
+              metric_kind,
+              locator,
+              chain_edge,
+              max_file_size_mb,
+            )
+          : null;
+
         const beforeFit = armSlope(b.values, cycles);
         const afterFit = armSlope(a.values, cycles);
         const beforeRate = beforeFit.slope;
         const afterRate = afterFit.slope;
+        const repeatFit = repeatArm ? armSlope(repeatArm.values, cycles) : null;
+        const repeatSpread = repeatFit
+          ? Math.abs(repeatFit.slope - beforeRate)
+          : 0;
 
         // Byte-valued metrics read as nonsense in raw counts — "1162420" is not
         // a number anyone checks, "1.1 MB" is.
@@ -368,12 +397,34 @@ export function registerVerifyFix(server: McpServer): void {
                 fmtRate(afterRate),
                 fmtInterval(afterFit),
               ],
+              ...(repeatArm && repeatFit
+                ? [
+                    [
+                      'before, repeated',
+                      String(repeatArm.values.length),
+                      fmtVal(repeatArm.values[0]),
+                      fmtVal(repeatArm.values[repeatArm.values.length - 1]),
+                      fmtVal(
+                        repeatArm.values[repeatArm.values.length - 1] -
+                          repeatArm.values[0],
+                      ),
+                      fmtRate(repeatFit.slope),
+                      fmtInterval(repeatFit),
+                    ],
+                  ]
+                : []),
             ],
             new Set([1, 2, 3, 4, 5]),
           ),
           '',
           `- before series: ${b.values.map(v => fmtVal(v)).join(' → ')}`,
           `- after series: ${a.values.map(v => fmtVal(v)).join(' → ')}`,
+          ...(repeatArm
+            ? [
+                `- repeat series: ${repeatArm.values.map(v => fmtVal(v)).join(' → ')}`,
+                `- run-to-run spread: the two unfixed ladders differ by ${fmtRate(repeatSpread)} per cycle; the fixed arm's interval is widened by that on both sides.`,
+              ]
+            : []),
           '',
         ];
 
@@ -385,7 +436,18 @@ export function registerVerifyFix(server: McpServer): void {
         }
 
         const reduction = (beforeRate - afterRate) / beforeRate;
-        const v = rateVerdict(beforeFit, afterFit, expected_reduction);
+        const v = rateVerdict(
+          beforeFit,
+          afterFit,
+          expected_reduction,
+          repeatSpread,
+        );
+        const judged =
+          afterFit.lo == null || afterFit.hi == null || repeatSpread === 0
+            ? fmtInterval(afterFit)
+            : // Widened down to zero, not past it, unless the arm's own
+              // interval already reached below zero.
+              `${fmtRate(Math.max(afterFit.lo - repeatSpread, Math.min(afterFit.lo, 0)))} … ${fmtRate(afterFit.hi + repeatSpread)}, with the run-to-run spread`;
         const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
         lines.push(
           `**Reduction: ${pct(reduction)}** of the before-rate (${fmtRate(beforeRate)} → ${fmtRate(afterRate)} per cycle), against an expected ${(expected_reduction * 100).toFixed(0)}%, so the fixed arm may keep at most ${fmtRate(v.threshold)} per cycle.`,
@@ -393,11 +455,11 @@ export function registerVerifyFix(server: McpServer): void {
         );
         if (v.verdict === 'FIX_CONFIRMED') {
           lines.push(
-            `✅ **FIX CONFIRMED** — the fixed arm's whole interval (${fmtInterval(afterFit)}) is at or under ${fmtRate(v.threshold)} per cycle.${afterRate > 0 ? ` It is not zero (${fmtRate(afterRate)}/cycle remains), so state the residual rather than claiming the leak is gone.` : ' The residual rate is zero.'}`,
+            `✅ **FIX CONFIRMED** — the fixed arm's whole interval (${judged}) is at or under ${fmtRate(v.threshold)} per cycle.${afterRate > 0 ? ` It is not zero (${fmtRate(afterRate)}/cycle remains), so state the residual rather than claiming the leak is gone.` : ' The residual rate is zero.'}`,
           );
         } else if (v.verdict === 'FIX_FALLS_SHORT') {
           lines.push(
-            `❌ **FIX FALLS SHORT** — the fixed arm's whole interval (${fmtInterval(afterFit)}) is above ${fmtRate(v.threshold)} per cycle: the fix removes less than the expected ${(expected_reduction * 100).toFixed(0)}%, and more rungs will not change that.`,
+            `❌ **FIX FALLS SHORT** — the fixed arm's whole interval (${judged}) is above ${fmtRate(v.threshold)} per cycle: the fix removes less than the expected ${(expected_reduction * 100).toFixed(0)}%, and more rungs will not change that.`,
           );
         } else if (v.reason === 'too_few_rungs') {
           lines.push(
@@ -407,9 +469,13 @@ export function registerVerifyFix(server: McpServer): void {
           lines.push(
             `⚠ **INCONCLUSIVE** (before arm not shown growing) — the before arm's interval (${fmtInterval(beforeFit)}) reaches zero, so the run has not shown the growth the fix is meant to remove. Drive more cycles or more rungs on the unfixed arm.`,
           );
+        } else if (v.reason === 'run_to_run_noise') {
+          lines.push(
+            `⚠ **INCONCLUSIVE** (run-to-run noise as large as the effect) — two ladders of the SAME unfixed build differ by ${fmtRate(repeatSpread)} per cycle, as much as the ${fmtRate(expected_reduction * beforeRate)} per cycle the fix is expected to remove. No verdict from this setup: find what moves between runs (another session on the browser or checkout, a busy host, a different warmup) and measure again.`,
+          );
         } else {
           lines.push(
-            `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${fmtInterval(afterFit)}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.`,
+            `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${judged}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.`,
           );
         }
         lines.push(

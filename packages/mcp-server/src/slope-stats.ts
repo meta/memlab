@@ -122,7 +122,11 @@ export function fitSlope(xs: number[], ys: number[]): SlopeFit {
 export type RateVerdict = 'FIX_CONFIRMED' | 'FIX_FALLS_SHORT' | 'INCONCLUSIVE';
 
 export type RateVerdictReason =
-  'too_few_rungs' | 'before_not_growing' | 'interval_crosses_threshold' | null;
+  | 'too_few_rungs'
+  | 'before_not_growing'
+  | 'run_to_run_noise'
+  | 'interval_crosses_threshold'
+  | null;
 
 export type RateVerdictResult = {
   verdict: RateVerdict;
@@ -146,11 +150,17 @@ export type RateVerdictResult = {
  *
  * The before arm must itself be shown growing (its interval above zero); a fix
  * cannot be credited with removing growth the run never demonstrated.
+ *
+ * `repeatSpread` is how far apart two independently driven ladders of the SAME
+ * build came out (|slope A - slope A'|). Within-ladder residuals cannot see
+ * run-to-run drift, so the after arm's interval is widened by it on both sides,
+ * and a spread as large as the reduction under test decides nothing at all.
  */
 export function rateVerdict(
   before: SlopeFit,
   after: SlopeFit,
   expectedReduction: number,
+  repeatSpread = 0,
 ): RateVerdictResult {
   const threshold = (1 - expectedReduction) * before.slope;
   if (before.lo == null || after.lo == null || after.hi == null) {
@@ -169,7 +179,17 @@ export function rateVerdict(
       confirmableReduction: null,
     };
   }
-  if (after.hi <= threshold) {
+  if (repeatSpread > 0 && repeatSpread >= expectedReduction * before.slope) {
+    return {
+      verdict: 'INCONCLUSIVE',
+      reason: 'run_to_run_noise',
+      threshold,
+      confirmableReduction: null,
+    };
+  }
+  const hi = after.hi + repeatSpread;
+  const lo = after.lo - repeatSpread;
+  if (hi <= threshold) {
     return {
       verdict: 'FIX_CONFIRMED',
       reason: null,
@@ -177,7 +197,7 @@ export function rateVerdict(
       confirmableReduction: null,
     };
   }
-  if (after.lo > threshold) {
+  if (lo > threshold) {
     return {
       verdict: 'FIX_FALLS_SHORT',
       reason: null,
@@ -189,6 +209,6 @@ export function rateVerdict(
     verdict: 'INCONCLUSIVE',
     reason: 'interval_crosses_threshold',
     threshold,
-    confirmableReduction: Math.max(0, 1 - after.hi / before.slope),
+    confirmableReduction: Math.max(0, 1 - hi / before.slope),
   };
 }
