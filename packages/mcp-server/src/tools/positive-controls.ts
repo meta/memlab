@@ -42,6 +42,7 @@ import {
   enumerateMapEntries,
   enumerateSetElements,
   errorResult,
+  escapeRegExp,
   formatNumber,
   markdownTable,
   toolResult,
@@ -69,10 +70,6 @@ function landedRequiredSteps(
   return Object.entries(stepsLanded)
     .filter(([name, n]) => n > 0 && patterns.some(re => re.test(name)))
     .map(([name]) => name);
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**

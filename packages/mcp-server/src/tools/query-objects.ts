@@ -29,6 +29,7 @@ import {
   clampLabel,
   clampLabelTo,
   errorResult,
+  escapeRegExp,
   formatBytes,
   formatNumber,
   markdownTable,
@@ -54,7 +55,7 @@ export function textPattern(source: string): {re: RegExp; literal: boolean} {
   try {
     return {re: new RegExp(source, 'i'), literal: false};
   } catch {
-    const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = escapeRegExp(source);
     return {re: new RegExp(escaped, 'i'), literal: true};
   }
 }

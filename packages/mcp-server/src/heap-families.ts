@@ -12,6 +12,7 @@ import type {IHeapEdge, IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {tickAnalysis} from './analysis-budget.js';
 import {loadedCodeKind, scriptSourceStringData} from './heap-budget.js';
 import {moduleRecords} from './module-registry.js';
+import {escapeRegExp} from './utils.js';
 
 /**
  * Record families that are recognizable by their own property names, so they
@@ -565,7 +566,7 @@ export function computeMemoryPartition(
       ? new RegExp(
           // Lookarounds, not `\b`: a family name can start or end with a
           // non-word character (`(fn.$$cache)`), where `\b` never matches.
-          `(?<![A-Za-z0-9_])${drillFamily.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`,
+          `(?<![A-Za-z0-9_])${escapeRegExp(drillFamily)}(?![A-Za-z0-9_])`,
           'i',
         )
       : null;

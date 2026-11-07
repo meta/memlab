@@ -19,6 +19,7 @@ import {
 } from '../snapshot-borrow.js';
 import {
   errorResult,
+  escapeRegExp,
   formatNumber,
   markdownTable,
   pathsHeader,
@@ -628,7 +629,7 @@ export function preludeReachedBy(
       // probe's classified source and, with it, the mechanism it uses.
       // `\b` also does not fire next to `$`, so the boundaries are widened
       // to "not an identifier character" on each side.
-      const esc = b.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const esc = escapeRegExp(b.name);
       if (new RegExp(`(?<![\\w$])${esc}(?![\\w$])`).test(scope)) {
         taken.add(b.name);
         changed = true;

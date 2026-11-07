@@ -13,9 +13,10 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {sourceOfNode} from './module-attribution.js';
-import {escapeRegExp, findModuleSpans, scriptSources} from './module-source.js';
+import {findModuleSpans, scriptSources} from './module-source.js';
 import {
   errorResult,
+  escapeRegExp,
   formatNumber,
   markdownTable,
   toolResult,

@@ -17,6 +17,7 @@ import {getSnapshot} from '../heap-state.js';
 import {moduleRecords, moduleScopes} from '../module-registry.js';
 import {
   errorResult,
+  escapeRegExp,
   formatBytes,
   formatNumber,
   markdownTable,
@@ -273,7 +274,7 @@ function shortestPathTable(
     try {
       re = new RegExp(namePattern, 'i');
     } catch {
-      re = new RegExp(namePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      re = new RegExp(escapeRegExp(namePattern), 'i');
     }
     rows = rows.filter(([m]) => re.test(m));
   }
@@ -375,10 +376,7 @@ export function registerModuleAttribution(server: McpServer): void {
           try {
             re = new RegExp(name_pattern, 'i');
           } catch {
-            re = new RegExp(
-              name_pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-              'i',
-            );
+            re = new RegExp(escapeRegExp(name_pattern), 'i');
           }
           rows = rows.filter(s => re.test(s.module));
         }

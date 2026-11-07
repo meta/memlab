@@ -14,6 +14,7 @@ import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {
   errorResult,
+  escapeRegExp,
   formatNumber,
   markdownTable,
   toolResult,
@@ -81,10 +82,7 @@ export function registerPropertyNames(server: McpServer): void {
           try {
             re = new RegExp(pattern, 'i');
           } catch {
-            re = new RegExp(
-              pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-              'i',
-            );
+            re = new RegExp(escapeRegExp(pattern), 'i');
           }
         }
         const counts = new Map<string, number>();

@@ -34,6 +34,7 @@ import {
 } from '../react-shapes.js';
 import {
   errorResult,
+  escapeRegExp,
   toolResult,
   formatNumber,
   markdownTable,
@@ -511,21 +512,20 @@ export function hookSource(
   }
   if (spans.length === 0) return null;
   const text = spans.map(sp => sp.text).join('\n');
-  const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let declaration: string | null = null;
   let approximate = false;
   if (setter != null) {
     const m = new RegExp(
-      `\\[\\s*[\\w$]+\\s*,\\s*${esc(setter)}\\s*\\]\\s*=\\s*(?:[\\w$.]+\\.)?use(?:State|Reducer)\\s*\\(`,
+      `\\[\\s*[\\w$]+\\s*,\\s*${escapeRegExp(setter)}\\s*\\]\\s*=\\s*(?:[\\w$.]+\\.)?use(?:State|Reducer)\\s*\\(`,
     ).exec(text);
     if (m != null) declaration = statementAt(text, m.index, m[0].length);
     // Transpiled: `_useState = useState(x), …, setX = _useState[1]`.
     const tuple = new RegExp(
-      `(?<![\\w$.])${esc(setter)}\\s*=\\s*([\\w$]+)\\[1\\]`,
+      `(?<![\\w$.])${escapeRegExp(setter)}\\s*=\\s*([\\w$]+)\\[1\\]`,
     ).exec(text);
     if (declaration == null && tuple != null) {
       const call = new RegExp(
-        `(?<![\\w$.])${esc(tuple[1])}\\s*=\\s*(?:[\\w$.]+\\.)?use(?:State|Reducer)\\s*\\(`,
+        `(?<![\\w$.])${escapeRegExp(tuple[1])}\\s*=\\s*(?:[\\w$.]+\\.)?use(?:State|Reducer)\\s*\\(`,
       ).exec(text);
       if (call != null) {
         declaration = statementAt(text, call.index, call[0].length);
@@ -546,7 +546,7 @@ export function hookSource(
   const shown: string[] = [];
   let calls = 0;
   if (setter != null) {
-    const re = new RegExp(`(?<![\\w$.])${esc(setter)}\\s*\\(`, 'g');
+    const re = new RegExp(`(?<![\\w$.])${escapeRegExp(setter)}\\s*\\(`, 'g');
     for (let m = re.exec(text); m != null; m = re.exec(text)) {
       calls++;
       if (shown.length < 3)

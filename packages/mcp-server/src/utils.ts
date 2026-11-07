@@ -1447,6 +1447,11 @@ export function sanitizeForTable(s: string): string {
   return s.replace(/[\n\r\t]/g, ' ').replace(/\|/g, '¦');
 }
 
+/** Escape every RegExp metacharacter in `s`, so it matches only itself. */
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * A one-cell preview of a node: the start of a string's value (up to
  * `maxChars`), or the names of an object's first `maxProps` properties and

@@ -28,7 +28,13 @@ import {
   getSnapshotMetadata,
 } from '../heap-state.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
-import {errorResult, formatBytes, formatNumber, toolResult} from '../utils.js';
+import {
+  errorResult,
+  escapeRegExp,
+  formatBytes,
+  formatNumber,
+  toolResult,
+} from '../utils.js';
 
 interface ModuleSpan {
   script: string;
@@ -45,10 +51,6 @@ function edgeString(node: IHeapNode, name: string): string | null {
     if (t.isString) return t.toStringNode()?.stringValue ?? t.name;
   }
   return null;
-}
-
-export function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export interface ScriptSource {
