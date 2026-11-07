@@ -697,7 +697,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_finding_index',
-        'Record findings as you go so the write-up is not reconstructed from memory. Keyed by retainer path, or by `kind` + `keys` for update queues, collections and probes; `list` filters by round, title and kind; `cover` stores the served revision and gating hash. With `run_dir` the workstream comes from run.json; a NEW `check` lists probable duplicates to `reconfirm` instead.',
+        'Record findings as you go so the write-up is not reconstructed from memory. Keyed by retainer path, or by `kind` + `keys` for update queues, collections and probes; `list` filters by round, title and kind; `cover` stores the served revision and gating hash. With `run_dir` the workstream comes from run.json; a NEW `check` lists probable duplicates to `reconfirm` instead. A fix records its `fix_outcome` once shipped, and `stale` lists fixes whose outcome was never settled or whose gate stopped serving.',
       ],
       [
         'memlab_validate_finding',

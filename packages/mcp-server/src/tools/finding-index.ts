@@ -136,6 +136,14 @@ interface Finding {
   gate_state?: 'allocated' | 'expired' | 'deallocated' | 'code_removed';
   /** When `gate_state` was last confirmed, so a stale answer can be spotted. */
   gate_checked_on?: string;
+  /**
+   * What the fix did once it shipped: "effective" (memory moved the way the
+   * A/B said it would), "no_effect" (it shipped and did not), or "pending".
+   * Absent means nobody recorded it; `stale` lists those fixes.
+   */
+  fix_outcome?: FixOutcome;
+  /** When `fix_outcome` was last set or confirmed, e.g. "2026-11-06". */
+  fix_outcome_on?: string;
   /** Why a finding was withdrawn; required in practice for `retracted`. */
   retraction_reason?: string;
   /** Short human name for the finding, e.g. "chat-list contextMenuOpened queue". */
@@ -150,6 +158,12 @@ interface Finding {
   /** Rounds that re-confirmed this finding (`action: "reconfirm"`), oldest first. */
   sightings?: Array<{round: string; rate?: string; note?: string}>;
 }
+
+const FIX_OUTCOMES = ['effective', 'no_effect', 'pending'] as const;
+type FixOutcome = (typeof FIX_OUTCOMES)[number];
+
+/** A fixed finding with no settled outcome is listed by `stale` after this many days. */
+const STALE_AFTER_DAYS = 60;
 
 /**
  * Populations a retainer path does not identify well. An update queue is a
@@ -296,6 +310,8 @@ const IMPORTED_FINDING_SCHEMA = z.object({
     .enum(['allocated', 'expired', 'deallocated', 'code_removed'])
     .optional(),
   gate_checked_on: z.string().optional(),
+  fix_outcome: z.enum(FIX_OUTCOMES).optional(),
+  fix_outcome_on: z.string().optional(),
   fixed_behind: z.string().optional(),
   fixed_by_diffs: z.array(z.string()).optional(),
   verified_by_ab: z.boolean().optional(),
@@ -356,6 +372,8 @@ export function importFindings(
       verified_by_ab: raw.verified_by_ab ?? existing?.verified_by_ab,
       gate_state: raw.gate_state ?? existing?.gate_state,
       gate_checked_on: raw.gate_checked_on ?? existing?.gate_checked_on,
+      fix_outcome: raw.fix_outcome ?? existing?.fix_outcome,
+      fix_outcome_on: raw.fix_outcome_on ?? existing?.fix_outcome_on,
       retraction_reason: raw.retraction_reason ?? existing?.retraction_reason,
       title: raw.title ?? existing?.title,
       note: raw.note ?? raw.notes ?? existing?.note,
@@ -545,6 +563,8 @@ interface RecordInput {
   fixed_behind?: string;
   gate_state?: Finding['gate_state'];
   gate_checked_on?: string;
+  fix_outcome?: FixOutcome;
+  fix_outcome_on?: string;
   fixed_by_diffs?: string[];
   verified_by_ab?: boolean;
   retraction_reason?: string;
@@ -587,6 +607,8 @@ function recordFinding(index: FindingIndex, r: RecordInput): RecordOutcome {
     fixed_behind: r.fixed_behind ?? existing?.fixed_behind,
     gate_state: r.gate_state ?? existing?.gate_state,
     gate_checked_on: r.gate_checked_on ?? existing?.gate_checked_on,
+    fix_outcome: r.fix_outcome ?? existing?.fix_outcome,
+    fix_outcome_on: r.fix_outcome_on ?? existing?.fix_outcome_on,
     fixed_by_diffs: r.fixed_by_diffs ?? existing?.fixed_by_diffs,
     verified_by_ab: r.verified_by_ab ?? existing?.verified_by_ab,
     retraction_reason: r.retraction_reason ?? existing?.retraction_reason,
@@ -614,6 +636,11 @@ function describeRecorded({finding: f, requested}: RecordOutcome): string {
     extras.push(`fixed by ${f.fixed_by_diffs.join(', ')}`);
   }
   if (f.verified_by_ab === true) extras.push('A/B verified');
+  if (f.fix_outcome != null) {
+    extras.push(
+      `outcome ${f.fix_outcome}${f.fix_outcome_on != null ? ` (${f.fix_outcome_on})` : ''}`,
+    );
+  }
   if (f.retraction_reason != null) {
     extras.push(`retracted: ${f.retraction_reason}`);
   }
@@ -1256,9 +1283,10 @@ export function registerFindingIndex(server: McpServer): void {
           'amend',
           'delete',
           'reconfirm',
+          'stale',
         ])
         .describe(
-          '"check" (fingerprint + look up, no write), "record" (add/update), "amend" (edit an EXISTING entry in place, without counting a sighting), "delete" (remove an entry), "import" (bulk-seed history), "export" (write the whole index to a file so it can be checked in), "list", "cover" (log combos driven in a round). `amend` and `delete` address an entry by `fingerprint` — which is how a bad entry is repaired, since a wrong signature cannot be re-derived from a path. "reconfirm" adds a sighting (`round`, optional `rate` and `note`) to an EXISTING entry by `fingerprint`: the way to attach a re-sighting whose path or class set came out slightly different, instead of minting a second entry for the same finding.',
+          '"check" (fingerprint + look up, no write), "record" (add/update), "amend" (edit an EXISTING entry in place, without counting a sighting), "delete" (remove an entry), "import" (bulk-seed history), "export" (write the whole index to a file so it can be checked in), "list", "cover" (log combos driven in a round). `amend` and `delete` address an entry by `fingerprint` — which is how a bad entry is repaired, since a wrong signature cannot be re-derived from a path. "reconfirm" adds a sighting (`round`, optional `rate` and `note`) to an EXISTING entry by `fingerprint`: the way to attach a re-sighting whose path or class set came out slightly different, instead of minting a second entry for the same finding. "stale" lists FIXED findings whose outcome was never settled: no `fix_outcome` (or "pending") and nothing confirmed in the last `max_age_days` (default 60), or a gate that is no longer serving. Those are the fixes that may never have shipped, or were removed after shipping.',
         ),
       retainer_path: z
         .string()
@@ -1344,6 +1372,24 @@ export function registerFindingIndex(server: McpServer): void {
         .describe(
           'When `gate_state` was last confirmed (e.g. "2026-09-23"), so a stale answer can be spotted rather than trusted.',
         ),
+      fix_outcome: z
+        .enum(FIX_OUTCOMES)
+        .optional()
+        .describe(
+          'What the fix did once it shipped: "effective" (memory moved the way the A/B said it would), "no_effect" (it shipped and did not; record why in `note`), or "pending". Set it with `amend` when the outcome is known.',
+        ),
+      fix_outcome_on: z
+        .string()
+        .optional()
+        .describe(
+          'When `fix_outcome` was set or last confirmed, e.g. "2026-11-06".',
+        ),
+      max_age_days: z
+        .number()
+        .optional()
+        .describe(
+          `For action "stale": days without a confirmed outcome before a fixed finding is listed (default ${STALE_AFTER_DAYS}).`,
+        ),
       verified_by_ab: z
         .boolean()
         .optional()
@@ -1414,7 +1460,7 @@ export function registerFindingIndex(server: McpServer): void {
         .array(IMPORTED_FINDING_SCHEMA)
         .optional()
         .describe(
-          'For action "import": findings passed inline, for seeding straight from a team doc without writing a file first. For action "record": a batch, each entry recorded as a sighting exactly as a single `record` would be (top-level `round`, `status`, `fixed_behind`, `fixed_by_diffs`, `verified_by_ab`, `gate_state`, `gate_checked_on` and `retraction_reason` apply to entries without their own; `title` and `note` are per entry). Both accept the same fields: retainer_path|signature, growing_classes, round, status, title, note|notes, fixed_behind, fixed_by_diffs, verified_by_ab, gate_state, gate_checked_on, retraction_reason.',
+          'For action "import": findings passed inline, for seeding straight from a team doc without writing a file first. For action "record": a batch, each entry recorded as a sighting exactly as a single `record` would be (top-level `round`, `status`, `fixed_behind`, `fixed_by_diffs`, `verified_by_ab`, `gate_state`, `gate_checked_on`, `fix_outcome`, `fix_outcome_on` and `retraction_reason` apply to entries without their own; `title` and `note` are per entry). Both accept the same fields: retainer_path|signature, growing_classes, round, status, title, note|notes, fixed_behind, fixed_by_diffs, verified_by_ab, gate_state, gate_checked_on, fix_outcome, fix_outcome_on, retraction_reason.',
         ),
     },
     async ({
@@ -1431,6 +1477,9 @@ export function registerFindingIndex(server: McpServer): void {
       verified_by_ab,
       gate_state,
       gate_checked_on,
+      fix_outcome,
+      fix_outcome_on,
+      max_age_days,
       retraction_reason,
       title,
       note,
@@ -1695,6 +1744,66 @@ export function registerFindingIndex(server: McpServer): void {
             ]
               .filter(Boolean)
               .join('\n'),
+          );
+        }
+
+        if (action === 'stale') {
+          const maxAge = max_age_days ?? STALE_AFTER_DAYS;
+          const now = Date.now();
+          const rows = Object.values(index.findings)
+            .filter(
+              f =>
+                f.status === 'fixed' &&
+                f.fix_outcome !== 'effective' &&
+                f.fix_outcome !== 'no_effect',
+            )
+            .map(f => {
+              const dates = [f.fix_outcome_on, f.gate_checked_on]
+                .map(d => (d != null ? Date.parse(d) : NaN))
+                .filter(Number.isFinite);
+              const age =
+                dates.length > 0
+                  ? Math.floor((now - Math.max(...dates)) / 86400000)
+                  : null;
+              const gateDown =
+                f.gate_state != null && f.gate_state !== 'allocated';
+              const why = [
+                gateDown ? `gate ${f.gate_state}` : null,
+                age == null
+                  ? 'never confirmed'
+                  : age > maxAge
+                    ? `last confirmed ${age} days ago`
+                    : null,
+              ].filter((x): x is string => x != null);
+              return {f, age, why};
+            })
+            .filter(r => r.why.length > 0)
+            .sort((a, b) => (b.age ?? Infinity) - (a.age ?? Infinity));
+          if (rows.length === 0) {
+            return result(
+              `No fixed finding in \`${indexPath}\` is waiting on an outcome for more than ${maxAge} days, and every recorded gate is serving.`,
+            );
+          }
+          return result(
+            [
+              `## Fixes with no settled outcome — ${rows.length}`,
+              '',
+              markdownTable(
+                ['Fingerprint', 'Finding', 'Fix', 'Outcome', 'Why listed'],
+                rows.slice(0, 40).map(({f, why}) => [
+                  f.fingerprint,
+                  (f.title ?? f.signature).slice(0, 60),
+                  [f.fixed_behind, ...(f.fixed_by_diffs ?? [])]
+                    .filter((x): x is string => x != null)
+                    .join(', ')
+                    .slice(0, 60) || '—',
+                  f.fix_outcome ?? 'not recorded',
+                  why.join('; '),
+                ]),
+              ),
+              '',
+              'For each: check whether the fix shipped and whether memory moved, then `amend` with `fix_outcome` ("effective" or "no_effect") and `fix_outcome_on`. A gate that is no longer serving means the fix is not live, whatever its status says.',
+            ].join('\n'),
           );
         }
 
@@ -2014,6 +2123,8 @@ export function registerFindingIndex(server: McpServer): void {
           set('verified_by_ab', verified_by_ab);
           set('gate_state', gate_state);
           set('gate_checked_on', gate_checked_on);
+          set('fix_outcome', fix_outcome);
+          set('fix_outcome_on', fix_outcome_on);
           set('retraction_reason', retraction_reason);
           set('note', note);
           set('last_seen_round', round);
@@ -2079,6 +2190,8 @@ export function registerFindingIndex(server: McpServer): void {
                     verified_by_ab: f.verified_by_ab ?? verified_by_ab,
                     gate_state: f.gate_state ?? gate_state,
                     gate_checked_on: f.gate_checked_on ?? gate_checked_on,
+                    fix_outcome: f.fix_outcome ?? fix_outcome,
+                    fix_outcome_on: f.fix_outcome_on ?? fix_outcome_on,
                     retraction_reason: f.retraction_reason ?? retraction_reason,
                     note: f.note ?? f.notes,
                   }),
@@ -2302,6 +2415,8 @@ export function registerFindingIndex(server: McpServer): void {
           fixed_behind,
           gate_state,
           gate_checked_on,
+          fix_outcome,
+          fix_outcome_on,
           fixed_by_diffs,
           verified_by_ab,
           retraction_reason,
