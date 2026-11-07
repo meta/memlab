@@ -134,6 +134,7 @@ html {
 .navbar__logo {
   height: 1.75rem;
   margin-right: 0.6rem;
+  width: 1.75rem;
 }
 
 .navbar__title {
@@ -202,10 +203,6 @@ html {
   border: 1px solid var(--ml-hairline-strong);
   border-radius: 10px !important;
   height: 2.25rem !important;
-}
-
-.DocSearch-Button-Keys {
-  min-width: auto !important;
 }
 
 /* ---------------------------------------------------------------- docs -- */
