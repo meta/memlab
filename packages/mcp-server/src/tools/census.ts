@@ -11,6 +11,7 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
+import {ownPropNames} from '../heap-families.js';
 import {withSnapshotAt} from '../snapshot-borrow.js';
 import {resolveLadderPaths} from './ladder.js';
 import {
@@ -138,14 +139,6 @@ export const BUILTIN: Metric[] = [
 /** Handed to name-only matchers so no Set is allocated per node. */
 const EMPTY_PROPS: ReadonlySet<string> = new Set<string>();
 
-function propsOf(node: IHeapNode): Set<string> {
-  const out = new Set<string>();
-  for (const e of node.references) {
-    if (e.type === 'property') out.add(String(e.name_or_index));
-  }
-  return out;
-}
-
 interface RungCount {
   label: string;
   cycles: number | null;
@@ -175,7 +168,7 @@ export function countOne(
         (counts.get(`class:${node.name}`) ?? 0) + 1,
       );
     }
-    const props = anyNeedsProps ? propsOf(node) : EMPTY_PROPS;
+    const props = anyNeedsProps ? ownPropNames(node) : EMPTY_PROPS;
     for (const m of metrics) {
       if (m.match(node, props))
         counts.set(m.name, (counts.get(m.name) ?? 0) + 1);

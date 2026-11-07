@@ -245,7 +245,8 @@ export function kindBucket(node: IHeapNode): string {
   return 'objects';
 }
 
-function ownPropNames(node: IHeapNode): Set<string> {
+/** The names of a node's own `property` edges. */
+export function ownPropNames(node: IHeapNode): Set<string> {
   const out = new Set<string>();
   for (const e of node.references) {
     if (e.type === 'property') out.add(String(e.name_or_index));
