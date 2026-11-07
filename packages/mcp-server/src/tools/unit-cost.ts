@@ -36,7 +36,8 @@ interface Population {
   exact: boolean;
 }
 
-function matchesShape(node: IHeapNode, shape: string[]): boolean {
+/** Does `node` carry every name in `shape` as a `property` edge? Never for an empty shape. */
+export function matchesShape(node: IHeapNode, shape: string[]): boolean {
   if (shape.length === 0) return false;
   const want = new Set(shape);
   for (const e of node.references) {

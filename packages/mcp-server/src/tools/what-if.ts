@@ -23,18 +23,9 @@ import {
   toolResult,
   typenameOf,
 } from '../utils.js';
+import {matchesShape} from './unit-cost.js';
 
 const {NumericSet} = memlabCore;
-
-function matchesShape(node: IHeapNode, shape: string[]): boolean {
-  const want = new Set(shape);
-  for (const e of node.references) {
-    if (e.type !== 'property') continue;
-    want.delete(String(e.name_or_index));
-    if (want.size === 0) return true;
-  }
-  return false;
-}
 
 /**
  * Second-order collectability: what ELSE dies when this population goes away.
