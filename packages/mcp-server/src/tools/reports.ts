@@ -26,6 +26,7 @@ import {
   toolResult,
 } from '../utils.js';
 import type {OutputMode} from '../utils.js';
+import {isDetachedDOMNode} from './detached-dom.js';
 import {splitClassKey} from './sequence-analysis.js';
 import {
   getCollectionChildren,
@@ -34,12 +35,6 @@ import {
 } from './stale-collections.js';
 
 // --- Detached DOM analysis ---
-
-function isDetachedDOMNode(node: IHeapNode): boolean {
-  if (node.id <= 3) return false;
-  if (node.is_detached) return true;
-  return node.name.startsWith('Detached ');
-}
 
 function runDetachedDom(limit: number): string {
   const snapshot = getSnapshot();
