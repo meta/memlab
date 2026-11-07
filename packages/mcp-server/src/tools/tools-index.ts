@@ -346,6 +346,10 @@ const GROUPS: Group[] = [
         "Did the fix work? Compares per-cycle growth RATES between a before ladder and an after ladder — from two sets of snapshot FILES, so no runtime gate is needed and an ungated or build-only fix is verified the same way. Each rate is a slope over every rung with a 95% interval, and the verdict is FIX CONFIRMED, FIX FALLS SHORT or INCONCLUSIVE (with the reason and the reduction the run could confirm). `before_repeat_paths` adds a second ladder of the unfixed build, whose spread widens the interval; with `setup_name` that spread is recorded once and reused by later checks on the same setup. A setup check reads each round's run.json and withholds the verdict when the code, isolate, build kind or browser changed. `second_pair` reads the verdict off two pairs and reports whether their order cancels drift.",
       ],
       [
+        'memlab_fix_knowledge_check',
+        'Before writing a fix: true/false questions on the beliefs that most often send a leak fix the wrong way (WeakMap hops, React alternate fibers, shared closure contexts, caches filling up, dev-only chains), graded with the reason and what to measure.',
+      ],
+      [
         'memlab_ladder',
         'Name a ladder once and reference it as `ladder:<name>` from every trend tool.',
       ],
