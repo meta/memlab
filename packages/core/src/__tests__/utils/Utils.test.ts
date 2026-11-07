@@ -9,7 +9,7 @@
  */
 
 import config from '../../lib/Config';
-import {IHeapEdge, IHeapNode} from '../../lib/Types';
+import {IHeapEdge, IHeapNode, LeakTracePathItem} from '../../lib/Types';
 import utils from '../../lib/Utils';
 
 beforeEach(() => {
@@ -279,4 +279,68 @@ test('Check getLeakTracePathLength', async () => {
   expect(utils.getLeakTracePathLength(path)).toBe(3);
   // the length is counted from the item passed in
   expect(utils.getLeakTracePathLength(path.next)).toBe(2);
+});
+
+function leakTracePath(): LeakTracePathItem {
+  // Window --eventListeners--> Array --0--> FiberNode
+  return {
+    node: {id: 1, name: 'Window', type: 'object'} as IHeapNode,
+    next: {
+      edge: {
+        name_or_index: 'eventListeners',
+        type: 'property',
+        edgeIndex: 7,
+      } as IHeapEdge,
+      next: {
+        node: {id: 2, name: 'Array', type: 'array'} as IHeapNode,
+        next: {
+          edge: {name_or_index: 0, type: 'element', edgeIndex: 9} as IHeapEdge,
+          next: {node: {id: 3, name: 'FiberNode', type: 'object'} as IHeapNode},
+        },
+      },
+    },
+  };
+}
+
+test('Check pathHasEdgeWithName', async () => {
+  const path = leakTracePath();
+  expect(utils.pathHasEdgeWithName(path, 'eventListeners')).toBe(true);
+  // the edge name has to match exactly
+  expect(utils.pathHasEdgeWithName(path, 'eventlisteners')).toBe(false);
+  expect(utils.pathHasEdgeWithName(path, 'Listeners')).toBe(false);
+  // node names are not edge names
+  expect(utils.pathHasEdgeWithName(path, 'Window')).toBe(false);
+  // an element index is a number, so its string form does not match
+  expect(utils.pathHasEdgeWithName(path, '0')).toBe(false);
+});
+
+test('Check pathHasEdgeWithIndex', async () => {
+  const path = leakTracePath();
+  expect(utils.pathHasEdgeWithIndex(path, 7)).toBe(true);
+  expect(utils.pathHasEdgeWithIndex(path, 9)).toBe(true);
+  expect(utils.pathHasEdgeWithIndex(path, 8)).toBe(false);
+});
+
+test('Check pathHasNodeOrEdgeWithName', async () => {
+  const path = leakTracePath();
+  // no name matches every path
+  expect(utils.pathHasNodeOrEdgeWithName(path, null)).toBe(true);
+  expect(utils.pathHasNodeOrEdgeWithName(path, undefined)).toBe(true);
+  // a case-insensitive substring of a node name or an edge name
+  expect(utils.pathHasNodeOrEdgeWithName(path, 'fiber')).toBe(true);
+  expect(utils.pathHasNodeOrEdgeWithName(path, 'LISTENERS')).toBe(true);
+  expect(utils.pathHasNodeOrEdgeWithName(path, '0')).toBe(true);
+  expect(utils.pathHasNodeOrEdgeWithName(path, 'Detached')).toBe(false);
+});
+
+test('Check getLastNodeId', async () => {
+  expect(utils.getLastNodeId(leakTracePath())).toBe(3);
+  expect(utils.getLastNodeId({node: {id: 5} as IHeapNode})).toBe(5);
+  // a path that ends on an edge has no last node
+  expect(
+    utils.getLastNodeId({
+      node: {id: 5} as IHeapNode,
+      next: {edge: {name_or_index: 'x'} as IHeapEdge},
+    }),
+  ).toBe(-1);
 });
