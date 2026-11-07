@@ -121,3 +121,33 @@ test('prioritized order are respected', () => {
     'Detached <div data-testids=" | GeoBaseText | GeoBaseText" class="x78zum5">',
   );
 });
+
+test('stripTagAttributes drops every attribute', () => {
+  const stripTagAttributes = utils.stripTagAttributes;
+  expect(stripTagAttributes('Detached <div class="a" id="b">')).toBe(
+    'Detached <div>',
+  );
+  expect(stripTagAttributes('Detached <input disabled>')).toBe(
+    'Detached <input>',
+  );
+  // the self-closing slash goes with the attributes
+  expect(stripTagAttributes('<img src="x.jpg" />')).toBe('<img>');
+  // every tag in the string is stripped, and the text between them is kept
+  expect(stripTagAttributes('Wrap <div id="x">text<span id="y">')).toBe(
+    'Wrap <div>text<span>',
+  );
+});
+
+test('stripTagAttributes leaves tags without attributes alone', () => {
+  const stripTagAttributes = utils.stripTagAttributes;
+  expect(stripTagAttributes('')).toBe('');
+  expect(stripTagAttributes('Detached HTMLDivElement')).toBe(
+    'Detached HTMLDivElement',
+  );
+  expect(stripTagAttributes('Detached <div>')).toBe('Detached <div>');
+  expect(stripTagAttributes('Something </div>')).toBe('Something </div>');
+  // a tag that never closes is kept as it is
+  expect(stripTagAttributes('Detached <div class="a"')).toBe(
+    'Detached <div class="a"',
+  );
+});

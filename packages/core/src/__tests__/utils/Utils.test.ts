@@ -247,3 +247,36 @@ test('Check mapToObject and objectToMap', async () => {
   ]);
   expect(utils.objectToMap({}).size).toBe(0);
 });
+
+test('Check upperCaseFirstCharacter', async () => {
+  expect(utils.upperCaseFirstCharacter('')).toBe('');
+  expect(utils.upperCaseFirstCharacter('heap')).toBe('Heap');
+  expect(utils.upperCaseFirstCharacter('Heap')).toBe('Heap');
+  expect(utils.upperCaseFirstCharacter('a')).toBe('A');
+  // only the first character changes
+  expect(utils.upperCaseFirstCharacter('heap snapshot')).toBe('Heap snapshot');
+  expect(utils.upperCaseFirstCharacter('1st')).toBe('1st');
+});
+
+test('Check repeat', async () => {
+  expect(utils.repeat('ab', 3)).toBe('ababab');
+  expect(utils.repeat('-', 1)).toBe('-');
+  expect(utils.repeat('', 5)).toBe('');
+  // a count of zero or less gives an empty string instead of throwing
+  expect(utils.repeat('x', 0)).toBe('');
+  expect(utils.repeat('x', -1)).toBe('');
+});
+
+test('Check getLeakTracePathLength', async () => {
+  expect(utils.getLeakTracePathLength({})).toBe(1);
+  const path = {
+    node: strackTraceFrameNodeMock,
+    next: {
+      edge: weakMapEdgeMock,
+      next: {node: fiberNodeMock},
+    },
+  };
+  expect(utils.getLeakTracePathLength(path)).toBe(3);
+  // the length is counted from the item passed in
+  expect(utils.getLeakTracePathLength(path.next)).toBe(2);
+});
