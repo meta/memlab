@@ -26,6 +26,8 @@ import {
 import {countEntries, parseLocator, resolvePath} from './collection-trend.js';
 import {resolveLadderPaths} from './ladder.js';
 import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
+import {fitSlope, rateVerdict} from '../slope-stats.js';
+import type {SlopeFit} from '../slope-stats.js';
 
 const {utils: memlabUtils} = memlabCore;
 const {getFullHeapFromFile} = memlabHeapAnalysis;
@@ -186,11 +188,16 @@ async function measureArm(
   return {labels, values};
 }
 
-/** Growth per interaction cycle across an arm's ladder. */
-export function perCycleRate(values: number[], cycles: number): number {
-  const steps = values.length - 1;
-  if (steps <= 0 || cycles <= 0) return 0;
-  return (values[values.length - 1] - values[0]) / (steps * cycles);
+/**
+ * Least-squares growth per interaction cycle across an arm's ladder, with its
+ * 95% interval. Rung i sits at i * cycles, so every rung contributes, not only
+ * the two ends.
+ */
+export function armSlope(values: number[], cycles: number): SlopeFit {
+  return fitSlope(
+    values.map((_, i) => i * cycles),
+    values,
+  );
 }
 
 export function registerVerifyFix(server: McpServer): void {
@@ -203,7 +210,8 @@ export function registerVerifyFix(server: McpServer): void {
       '"retained_size" (retained size of the LARGEST instance of a class — the figure the leak-hunt methodology asks you to quote for a fix, rather than aggregate heap). ' +
       'Note "retained_size" forces a FULL parse of every rung on both arms because retained sizes need the dominator pass; the other metrics load LIGHT. ' +
       'Compares RATES, not levels: a build difference, a warmer cache or a longer session all shift the absolute level, and only the slope per interaction says whether the thing still accumulates. Each arm therefore needs at least 2 rungs — a single snapshot per arm is refused rather than compared, because that comparison is confounded. ' +
-      'Returns both series, both rates, the reduction, and a PASS/FAIL against expected_reduction. Loads rungs transiently in LIGHT mode, one graph at a time.',
+      "Each rate is a least-squares slope over every rung, with a 95% interval from the residuals. The verdict is FIX CONFIRMED (the fixed arm's whole interval is at or under the residual rate expected_reduction allows), FIX FALLS SHORT (its whole interval is above it) or INCONCLUSIVE, with the reason: fewer than 3 rungs in an arm (a two-point slope has no error bar), a before arm whose own interval reaches zero, or an interval that crosses the threshold, in which case it also prints the largest reduction this run can confirm. More rungs on the same ladders narrow the interval; no extra ladders are needed. " +
+      'Returns both series, both rates and intervals, the reduction and the verdict. Loads rungs transiently in LIGHT mode, one graph at a time.',
     {
       metric_kind: z
         .enum([
@@ -304,8 +312,10 @@ export function registerVerifyFix(server: McpServer): void {
           max_file_size_mb,
         );
 
-        const beforeRate = perCycleRate(b.values, cycles);
-        const afterRate = perCycleRate(a.values, cycles);
+        const beforeFit = armSlope(b.values, cycles);
+        const afterFit = armSlope(a.values, cycles);
+        const beforeRate = beforeFit.slope;
+        const afterRate = afterFit.slope;
 
         // Byte-valued metrics read as nonsense in raw counts — "1162420" is not
         // a number anyone checks, "1.1 MB" is.
@@ -315,16 +325,30 @@ export function registerVerifyFix(server: McpServer): void {
           isBytes ? formatBytes(v) : formatNumber(v);
         const fmtRate = (r: number): string =>
           isBytes
-            ? `${formatBytes(Math.round(r))}`
+            ? Math.round(r) < 0
+              ? `-${formatBytes(Math.round(-r))}`
+              : `${formatBytes(Math.max(0, Math.round(r)))}`
             : Math.abs(r) < 10
-              ? r.toFixed(2)
+              ? (Math.abs(r) < 0.005 ? 0 : r).toFixed(2)
               : formatNumber(Math.round(r));
+        const fmtInterval = (f: SlopeFit): string =>
+          f.lo == null || f.hi == null
+            ? 'none (2 rungs)'
+            : `${fmtRate(f.lo)} … ${fmtRate(f.hi)}`;
 
         const lines: string[] = [
           `## Fix verification — \`${metric_kind}\` on \`${locator}\``,
           '',
           markdownTable(
-            ['Arm', 'Rungs', 'First', 'Last', 'Net', 'Per cycle'],
+            [
+              'Arm',
+              'Rungs',
+              'First',
+              'Last',
+              'Net',
+              'Per cycle',
+              '95% interval',
+            ],
             [
               [
                 'before (unfixed)',
@@ -333,6 +357,7 @@ export function registerVerifyFix(server: McpServer): void {
                 fmtVal(b.values[b.values.length - 1]),
                 fmtVal(b.values[b.values.length - 1] - b.values[0]),
                 fmtRate(beforeRate),
+                fmtInterval(beforeFit),
               ],
               [
                 'after (fixed)',
@@ -341,6 +366,7 @@ export function registerVerifyFix(server: McpServer): void {
                 fmtVal(a.values[a.values.length - 1]),
                 fmtVal(a.values[a.values.length - 1] - a.values[0]),
                 fmtRate(afterRate),
+                fmtInterval(afterFit),
               ],
             ],
             new Set([1, 2, 3, 4, 5]),
@@ -353,23 +379,42 @@ export function registerVerifyFix(server: McpServer): void {
 
         if (beforeRate <= 0) {
           lines.push(
-            `⚠ **Inconclusive — the BEFORE arm does not grow** (rate ${fmtRate(beforeRate)}/cycle). There is nothing for the fix to reduce, so this run cannot validate it. The unfixed arm has to reproduce the leak first: check the metric and locator, drive more cycles, or confirm the arm really is running the unfixed build.`,
+            `⚠ **INCONCLUSIVE — the BEFORE arm does not grow** (rate ${fmtRate(beforeRate)}/cycle). There is nothing for the fix to reduce, so this run cannot validate it. The unfixed arm has to reproduce the leak first: check the metric and locator, drive more cycles, or confirm the arm really is running the unfixed build.`,
           );
           return toolResult(lines.join('\n'), armsHeader);
         }
 
         const reduction = (beforeRate - afterRate) / beforeRate;
-        const pass = reduction >= expected_reduction;
+        const v = rateVerdict(beforeFit, afterFit, expected_reduction);
+        const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
         lines.push(
-          `**Reduction: ${(reduction * 100).toFixed(1)}%** of the before-rate (${fmtRate(beforeRate)} → ${fmtRate(afterRate)} per cycle), against an expected ${(expected_reduction * 100).toFixed(0)}%.`,
+          `**Reduction: ${pct(reduction)}** of the before-rate (${fmtRate(beforeRate)} → ${fmtRate(afterRate)} per cycle), against an expected ${(expected_reduction * 100).toFixed(0)}%, so the fixed arm may keep at most ${fmtRate(v.threshold)} per cycle.`,
           '',
-          pass
-            ? `✅ **PASS** — the fixed arm accumulates ${(reduction * 100).toFixed(1)}% less per cycle.${afterRate > 0 ? ` It is not zero (${fmtRate(afterRate)}/cycle remains), so state the residual rather than claiming the leak is gone.` : ' The residual rate is zero.'}`
-            : `❌ **FAIL** — ${(reduction * 100).toFixed(1)}% is short of the expected ${(expected_reduction * 100).toFixed(0)}%. The fixed arm still accumulates ${fmtRate(afterRate)} per cycle.`,
         );
+        if (v.verdict === 'FIX_CONFIRMED') {
+          lines.push(
+            `✅ **FIX CONFIRMED** — the fixed arm's whole interval (${fmtInterval(afterFit)}) is at or under ${fmtRate(v.threshold)} per cycle.${afterRate > 0 ? ` It is not zero (${fmtRate(afterRate)}/cycle remains), so state the residual rather than claiming the leak is gone.` : ' The residual rate is zero.'}`,
+          );
+        } else if (v.verdict === 'FIX_FALLS_SHORT') {
+          lines.push(
+            `❌ **FIX FALLS SHORT** — the fixed arm's whole interval (${fmtInterval(afterFit)}) is above ${fmtRate(v.threshold)} per cycle: the fix removes less than the expected ${(expected_reduction * 100).toFixed(0)}%, and more rungs will not change that.`,
+          );
+        } else if (v.reason === 'too_few_rungs') {
+          lines.push(
+            `⚠ **INCONCLUSIVE** (too few rungs) — an arm has 2 rungs, and a two-point slope has no error bar, so a ${pct(reduction)} reduction cannot be told from noise. Measure 3 or more rungs per arm (the leak-hunt runner places 4 by default); the same ladders with an extra rung each are enough.`,
+          );
+        } else if (v.reason === 'before_not_growing') {
+          lines.push(
+            `⚠ **INCONCLUSIVE** (before arm not shown growing) — the before arm's interval (${fmtInterval(beforeFit)}) reaches zero, so the run has not shown the growth the fix is meant to remove. Drive more cycles or more rungs on the unfixed arm.`,
+          );
+        } else {
+          lines.push(
+            `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${fmtInterval(afterFit)}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.`,
+          );
+        }
         lines.push(
           '',
-          `_Both arms must have been driven with the same interaction and the same ${formatNumber(cycles)} cycles between rungs; nothing in a .heapsnapshot records that, so it is the caller's to guarantee — record it with \`memlab_ladder\`. Two rungs per arm give a two-point slope: add rungs if the before-arm series is not monotonic, since a single noisy pair can produce either verdict._`,
+          `_Both arms must have been driven with the same interaction and the same ${formatNumber(cycles)} cycles between rungs; nothing in a .heapsnapshot records that, so it is the caller's to guarantee — record it with \`memlab_ladder\`. The interval assumes the rungs of one arm scatter independently around a straight line; a before arm that bends or plateaus is better read with \`memlab_rate_model\` first._`,
         );
         return toolResult(lines.join('\n'), armsHeader);
       } catch (err) {
