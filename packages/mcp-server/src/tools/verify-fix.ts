@@ -27,6 +27,8 @@ import {countEntries, parseLocator, resolvePath} from './collection-trend.js';
 import {resolveLadderPaths} from './ladder.js';
 import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
 import {fitSlope, rateVerdict} from '../slope-stats.js';
+import {compareArmSetups, readArmSetup} from '../arm-setup.js';
+import type {ArmSetup} from '../arm-setup.js';
 import {
   NOISE_FLOOR_MAX_AGE_DAYS,
   readNoiseFloor,
@@ -215,8 +217,9 @@ export function registerVerifyFix(server: McpServer): void {
       '"retained_size" (retained size of the LARGEST instance of a class — the figure the leak-hunt methodology asks you to quote for a fix, rather than aggregate heap). ' +
       'Note "retained_size" forces a FULL parse of every rung on both arms because retained sizes need the dominator pass; the other metrics load LIGHT. ' +
       'Compares RATES, not levels: a build difference, a warmer cache or a longer session all shift the absolute level, and only the slope per interaction says whether the thing still accumulates. Each arm therefore needs at least 2 rungs — a single snapshot per arm is refused rather than compared, because that comparison is confounded. ' +
-      "Each rate is a least-squares slope over every rung, with a 95% interval from the residuals. The verdict is FIX CONFIRMED (the fixed arm's whole interval is at or under the residual rate expected_reduction allows), FIX FALLS SHORT (its whole interval is above it) or INCONCLUSIVE, with the reason: fewer than 3 rungs in an arm (a two-point slope has no error bar), a before arm whose own interval reaches zero, or an interval that crosses the threshold, in which case it also prints the largest reduction this run can confirm. More rungs on the same ladders narrow the interval; no extra ladders are needed. " +
+      "Each rate is a least-squares slope over every rung, with a 95% interval from the residuals; rungs of a leak-hunt round sit at the cycle counts their run.json records. The verdict is FIX CONFIRMED (the fixed arm's whole interval is at or under the residual rate expected_reduction allows), FIX FALLS SHORT (its whole interval is above it) or INCONCLUSIVE, with the reason: fewer than 3 rungs in an arm (a two-point slope has no error bar), a before arm whose own interval reaches zero, or an interval that crosses the threshold, in which case it also prints the largest reduction this run can confirm. More rungs on the same ladders narrow the interval; no extra ladders are needed. " +
       "Optional `before_repeat_paths`: a second, independently driven ladder of the UNFIXED build. Residuals within one ladder cannot see run-to-run drift; the two unfixed slopes can. Their spread widens the fixed arm's interval on both sides, and a spread as large as the reduction under test makes the verdict INCONCLUSIVE (run-to-run noise as large as the effect). Costs one more ladder parse, only when given. " +
+      "When the rungs sit in a leak-hunt round (run.json next to them or one level up), a setup check reads it: the served checkout changing or the V8 isolate restarting between an arm's rungs, or the arms (and any repeat ladder) differing in dev vs production-like build or browser version, withholds the verdict as SETUP CHANGED. Snapshots without a run.json are reported as not checked. " +
       'Optional `setup_name` (a name you choose for the app, build mode and machine, e.g. "example.com prod-like devbox-1"): with `before_repeat_paths`, the spread is recorded for that setup and metric; without, a spread recorded for it in the last 14 days is reused, so the extra ladder is paid once per setup rather than once per fix. ' +
       'Returns both series, both rates and intervals, the reduction and the verdict. Loads rungs transiently in LIGHT mode, one graph at a time.',
     {
@@ -258,7 +261,7 @@ export function registerVerifyFix(server: McpServer): void {
       cycles: z
         .number()
         .describe(
-          'Interaction cycles driven between consecutive rungs. Must be the same for both arms — otherwise the rates are not comparable.',
+          'Interaction cycles driven between consecutive rungs, for rungs without a run.json. Rungs of a leak-hunt round are placed at the cycle count run.json records for each, since the runner does not space them evenly.',
         ),
       expected_reduction: z
         .number()
@@ -350,11 +353,24 @@ export function registerVerifyFix(server: McpServer): void {
             )
           : null;
 
-        const beforeFit = armSlope(b.values, cycles);
-        const afterFit = armSlope(a.values, cycles);
+        // What run.json says about the setup under each arm. A changed setup
+        // withholds the verdict: the slope would mix two experiments. It also
+        // gives each rung's real cycle count, which places it on the slope.
+        const beforeSetup = readArmSetup(before);
+        const afterSetup = readArmSetup(after);
+        const repeatSetup = repeatPaths ? readArmSetup(repeatPaths) : null;
+        const fitArm = (values: number[], setup: ArmSetup | null): SlopeFit =>
+          setup?.cycles != null
+            ? fitSlope(setup.cycles, values)
+            : armSlope(values, cycles);
+
+        const beforeFit = fitArm(b.values, beforeSetup);
+        const afterFit = fitArm(a.values, afterSetup);
         const beforeRate = beforeFit.slope;
         const afterRate = afterFit.slope;
-        const repeatFit = repeatArm ? armSlope(repeatArm.values, cycles) : null;
+        const repeatFit = repeatArm
+          ? fitArm(repeatArm.values, repeatSetup)
+          : null;
         let repeatSpread = repeatFit
           ? Math.abs(repeatFit.slope - beforeRate)
           : 0;
@@ -441,6 +457,66 @@ export function registerVerifyFix(server: McpServer): void {
           '',
         ];
 
+        const placed = (name: string, s: ArmSetup | null): string =>
+          s?.cycles != null
+            ? `${name} at cycles ${s.cycles.map(c => formatNumber(c)).join(', ')} (run.json)`
+            : `${name} every ${formatNumber(cycles)} cycles`;
+        lines.push(
+          `- Rung positions: ${[
+            placed('before', beforeSetup),
+            placed('after', afterSetup),
+            ...(repeatSetup ? [placed('repeat', repeatSetup)] : []),
+          ].join('; ')}.`,
+        );
+        // Every pair, not each against the before arm: a value the before
+        // arm did not record would otherwise hide a mismatch between the rest.
+        const arms: Array<[string, ArmSetup]> = [
+          ['before', beforeSetup],
+          ['after', afterSetup],
+          ...(repeatSetup
+            ? [['repeat', repeatSetup] as [string, ArmSetup]]
+            : []),
+        ];
+        const setupIssues = [
+          ...beforeSetup.issues.map(i => `before arm: ${i}`),
+          ...afterSetup.issues.map(i => `after arm: ${i}`),
+          ...(repeatSetup?.issues ?? []).map(i => `repeat ladder: ${i}`),
+          ...arms.flatMap(([aName, a], i) =>
+            arms
+              .slice(i + 1)
+              .flatMap(([bName, b]) => compareArmSetups(a, b, aName, bName)),
+          ),
+        ];
+        const setupNotes = [
+          ...beforeSetup.notes.map(i => `before arm: ${i}`),
+          ...afterSetup.notes.map(i => `after arm: ${i}`),
+          ...(repeatSetup?.notes ?? []).map(i => `repeat ladder: ${i}`),
+        ];
+        if (beforeSetup.runJson == null && afterSetup.runJson == null) {
+          lines.push(
+            '- Setup check: no run.json next to the rungs, so whether the code, isolate, build or browser changed was not checked.',
+            '',
+          );
+        } else if (setupIssues.length === 0) {
+          lines.push(
+            '- Setup check: run.json shows the same served code and isolate within each arm, and the same build kind and browser across arms (where recorded).',
+            '',
+          );
+        } else {
+          lines.push(
+            '- Setup check found changes:',
+            ...setupIssues.map(i => `  - ${i}`),
+            '',
+          );
+        }
+        if (setupNotes.length > 0) {
+          lines.push(
+            '- Setup notes (not changes):',
+            ...setupNotes.map(i => `  - ${i}`),
+            '',
+          );
+        }
+
         if (beforeRate <= 0) {
           lines.push(
             `⚠ **INCONCLUSIVE — the BEFORE arm does not grow** (rate ${fmtRate(beforeRate)}/cycle). There is nothing for the fix to reduce, so this run cannot validate it. The unfixed arm has to reproduce the leak first: check the metric and locator, drive more cycles, or confirm the arm really is running the unfixed build.`,
@@ -498,7 +574,14 @@ export function registerVerifyFix(server: McpServer): void {
           `**Reduction: ${pct(reduction)}** of the before-rate (${fmtRate(beforeRate)} → ${fmtRate(afterRate)} per cycle), against an expected ${(expected_reduction * 100).toFixed(0)}%, so the fixed arm may keep at most ${fmtRate(v.threshold)} per cycle.`,
           '',
         );
-        if (v.verdict === 'FIX_CONFIRMED') {
+        if (
+          setupIssues.length > 0 &&
+          (v.verdict === 'FIX_CONFIRMED' || v.verdict === 'FIX_FALLS_SHORT')
+        ) {
+          lines.push(
+            `⛔ **SETUP CHANGED** — no verdict. The numbers would read as ${v.verdict === 'FIX_CONFIRMED' ? 'FIX CONFIRMED' : 'FIX FALLS SHORT'}, but the setup check above found ${setupIssues.length} change(s), so the rates do not compare one fix. Re-drive the affected arm with nothing else moving.`,
+          );
+        } else if (v.verdict === 'FIX_CONFIRMED') {
           lines.push(
             `✅ **FIX CONFIRMED** — the fixed arm's whole interval (${judged}) is at or under ${fmtRate(v.threshold)} per cycle.${afterRate > 0 ? ` It is not zero (${fmtRate(afterRate)}/cycle remains), so state the residual rather than claiming the leak is gone.` : ' The residual rate is zero.'}`,
           );
@@ -523,9 +606,14 @@ export function registerVerifyFix(server: McpServer): void {
             `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${judged}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.`,
           );
         }
+        if (setupIssues.length > 0 && v.verdict === 'INCONCLUSIVE') {
+          lines.push(
+            `⛔ The setup check above also found ${setupIssues.length} change(s), so a conclusive reading of these ladders would be withheld too. Re-drive the affected arm with nothing else moving.`,
+          );
+        }
         lines.push(
           '',
-          `_Both arms must have been driven with the same interaction and the same ${formatNumber(cycles)} cycles between rungs; nothing in a .heapsnapshot records that, so it is the caller's to guarantee — record it with \`memlab_ladder\`. The interval assumes the rungs of one arm scatter independently around a straight line; a before arm that bends or plateaus is better read with \`memlab_rate_model\` first._`,
+          `_Both arms must have been driven with the same interaction, and rungs without a run.json with the same ${formatNumber(cycles)} cycles between them; nothing in a .heapsnapshot records that, so it is the caller's to guarantee — record it with \`memlab_ladder\`. The interval assumes the rungs of one arm scatter independently around a straight line; a before arm that bends or plateaus is better read with \`memlab_rate_model\` first._`,
         );
         return toolResult(lines.join('\n'), armsHeader);
       } catch (err) {
