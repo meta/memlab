@@ -77,8 +77,7 @@ export default class StringAnalysis extends BaseAnalysis {
    */
   private static stringPatternsToObserve: StringPatterns = {
     // all strings (excluding sliced strings)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    'All strings': (_: string) => true,
+    'All strings': () => true,
 
     'Relay DataID': (str: string) => {
       return str.startsWith('Uzpf');

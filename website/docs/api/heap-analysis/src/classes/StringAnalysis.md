@@ -86,7 +86,7 @@ const result = await analysis.analyzeSnapshotFromFile(snapshotFile, {
 
 > **getCommandName**(): `string`
 
-Defined in: heap-analysis/src/plugins/StringAnalysis.ts:120
+Defined in: heap-analysis/src/plugins/StringAnalysis.ts:119
 
 get CLI command name for this memory analysis;
 use it with `memlab analyze <ANALYSIS_NAME>` in CLI

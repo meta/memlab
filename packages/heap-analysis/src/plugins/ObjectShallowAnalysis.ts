@@ -162,8 +162,7 @@ class ObjectShallowAnalysis extends BaseAnalysis {
   }
 
   private static objectPatternsToObserve: ObjectPatterns = {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    'All objects': (_: string) => true,
+    'All objects': () => true,
   };
 
   private shouldIgnoreNode(node: IHeapNode): boolean {
