@@ -699,6 +699,10 @@ const GROUPS: Group[] = [
         'memlab_finding_index',
         'Record findings as you go so the write-up is not reconstructed from memory. Keyed by retainer path, or by `kind` + `keys` for update queues, collections and probes; `list` filters by round, title and kind; `cover` stores the served revision and gating hash. With `run_dir` the workstream comes from run.json; a NEW `check` lists probable duplicates to `reconfirm` instead.',
       ],
+      [
+        'memlab_validate_finding',
+        'Before filing: does the write-up declare every check (reproduced, at rest, production-like, retainer path, per-cycle rate, not a known artifact, and the fix verdict for a fix) with evidence or a reason, and were the checks its claim rests on actually measured? VALID or INVALID with each problem.',
+      ],
       ['memlab_reports', 'Render the findings.'],
       ['memlab_hunt_report', 'Render a leak-hunt run.'],
       [
