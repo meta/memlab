@@ -254,6 +254,10 @@ const GROUPS: Group[] = [
         "Measure the round's declared positive controls — known accumulators — so a flat result can be trusted as clean rather than blind. Finds a control by value shape on a minified build, and says UNRESOLVED when it cannot.",
       ],
       [
+        'memlab_synthetic_controls',
+        'Did a sizing round SEE its synthetic leak (`--synthetic-leak-kb`) at the injected rate and leave its synthetic plateau (`--synthetic-plateau-cap`) flat? App-independent positive and negative controls, plus the smallest total-heap growth per cycle the ladder can tell from noise.',
+      ],
+      [
         'memlab_judges',
         'Judge a round against its stated invariants at rest — PASS / LEAK / BACKLOG / UNSETTLED / UNVERIFIED per plain-words claim, every probe on every rung and the settle rung in one pass.',
       ],
