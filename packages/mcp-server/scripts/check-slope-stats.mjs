@@ -125,3 +125,15 @@ test('rateVerdict: with no spread, expected_reduction 0 still reaches a verdict'
   assert.equal(v.verdict, 'FIX_CONFIRMED');
   assert.equal(v.reason, null);
 });
+
+test('poolFits: the mean of two slopes, with the interval of the mean', async () => {
+  const {poolFits} = await import(pathToFileURL(built).href);
+  const a = fitSlope([0, 1, 2, 3], [0, 1, 3, 3]);
+  const b = fitSlope([0, 1, 2, 3], [0, 2, 3, 5]);
+  const p = poolFits(a, b);
+  assert.ok(Math.abs(p.slope - (a.slope + b.slope) / 2) < 1e-12);
+  assert.equal(p.df, 4);
+  assert.ok(Math.abs(p.se - Math.sqrt(a.se ** 2 + b.se ** 2) / 2) < 1e-12);
+  assert.ok(Math.abs(p.hi - (p.slope + 2.776 * p.se)) < 1e-9);
+  assert.equal(poolFits(a, fitSlope([0, 1], [0, 1])).lo, null);
+});

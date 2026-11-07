@@ -212,3 +212,40 @@ export function rateVerdict(
     confirmableReduction: Math.max(0, 1 - hi / before.slope),
   };
 }
+
+/**
+ * The mean of two independent slopes of the same quantity (one per pair of
+ * ladders), with the interval of that mean from both standard errors. Null
+ * interval when either fit has none. The intercept is the plain mean of the
+ * two, which is not the intercept of any regression; nothing should read it.
+ */
+export function poolFits(a: SlopeFit, b: SlopeFit): SlopeFit {
+  const slope = (a.slope + b.slope) / 2;
+  const intercept = (a.intercept + b.intercept) / 2;
+  const n = a.n + b.n;
+  const df = Math.max(a.df, 0) + Math.max(b.df, 0);
+  if (a.se == null || b.se == null) {
+    return {
+      slope,
+      intercept,
+      r2: Math.min(a.r2, b.r2),
+      n,
+      df,
+      se: null,
+      lo: null,
+      hi: null,
+    };
+  }
+  const se = Math.sqrt(a.se * a.se + b.se * b.se) / 2;
+  const half = t95(df) * se;
+  return {
+    slope,
+    intercept,
+    r2: Math.min(a.r2, b.r2),
+    n,
+    df,
+    se,
+    lo: slope - half,
+    hi: slope + half,
+  };
+}

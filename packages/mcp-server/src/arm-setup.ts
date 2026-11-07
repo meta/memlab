@@ -40,6 +40,14 @@ export interface ArmSetup {
    * rung i at i * cycles is biased.
    */
   cycles: number[] | null;
+  /**
+   * When the arm was driven: run.json `started_epoch` and the index of its
+   * first rung (the arms of an A/B round share one run.json). Rung indices
+   * follow wall-clock order within one run.json, and start times order runs,
+   * so the pair is a sort key. Null when unknown.
+   */
+  startedEpoch: number | null;
+  firstRung: number | null;
 }
 
 /** run.json next to the rung, or one level up (the runner writes rungs to snapshots/). */
@@ -81,6 +89,8 @@ export function readArmSetup(rungPaths: string[]): ArmSetup {
       issues: [],
       notes: [],
       cycles: null,
+      startedEpoch: null,
+      firstRung: null,
     };
   }
   if (files.size > 1) {
@@ -88,11 +98,13 @@ export function readArmSetup(rungPaths: string[]): ArmSetup {
       runJson: [...files][0],
       devBuild: null,
       browserVersion: null,
+      startedEpoch: null,
+      firstRung: null,
+      notes: [],
+      cycles: null,
       issues: [
         `its rungs come from ${files.size} different runs (${[...files].join(', ')}), so the slope mixes sessions`,
       ],
-      notes: [],
-      cycles: null,
     };
   }
   const runJson = [...files][0];
@@ -105,6 +117,8 @@ export function readArmSetup(rungPaths: string[]): ArmSetup {
       issues: [`${runJson} is not readable JSON`],
       notes: [],
       cycles: null,
+      startedEpoch: null,
+      firstRung: null,
     };
   }
 
@@ -147,6 +161,9 @@ export function readArmSetup(rungPaths: string[]): ArmSetup {
     used.length === rungPaths.length && used.every(r => r.cycles != null)
       ? used.map(r => r.cycles as number)
       : null;
+  const startedEpoch =
+    typeof raw.started_epoch === 'number' ? raw.started_epoch : null;
+  const firstRung = used.length > 0 ? used[0].index : null;
   const issues: string[] = [];
   const notes: string[] = [];
   const unmatched = rungPaths.length - used.length;
@@ -156,7 +173,16 @@ export function readArmSetup(rungPaths: string[]): ArmSetup {
     );
   }
   if (used.length < 2) {
-    return {runJson, devBuild, browserVersion, issues, notes, cycles};
+    return {
+      runJson,
+      devBuild,
+      browserVersion,
+      issues,
+      notes,
+      cycles,
+      startedEpoch,
+      firstRung,
+    };
   }
   const first = Math.min(...used.map(r => r.index));
   const last = Math.max(...used.map(r => r.index));
@@ -212,7 +238,37 @@ export function readArmSetup(rungPaths: string[]): ArmSetup {
       );
     }
   }
-  return {runJson, devBuild, browserVersion, issues, notes, cycles};
+  return {
+    runJson,
+    devBuild,
+    browserVersion,
+    issues,
+    notes,
+    cycles,
+    startedEpoch,
+    firstRung,
+  };
+}
+
+/**
+ * The order two before/after pairs were driven in, from run.json. A balanced
+ * order (B A A B or A B B A) cancels a steady drift over the session; an
+ * alternating one (B A B A) lets that drift favor one arm. Two --ab rounds are
+ * always B A B A, since an --ab round drives its before arm first; a balanced
+ * second pair is two single-arm rounds. Null when any arm's start time is
+ * unknown.
+ */
+export function pairOrder(
+  arms: Array<{label: 'B' | 'A'; setup: ArmSetup}>,
+): {sequence: string; balanced: boolean} | null {
+  if (arms.some(a => a.setup.startedEpoch == null)) return null;
+  const sorted = [...arms].sort(
+    (x, y) =>
+      (x.setup.startedEpoch ?? 0) - (y.setup.startedEpoch ?? 0) ||
+      (x.setup.firstRung ?? 0) - (y.setup.firstRung ?? 0),
+  );
+  const sequence = sorted.map(a => a.label).join(' ');
+  return {sequence, balanced: sequence === 'B A A B' || sequence === 'A B B A'};
 }
 
 /** Differences between two arms that make their rates incomparable. */

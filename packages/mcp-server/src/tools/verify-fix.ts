@@ -26,8 +26,8 @@ import {
 import {countEntries, parseLocator, resolvePath} from './collection-trend.js';
 import {resolveLadderPaths} from './ladder.js';
 import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
-import {fitSlope, rateVerdict} from '../slope-stats.js';
-import {compareArmSetups, readArmSetup} from '../arm-setup.js';
+import {fitSlope, poolFits, rateVerdict} from '../slope-stats.js';
+import {compareArmSetups, pairOrder, readArmSetup} from '../arm-setup.js';
 import type {ArmSetup} from '../arm-setup.js';
 import {
   NOISE_FLOOR_MAX_AGE_DAYS,
@@ -220,6 +220,7 @@ export function registerVerifyFix(server: McpServer): void {
       "Each rate is a least-squares slope over every rung, with a 95% interval from the residuals; rungs of a leak-hunt round sit at the cycle counts their run.json records. The verdict is FIX CONFIRMED (the fixed arm's whole interval is at or under the residual rate expected_reduction allows), FIX FALLS SHORT (its whole interval is above it) or INCONCLUSIVE, with the reason: fewer than 3 rungs in an arm (a two-point slope has no error bar), a before arm whose own interval reaches zero, or an interval that crosses the threshold, in which case it also prints the largest reduction this run can confirm. More rungs on the same ladders narrow the interval; no extra ladders are needed. " +
       "Optional `before_repeat_paths`: a second, independently driven ladder of the UNFIXED build. Residuals within one ladder cannot see run-to-run drift; the two unfixed slopes can. Their spread widens the fixed arm's interval on both sides, and a spread as large as the reduction under test makes the verdict INCONCLUSIVE (run-to-run noise as large as the effect). Costs one more ladder parse, only when given. " +
       "When the rungs sit in a leak-hunt round (run.json next to them or one level up), a setup check reads it: the served checkout changing or the V8 isolate restarting between an arm's rungs, or the arms (and any repeat ladder) differing in dev vs production-like build or browser version, withholds the verdict as SETUP CHANGED. Snapshots without a run.json are reported as not checked. " +
+      "Optional `second_pair` ({before_paths, after_paths}, at least 3 rungs per arm): one more independently driven pair, for when one pair came out INCONCLUSIVE. The verdict is then read off the mean of the two pairs' slopes; half the larger disagreement between the pairs widens the fixed arm's interval, so the second pair doubles as the run-to-run check. With run.json start times it also reports the order the four arms ran in: before-after-after-before (or the reverse) cancels a steady drift over the session, alternating does not. " +
       'Optional `setup_name` (a name you choose for the app, build mode and machine, e.g. "example.com prod-like devbox-1"): with `before_repeat_paths`, the spread is recorded for that setup and metric; without, a spread recorded for it in the last 14 days is reused, so the extra ladder is paid once per setup rather than once per fix. ' +
       'Returns both series, both rates and intervals, the reduction and the verdict. Loads rungs transiently in LIGHT mode, one graph at a time.',
     {
@@ -251,6 +252,15 @@ export function registerVerifyFix(server: McpServer): void {
         .optional()
         .describe(
           'Optional same-build check: ordered rungs of a SECOND, independently driven ladder of the UNFIXED build (a separate run, not more rungs of the same session), same cycles between rungs.',
+        ),
+      second_pair: z
+        .object({
+          before_paths: z.array(z.string()),
+          after_paths: z.array(z.string()),
+        })
+        .optional()
+        .describe(
+          'Optional second, independently driven before/after pair (same metric, locator and cycles), each oldest first. Drive it in the reverse order of the first pair.',
         ),
       setup_name: z
         .string()
@@ -289,6 +299,7 @@ export function registerVerifyFix(server: McpServer): void {
       after_paths,
       before_repeat_paths,
       setup_name,
+      second_pair,
       cycles,
       expected_reduction,
       chain_edge,
@@ -364,10 +375,13 @@ export function registerVerifyFix(server: McpServer): void {
             ? fitSlope(setup.cycles, values)
             : armSlope(values, cycles);
 
-        const beforeFit = fitArm(b.values, beforeSetup);
-        const afterFit = fitArm(a.values, afterSetup);
-        const beforeRate = beforeFit.slope;
-        const afterRate = afterFit.slope;
+        let beforeFit = fitArm(b.values, beforeSetup);
+        let afterFit = fitArm(a.values, afterSetup);
+        let beforeRate = beforeFit.slope;
+        // The repeat ladder and the noise ledger describe ONE before ladder,
+        // so they stay on the first pair's rate after a second pair is pooled.
+        const firstBeforeRate = beforeRate;
+        let afterRate = afterFit.slope;
         const repeatFit = repeatArm
           ? fitArm(repeatArm.values, repeatSetup)
           : null;
@@ -457,6 +471,59 @@ export function registerVerifyFix(server: McpServer): void {
           '',
         ];
 
+        // A second pair: verdict on the mean of both pairs' slopes, widened by
+        // half the larger disagreement between the pairs.
+        let pairSpread = 0;
+        let pair2: {before: string[]; after: string[]} | null = null;
+        let pair2Setups: {before: ArmSetup; after: ArmSetup} | null = null;
+        if (second_pair) {
+          pair2 = {
+            before: resolveLadderPaths(second_pair.before_paths).paths,
+            after: resolveLadderPaths(second_pair.after_paths).paths,
+          };
+          if (pair2.before.length < 3 || pair2.after.length < 3) {
+            return errorResult(
+              "second_pair needs at least 3 rungs in each arm: a two-point slope has no interval, and pooling it would drop the first pair's.",
+            );
+          }
+          const b2 = await measureArm(
+            pair2.before,
+            metric_kind,
+            locator,
+            chain_edge,
+            max_file_size_mb,
+          );
+          const a2 = await measureArm(
+            pair2.after,
+            metric_kind,
+            locator,
+            chain_edge,
+            max_file_size_mb,
+          );
+          pair2Setups = {
+            before: readArmSetup(pair2.before),
+            after: readArmSetup(pair2.after),
+          };
+          const b2Fit = fitArm(b2.values, pair2Setups.before);
+          const a2Fit = fitArm(a2.values, pair2Setups.after);
+          pairSpread =
+            Math.max(
+              Math.abs(b2Fit.slope - beforeFit.slope),
+              Math.abs(a2Fit.slope - afterFit.slope),
+            ) / 2;
+          lines.push(
+            `- second pair: before ${b2.values.map(v => fmtVal(v)).join(' → ')} (${fmtRate(b2Fit.slope)}/cycle, ${fmtInterval(b2Fit)}); after ${a2.values.map(v => fmtVal(v)).join(' → ')} (${fmtRate(a2Fit.slope)}/cycle, ${fmtInterval(a2Fit)}).`,
+          );
+          beforeFit = poolFits(beforeFit, b2Fit);
+          afterFit = poolFits(afterFit, a2Fit);
+          beforeRate = beforeFit.slope;
+          afterRate = afterFit.slope;
+          lines.push(
+            `- both pairs: before ${fmtRate(beforeRate)}/cycle (${fmtInterval(beforeFit)}), after ${fmtRate(afterRate)}/cycle (${fmtInterval(afterFit)}). The pairs disagree by up to ${fmtRate(2 * pairSpread)} per cycle, so the fixed arm's interval is widened by half that.`,
+            '',
+          );
+        }
+
         const placed = (name: string, s: ArmSetup | null): string =>
           s?.cycles != null
             ? `${name} at cycles ${s.cycles.map(c => formatNumber(c)).join(', ')} (run.json)`
@@ -466,6 +533,12 @@ export function registerVerifyFix(server: McpServer): void {
             placed('before', beforeSetup),
             placed('after', afterSetup),
             ...(repeatSetup ? [placed('repeat', repeatSetup)] : []),
+            ...(pair2Setups
+              ? [
+                  placed('second before', pair2Setups.before),
+                  placed('second after', pair2Setups.after),
+                ]
+              : []),
           ].join('; ')}.`,
         );
         // Every pair, not each against the before arm: a value the before
@@ -492,6 +565,41 @@ export function registerVerifyFix(server: McpServer): void {
           ...afterSetup.notes.map(i => `after arm: ${i}`),
           ...(repeatSetup?.notes ?? []).map(i => `repeat ladder: ${i}`),
         ];
+        let orderLine: string | null = null;
+        if (pair2Setups) {
+          const b2Setup = pair2Setups.before;
+          const a2Setup = pair2Setups.after;
+          setupNotes.push(
+            ...b2Setup.notes.map(i => `second pair, before arm: ${i}`),
+            ...a2Setup.notes.map(i => `second pair, after arm: ${i}`),
+          );
+          const second: Array<[string, ArmSetup]> = [
+            ['second before', b2Setup],
+            ['second after', a2Setup],
+          ];
+          setupIssues.push(
+            ...b2Setup.issues.map(i => `second pair, before arm: ${i}`),
+            ...a2Setup.issues.map(i => `second pair, after arm: ${i}`),
+            ...second.flatMap(([bName, b], j) =>
+              [...arms, ...second.slice(0, j)].flatMap(([aName, a]) =>
+                compareArmSetups(a, b, aName, bName),
+              ),
+            ),
+          );
+          const order = pairOrder([
+            {label: 'B', setup: beforeSetup},
+            {label: 'A', setup: afterSetup},
+            {label: 'B', setup: b2Setup},
+            {label: 'A', setup: a2Setup},
+          ]);
+          orderLine =
+            order == null
+              ? '- Pair order: unknown (run.json start times missing), so drift over the session may favor one arm.'
+              : order.balanced
+                ? `- Pair order: ${order.sequence} (B = before, A = after) — balanced, so a steady drift over the session cancels.`
+                : `- Pair order: ${order.sequence} (B = before, A = after) — not balanced, so a steady drift over the session favors one arm. Next time drive the second pair in the reverse order of the first: an --ab round always drives its before arm first, so drive it as two single-arm rounds, after then before.`;
+        }
+        if (orderLine) lines.push(orderLine, '');
         if (beforeSetup.runJson == null && afterSetup.runJson == null) {
           lines.push(
             '- Setup check: no run.json next to the rungs, so whether the code, isolate, build or browser changed was not checked.',
@@ -527,7 +635,7 @@ export function registerVerifyFix(server: McpServer): void {
         const pct = (x: number): string => `${(x * 100).toFixed(1)}%`;
         const setupName = setup_name?.trim() || null;
         if (setupName != null && repeatFit) {
-          const relative = repeatSpread / beforeRate;
+          const relative = repeatSpread / firstBeforeRate;
           const err = await recordNoiseFloor({
             setup: setupName,
             metric_kind,
@@ -544,7 +652,7 @@ export function registerVerifyFix(server: McpServer): void {
         } else if (setupName != null) {
           const floor = readNoiseFloor(setupName, metric_kind, locator);
           if (floor != null) {
-            repeatSpread = floor.relative_spread * beforeRate;
+            repeatSpread = floor.relative_spread * firstBeforeRate;
             lines.push(
               `- run-to-run spread from the noise ledger for setup "${setupName}": ${pct(floor.relative_spread)} of the before rate (${fmtRate(repeatSpread)} per cycle here), recorded ${floor.recorded_at.slice(0, 10)}. The fixed arm's interval is widened by that on both sides.`,
               '',
@@ -558,18 +666,14 @@ export function registerVerifyFix(server: McpServer): void {
         }
 
         const reduction = (beforeRate - afterRate) / beforeRate;
-        const v = rateVerdict(
-          beforeFit,
-          afterFit,
-          expected_reduction,
-          repeatSpread,
-        );
+        const spread = Math.max(repeatSpread, pairSpread);
+        const v = rateVerdict(beforeFit, afterFit, expected_reduction, spread);
         const judged =
-          afterFit.lo == null || afterFit.hi == null || repeatSpread === 0
+          afterFit.lo == null || afterFit.hi == null || spread === 0
             ? fmtInterval(afterFit)
             : // Widened down to zero, not past it, unless the arm's own
               // interval already reached below zero.
-              `${fmtRate(Math.max(afterFit.lo - repeatSpread, Math.min(afterFit.lo, 0)))} … ${fmtRate(afterFit.hi + repeatSpread)}, with the run-to-run spread`;
+              `${fmtRate(Math.max(afterFit.lo - spread, Math.min(afterFit.lo, 0)))} … ${fmtRate(afterFit.hi + spread)}, with the run-to-run spread`;
         lines.push(
           `**Reduction: ${pct(reduction)}** of the before-rate (${fmtRate(beforeRate)} → ${fmtRate(afterRate)} per cycle), against an expected ${(expected_reduction * 100).toFixed(0)}%, so the fixed arm may keep at most ${fmtRate(v.threshold)} per cycle.`,
           '',
@@ -599,11 +703,11 @@ export function registerVerifyFix(server: McpServer): void {
           );
         } else if (v.reason === 'run_to_run_noise') {
           lines.push(
-            `⚠ **INCONCLUSIVE** (run-to-run noise as large as the effect) — two ladders of the SAME unfixed build differ by ${fmtRate(repeatSpread)} per cycle, as much as the ${fmtRate(expected_reduction * beforeRate)} per cycle the fix is expected to remove. No verdict from this setup: find what moves between runs (another session on the browser or checkout, a busy host, a different warmup) and measure again.`,
+            `⚠ **INCONCLUSIVE** (run-to-run noise as large as the effect) — ${pairSpread > repeatSpread ? `the two pairs disagree by up to ${fmtRate(2 * pairSpread)} per cycle, which leaves the mean of the pairs uncertain by ${fmtRate(spread)}` : `repeated ladders differ by ${fmtRate(spread)} per cycle`}, as much as the ${fmtRate(expected_reduction * beforeRate)} per cycle the fix is expected to remove. No verdict from this setup: find what moves between runs (another session on the browser or checkout, a busy host, a different warmup) and measure again.`,
           );
         } else {
           lines.push(
-            `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${judged}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.`,
+            `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${judged}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.${pair2 ? '' : ' Or drive one more pair in the reverse order and pass it as `second_pair`.'}`,
           );
         }
         if (setupIssues.length > 0 && v.verdict === 'INCONCLUSIVE') {
