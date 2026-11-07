@@ -14,11 +14,11 @@ import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {
   errorResult,
-  escapeRegExp,
   formatNumber,
   markdownTable,
   toolResult,
 } from '../utils.js';
+import {textPattern} from './query-objects.js';
 
 /**
  * The heap's VOCABULARY: every distinct property name, with how many objects
@@ -77,14 +77,10 @@ export function registerPropertyNames(server: McpServer): void {
             'No heap snapshot loaded. Use memlab_load_snapshot first.',
           );
         }
-        let re: RegExp | null = null;
-        if (pattern != null && pattern.length > 0) {
-          try {
-            re = new RegExp(pattern, 'i');
-          } catch {
-            re = new RegExp(escapeRegExp(pattern), 'i');
-          }
-        }
+        const re =
+          pattern != null && pattern.length > 0
+            ? textPattern(pattern).re
+            : null;
         const counts = new Map<string, number>();
         const classes = new Map<string, Map<string, number>>();
         snapshot.nodes.forEach((node: IHeapNode) => {

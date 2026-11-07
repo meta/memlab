@@ -17,12 +17,12 @@ import {getSnapshot} from '../heap-state.js';
 import {moduleRecords, moduleScopes} from '../module-registry.js';
 import {
   errorResult,
-  escapeRegExp,
   formatBytes,
   formatNumber,
   markdownTable,
   toolResult,
 } from '../utils.js';
+import {textPattern} from './query-objects.js';
 
 /**
  * Attribute heap bytes to the MODULE that owns them.
@@ -270,12 +270,7 @@ function shortestPathTable(
     .filter(([, r]) => r.bytes >= minBytes)
     .sort((a, b) => b[1].bytes - a[1].bytes);
   if (namePattern != null && namePattern.length > 0) {
-    let re: RegExp;
-    try {
-      re = new RegExp(namePattern, 'i');
-    } catch {
-      re = new RegExp(escapeRegExp(namePattern), 'i');
-    }
+    const re = textPattern(namePattern).re;
     rows = rows.filter(([m]) => re.test(m));
   }
   return [
@@ -372,12 +367,7 @@ export function registerModuleAttribution(server: McpServer): void {
         );
         let rows = stats.filter(s => s.selfBytes >= min_bytes);
         if (name_pattern != null && name_pattern.length > 0) {
-          let re: RegExp;
-          try {
-            re = new RegExp(name_pattern, 'i');
-          } catch {
-            re = new RegExp(escapeRegExp(name_pattern), 'i');
-          }
+          const re = textPattern(name_pattern).re;
           rows = rows.filter(s => re.test(s.module));
         }
         const total = attributed + unattributed;
