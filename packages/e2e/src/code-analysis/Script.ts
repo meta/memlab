@@ -124,13 +124,8 @@ export default class Script {
     const locToClosureScopeMap = new Map<string, ClosureScope>();
     locToClosureScopeMap.set(this.locToStr(ast.program.loc), root);
 
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-
     // build closure scope hierarchy
-    const buildClosureScopeFromFunction = function (
-      path: NodePath<FunctionClass>,
-    ) {
+    const buildClosureScopeFromFunction = (path: NodePath<FunctionClass>) => {
       const closureScope = {
         functionName: 'id' in path.node ? path.node?.id?.name : null,
         functionType: path.node.type,
@@ -139,9 +134,9 @@ export default class Script {
         nestedClosures: [] as ClosureScope[],
         loc: path.node.loc,
       };
-      locToClosureScopeMap.set(self.locToStr(path.node.loc), closureScope);
+      locToClosureScopeMap.set(this.locToStr(path.node.loc), closureScope);
       // find and connect to parent closure scope
-      const parentClosureScope = self.findParentFunctionClosureScope(
+      const parentClosureScope = this.findParentFunctionClosureScope(
         locToClosureScopeMap,
         path,
       );
@@ -155,29 +150,29 @@ export default class Script {
     //    of the containing scope
     // If true, add the identifier name to the usedVariablesFromParentScope
     // of the containing scope
-    const fillInVarInfo = function (path: NodePath<Identifier>) {
+    const fillInVarInfo = (path: NodePath<Identifier>) => {
       // if the identifier is a function name of a function definition
       if (isFunctionType(path.parentPath.node.type)) {
         return;
       }
       const name = path.node.name;
-      let parentPath = self.findParentFunctionPath(path);
+      let parentPath = this.findParentFunctionPath(path);
       let parentClosureScope = parentPath
-        ? locToClosureScopeMap.get(self.locToStr(parentPath.node.loc))
+        ? locToClosureScopeMap.get(this.locToStr(parentPath.node.loc))
         : null;
       // eslint-disable-next-line no-constant-condition
       while (true) {
         if (!parentPath || !parentClosureScope) {
           break;
         }
-        const grandparentPath = self.findParentFunctionPath(
+        const grandparentPath = this.findParentFunctionPath(
           parentPath as NodePath<FunctionClass>,
         );
         if (!grandparentPath) {
           break;
         }
         const grandparentClosureScope = locToClosureScopeMap.get(
-          self.locToStr(grandparentPath.node.loc),
+          this.locToStr(grandparentPath.node.loc),
         );
         if (!grandparentClosureScope) {
           break;
