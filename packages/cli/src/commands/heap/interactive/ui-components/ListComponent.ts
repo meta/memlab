@@ -118,58 +118,56 @@ export default class ListComponent {
   }
 
   protected registerKeys() {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
     this.element.on(
       'keypress',
       (char: string, key: Widgets.Events.IKeyEventArg) => {
-        const content = self.content;
+        const content = this.content;
 
         // if selecting "More"
         if (
           key.name === 'enter' &&
           content.length > 0 &&
-          self.listIndex >= 0 &&
-          self.listIndex === self.moreEntryIndex
+          this.listIndex >= 0 &&
+          this.listIndex === this.moreEntryIndex
         ) {
-          self.loadMoreContent();
+          this.loadMoreContent();
           return;
         }
 
         // if press 'd'
         if (key.name === 'd' || key.name === 'D') {
-          self.selectUpdate(self.listIndex, content, {
+          this.selectUpdate(this.listIndex, content, {
             keyName: key.name,
           });
         }
 
         // move selection down
-        if (key.name === 'down' && self.listIndex < self.displayedItems - 1) {
-          self.element.select(++self.listIndex);
-          self.selectUpdate(self.listIndex, content, {
+        if (key.name === 'down' && this.listIndex < this.displayedItems - 1) {
+          this.element.select(++this.listIndex);
+          this.selectUpdate(this.listIndex, content, {
             keyName: key.name,
           });
 
           // move selection up
-        } else if (key.name === 'up' && self.listIndex > 0) {
-          self.element.select(--self.listIndex);
-          self.selectUpdate(self.listIndex, content, {
+        } else if (key.name === 'up' && this.listIndex > 0) {
+          this.element.select(--this.listIndex);
+          this.selectUpdate(this.listIndex, content, {
             keyName: key.name,
           });
 
           // hit enter to select the current heap object
         } else if (key.name === 'enter') {
-          self.selectUpdate(self.listIndex, content, {
+          this.selectUpdate(this.listIndex, content, {
             keyName: key.name,
           });
 
           // scroll left
         } else if (key.name === 'left') {
-          self.scrollLeft();
+          this.scrollLeft();
 
           // scroll right
         } else if (key.name === 'right') {
-          self.scrollRight();
+          this.scrollRight();
         }
       },
     );

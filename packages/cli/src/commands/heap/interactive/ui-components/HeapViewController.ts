@@ -284,11 +284,9 @@ export default class HeapViewController {
         stringContent: this.getKeyValuePairString('column', location.column),
       });
     }
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
     options.details?.forEach((value, key) =>
       data.items.push({
-        stringContent: self.getKeyValuePairString(key, value),
+        stringContent: this.getKeyValuePairString(key, value),
       }),
     );
     // inject additional node information
