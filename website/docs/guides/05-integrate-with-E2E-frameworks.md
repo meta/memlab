@@ -31,7 +31,7 @@ The API could look like this (as an example):
 await takeJSHeapSnapshot(page, tag);
 ```
 `tag` is one of `baseline`, `target`, or `final`. These three snapshots
-correspond to [`SBP`, `STP`, `SFP`](https://meta.github.io/memlab/docs/how-memlab-works)
+correspond to [`SBP`, `STP`, `SFP`](../how-memlab-works.md)
 respectively.
 
 Your `takeJSHeapSnapshot` API should write files in the format expected by
@@ -58,7 +58,7 @@ points to collect the three snapshots and write them to disk.
 ## Pipe Files into MemLab
 Once your `takeJSHeapSnapshot` implementation has written the heap snapshots
 and metadata files to disk, you can find memory leaks using the
-[memlab core API](https://meta.github.io/memlab/docs/api/api/src/functions/findLeaksBySnapshotFilePaths):
+[memlab core API](../api/api/src/functions/findLeaksBySnapshotFilePaths.md):
 
 ```javascript
 const {findLeaks, BrowserInteractionResultReader} = require('@memlab/api');
@@ -80,7 +80,7 @@ object represents a browser interaction step.
 To detect memory leaks, MemLab requires at least three steps labeled
 `baseline`, `target`, and `final`, in that order. For details on why
 three snapshots are needed,
-see [How memlab Works](https://meta.github.io/memlab/docs/how-memlab-works).
+see [How memlab Works](../how-memlab-works.md).
 
 ```json
 [
@@ -121,7 +121,7 @@ Now let's take a look at the JSON encoding of a specific step:
 
 * `name` is a human-readable name for the interaction step, used for documentation purposes.
 * `"snapshot": true` indicates that a heap snapshot was captured after this E2E interaction step. If `false`, MemLab skips this step when loading and diffing heap snapshots.
-* `type` should be one of: `baseline`, `target`, or `final`. See [How memlab Works](https://meta.github.io/memlab/docs/how-memlab-works) for their meanings.
+* `type` should be one of: `baseline`, `target`, or `final`. See [How memlab Works](../how-memlab-works.md) for their meanings.
 * `idx` is the index of the interaction step. MemLab uses this index to load the corresponding heap snapshot file using the naming convention `s${idx}.heapsnapshot` when `snapshot` is `true`. For example, when `idx` is `1`, MemLab looks for `s1.heapsnapshot` in the same directory as the `snap-seq.json` file.
 * `JSHeapUsedSize` is an optional field that records the total heap size in bytes after this E2E interaction step completes. If all steps include this field, MemLab generates a chart showing memory usage across steps before listing detected memory leaks in the terminal.
 
