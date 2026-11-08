@@ -597,7 +597,12 @@ in the digest; it is left out on A/B rounds. When the round recorded
 cross-origin isolated), the header gives its first and last value per segment,
 with the dedicated-worker share: workers and wasm are in no page snapshot, so
 this is the only place their growth shows. `memlab_hunt_report` lists the same
-two numbers per rung in its off-heap table. The digest ends with the next calls worth
+two numbers per rung in its off-heap table. Once per sweep (the round
+directories sharing a parent), a `standard` battery also runs
+`memlab_sparse_elements`, `memlab_duplicated_strings` and
+`memlab_duplicate_objects` on the final rung and puts their top rows in the
+digest: on the first round, and again when a round's final rung is at least
+25% larger than the largest one already scanned. The digest ends with the next calls worth
 making for that round; a call already suggested in an earlier round of the
 same sweep, for the same class, is named once instead of repeated. Likewise a
 `memlab_round_audit` row an earlier round of the sweep showed word for word is

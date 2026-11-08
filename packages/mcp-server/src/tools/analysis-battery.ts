@@ -624,9 +624,80 @@ const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
     },
     {tool: /retention_windows/, re: /window-shaped key|longer than it/, max: 3},
     {tool: /intern_opportunities/, re: /^Verdict:/, max: 2},
+    {tool: /sparse_elements/, re: /of unused slots|^\| (?!Owner)/, max: 4},
+    {tool: /duplicated_strings/, re: /interning savings/i, max: 1},
     {tool: /duplicate_objects/, re: /collapse to|Reclaimable/, max: 2},
     {tool: /app_heap/, re: /application|bundle/, max: 4},
   ];
+
+/**
+ * The optimization scans a standard battery adds once per sweep. They read the
+ * final rung the deep dive already loaded, so they cost scan time, not a parse.
+ */
+const SWEEP_OPTIMIZATION: Step[] = [
+  {tool: 'memlab_sparse_elements', args: {limit: 8}},
+  {tool: 'memlab_duplicated_strings', args: {}},
+  {tool: 'memlab_duplicate_objects', args: {}},
+];
+
+/** A rung must be this much larger than the last optimized one to run again. */
+const SWEEP_OPTIMIZATION_GROWTH = 1.25;
+
+function fileSize(p: string): number | null {
+  try {
+    return fs.statSync(p).size;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why a standard battery should add the optimization scans for this round, or
+ * null when another round of the sweep already covered a rung this large.
+ *
+ * Optimization findings (pre-sized buffers, sparse caches, duplicated strings)
+ * live in the largest heap, and in one sweep they surfaced only from a manual
+ * optimization pass run at the end. A sweep shares a parent directory, and a
+ * round whose battery ran the scans has their output in `analysis/`.
+ */
+export function sweepOptimizationReason(
+  runDir: string,
+  finalRung: string,
+): string | null {
+  const self = path.resolve(runDir);
+  const parent = path.dirname(self);
+  let largestDone = 0;
+  try {
+    for (const e of fs.readdirSync(parent)) {
+      const d = path.resolve(parent, e);
+      if (d === self) continue;
+      if (
+        !fs.existsSync(path.join(d, 'analysis', 'memlab_sparse_elements.txt'))
+      ) {
+        continue;
+      }
+      try {
+        const m = loadRunManifest(d);
+        largestDone = Math.max(
+          largestDone,
+          fileSize(m.paths[m.paths.length - 1]) ?? 0,
+        );
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return null;
+  }
+  const size = fileSize(finalRung);
+  if (largestDone === 0) {
+    return 'no other round of this sweep has run them yet';
+  }
+  if (size != null && size >= largestDone * SWEEP_OPTIMIZATION_GROWTH) {
+    return `this final rung is ${formatBytes(size)}, ${Math.round((size / largestDone - 1) * 100)}% larger than the largest one already scanned`;
+  }
+  return null;
+}
 
 /**
  * Tools whose digest is a TABLE, where `digest_rows` decides how many rows to
@@ -1175,7 +1246,7 @@ export function registerAnalysisBattery(server: McpServer): void {
       'Give it `run_dir` and it resolves the ladder, the per-rung cycle counts and the total cycles from `run.json`, so the per-cycle axis is measured rather than assumed.\n\n' +
       'When the round directory holds an invariants.json, `memlab_judges` runs in every profile and its verdict summary is in the digest. ' +
       'When the round captured a settle rung, `memlab_settle_check` runs in EVERY profile and its `N HELD / M DRAINED` headline is in the digest: a ladder alone cannot tell retention from in-flight backlog, and a round without that line has a leak list that is mostly backlog.\n\n' +
-      'Profiles: `standard` (ladder + leak detectors), `optimization` (adds string/shape/duplication analysis), `deep` (everything, including the slower single-snapshot passes).',
+      'Profiles: `standard` (ladder + leak detectors), `optimization` (adds string/shape/duplication analysis), `deep` (everything, including the slower single-snapshot passes). Once per sweep a `standard` battery also runs three optimization scans on the final rung (first round of the sweep, or a final rung 25% larger than any already scanned).',
     {
       run_dir: z
         .string()
@@ -1413,6 +1484,11 @@ export function registerAnalysisBattery(server: McpServer): void {
             .map(c => ({name: c.name, edge: c.edge, value_keys: c.valueKeys})),
         );
         const ab = abSegments(run_dir, manifest);
+        const optimizationReason =
+          profile === 'standard' && ab == null
+            ? sweepOptimizationReason(run_dir, finalRung)
+            : null;
+        if (optimizationReason != null) basePlan.push(...SWEEP_OPTIMIZATION);
         if (ab == null && probeSet != null) {
           // With the ladder steps, before the deep dive's load: the rungs
           // they kept parsed are reused.
@@ -1657,6 +1733,12 @@ export function registerAnalysisBattery(server: McpServer): void {
                   ]
                 : [];
             })(),
+            ...(optimizationReason != null
+              ? [
+                  `_Optimization scans (\`memlab_sparse_elements\`, \`memlab_duplicated_strings\`, \`memlab_duplicate_objects\`) added on the final rung, once per sweep: ${optimizationReason}._`,
+                  '',
+                ]
+              : []),
             ...(lowDisk
               ? [
                   `> ⚠️ **Low disk: ${formatBytes(freeBytes)} free, against a ${formatBytes(ladderBytes)} ladder** (the tighter of the output volume and the temp volume a compressed rung expands into). ` +
