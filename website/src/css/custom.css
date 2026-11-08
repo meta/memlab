@@ -127,6 +127,17 @@ html {
   padding-right: 1.25rem;
 }
 
+/* a backdrop-filter makes the navbar the containing block of the fixed
+   mobile sidebar, which would clip the sidebar to the navbar's height */
+.navbar-sidebar--show {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.navbar-sidebar {
+  background-color: var(--ifm-background-surface-color);
+}
+
 .navbar__brand {
   margin-right: 1.75rem;
 }
