@@ -364,7 +364,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_job_status` | Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done. `wait_ms` (up to 90 s) waits for it to finish. |
 | `memlab_shape_census_diff` | Per-SHAPE growth across the ladder. Reach for this the moment a class-level tool blames `Object`: it turns "`Object` +377,959" into "`{event,timestamp}` ~0 → 53,029" in one call. |
 | `memlab_census_diff` | Detached-DOM and listener census at TWO rungs, diffed per class and per callback in one call. |
-| `memlab_leak_report` | The ladder verdict: per-class growth across an ordered set of snapshots; SATURATING (warm-up) and STEP+LINEAR (post-step rate) rows are told apart from linear growth. |
+| `memlab_leak_report` | The ladder verdict: per-class growth across an ordered set of snapshots; SATURATING (warm-up) and STEP+LINEAR (post-step rate) rows are told apart from linear growth, and rows that grow by one shared unit are grouped. |
 | `memlab_growth_cohort` | Who holds the NEWEST instances — the tail of the id range IS the growth. Reports it next to the whole population, so a static collection masking an accumulating one is visible in one call. `group_by: "referrer+shape"` splits an `Object` cohort into (holder, record type) rows, with counts on a `baseline_path` rung. |
 | `memlab_sequence_analysis` | Per-class trend across a ladder, with artifact families flagged. |
 | `memlab_collection_trend` | Entry counts of NAMED collections across a ladder, with growth per interaction cycle. |

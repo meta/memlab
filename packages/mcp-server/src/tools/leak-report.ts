@@ -310,6 +310,68 @@ export function integerRatios(
   return out;
 }
 
+/**
+ * Growing rows that move together by one unit: each member's net delta is a
+ * whole multiple of the base row's, and so is every per-step delta.
+ *
+ * One leaked object graph shows up as several rows: a detached `<div>`, the
+ * listener that holds it and the closure scope that holds the listener each
+ * grow by one per leak. Read separately they look like three findings.
+ *
+ * `tolerance` is absolute on the net ratio, for the reason `integerRatios`
+ * gives. A small base makes every row a multiple of it, so `minUnit` drops
+ * rows that grew by less than that across the ladder. A base must also grow
+ * on two steps: rows that all jumped once at first mount and then stayed flat
+ * match each other trivially and are not a leak.
+ */
+export function growthUnits<R extends {counts: number[]; netCount: number}>(
+  rows: ReadonlyArray<R>,
+  {minUnit = 10, maxMultiple = 20, tolerance = 0.02} = {},
+): Array<{base: R; members: Array<{row: R; multiple: number}>}> {
+  const eligible = rows
+    .filter(r => r.netCount >= minUnit)
+    .sort((a, b) => a.netCount - b.netCount);
+  const steps = (eligible[0]?.counts.length ?? 1) - 1;
+  const taken = new Set<R>();
+  const out: Array<{base: R; members: Array<{row: R; multiple: number}>}> = [];
+  for (const base of eligible) {
+    if (taken.has(base) || growingSteps(base) < Math.min(2, steps)) continue;
+    const members = [{row: base, multiple: 1}];
+    for (const r of eligible) {
+      if (r === base || taken.has(r) || r.netCount < base.netCount) continue;
+      const ratio = r.netCount / base.netCount;
+      const k = Math.round(ratio);
+      if (k > maxMultiple || Math.abs(ratio - k) > tolerance) continue;
+      if (stepsScale(base.counts, r.counts, k)) {
+        members.push({row: r, multiple: k});
+      }
+    }
+    if (members.length < 2) continue;
+    for (const m of members) taken.add(m.row);
+    out.push({base, members});
+  }
+  return out;
+}
+
+function growingSteps(row: {counts: number[]; netCount: number}): number {
+  const floor = Math.max(1, 0.05 * row.netCount);
+  let n = 0;
+  for (let i = 1; i < row.counts.length; i++) {
+    if (row.counts[i] - row.counts[i - 1] >= floor) n++;
+  }
+  return n;
+}
+
+function stepsScale(base: number[], other: number[], k: number): boolean {
+  if (base.length !== other.length) return false;
+  for (let i = 1; i < base.length; i++) {
+    const want = k * (base[i] - base[i - 1]);
+    const got = other[i] - other[i - 1];
+    if (Math.abs(got - want) > Math.max(2, 0.1 * Math.abs(want))) return false;
+  }
+  return true;
+}
+
 /** Per-cycle (or per-rung) rate of the first and the last ladder step. */
 function stepRates(
   counts: number[],
@@ -375,6 +437,7 @@ export function registerLeakReport(server: McpServer): void {
       'Exists because the trend pass alone cannot tell a leak from an artifact: every hunt then ran memlab_dev_artifacts and a retainer trace by hand on each grower and joined the three outputs mentally, which is the step that gets skipped right before something is reported as a production leak. Composes memlab_sequence_analysis with memlab_dev_artifacts and a retainer sample; costs one extra snapshot load (the last rung) on top of the ladder pass. ' +
       "When `run_dir` names a round that captured a SETTLE rung, every row also carries how much of its growth survived idle + GC, and a class that DRAINS is labelled backlog rather than a leak candidate — without that column the default table is mostly backlog (measured: one sweep's settle rungs retired 92,452 objects and 26.3 MB the ladder had called leaks). A round with no settle rung is stamped UNSETTLED. " +
       'The verdict column is a HINT, not a conclusion — confirm a candidate with memlab_retainer_trace on the example node before calling it a leak. ' +
+      'Rows whose growth is equal, or a whole multiple, at every step are grouped as one unit under the table: a detached subtree, its listener and its scope usually grow together, and one trace covers the group. ' +
       "The retainer column votes over the class's NEWEST instances (highest node ids = the growth cohort), NOT over its whole population: voting over the population names whoever holds the most instances, which is a large STATIC collection whenever one exists and is not what grew. Rows where the two disagree are listed under the table. Paths may be local, manifold:// URLs, or bare filenames.",
     {
       run_dir: z
@@ -1293,6 +1356,33 @@ export function registerLeakReport(server: McpServer): void {
                 'content count — the ratio should hold and the absolute number should not._',
             );
           }
+        }
+
+        const units = growthUnits(candidates.filter(r => r.artifact == null));
+        if (units.length > 0) {
+          lines.push('', '### Rows that grew by the same unit', '');
+          for (const {base, members} of units) {
+            const unit = perCycle
+              ? `${formatNumber(Math.round((base.netCount / (cycles as number)) * 100) / 100)} per cycle`
+              : `${formatNumber(base.netCount)} across the ladder`;
+            lines.push(
+              `- **${members.length} rows, one unit of ${unit}:** ` +
+                members
+                  .map(
+                    m =>
+                      `\`${proseName(m.row)}\` ×${m.multiple} (+${formatNumber(m.row.netCount)})`,
+                  )
+                  .join(', ') +
+                '.',
+            );
+          }
+          lines.push(
+            '',
+            '_Rows that grow by the same amount, or a whole multiple of it, at every step usually belong to one leaked ' +
+              'object graph: a detached subtree, the listener holding it and the scope holding the listener each grow ' +
+              'once per leak. Trace the row with the clearest retainer first; a fix there should flatten the rest of ' +
+              'its group. A match is a lead, not proof: confirm the rows share a retainer._',
+          );
         }
 
         // A LEAK-candidate verdict is the one most often read as "unbounded".

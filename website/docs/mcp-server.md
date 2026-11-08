@@ -455,6 +455,12 @@ figures are defined or grouped differently:
   what its first did. It is not counted as a leak candidate. A mount followed
   by steady growth reads `STEP+LINEAR`, with its post-step rate, which is the
   leak rate; the overall Δ/cycle overstates it.
+- **Rows that grow together are one leak.** `memlab_leak_report` groups
+  growing rows whose change is the same, or a whole multiple of it, at every
+  step. A leaked subtree shows up as a detached element, the listener holding
+  it and the scope holding the listener, each growing once per cycle; the group
+  says to trace one of them. The base row must grow on at least two steps, so
+  classes that only jumped once at first mount are not grouped.
 - **A whole-number rate is a mechanism.** `memlab_compare_rounds` lists
   every population, in any round of a sweep, whose rate is a whole number per
   cycle or per landed step (from run.json `steps`), with the step it matches.
