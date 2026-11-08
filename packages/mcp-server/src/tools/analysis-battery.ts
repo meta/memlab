@@ -455,6 +455,8 @@ const SEGMENTED_TOOLS = new Set([
   'memlab_judges',
 ]);
 const PAIRED_TOOLS = new Set(['memlab_artifact_budget', 'memlab_census_diff']);
+// Built-in census populations every A/B verdict table includes.
+export const AB_CENSUS = ['react_update_records'] as const;
 
 /**
  * An A/B round's plan: every ladder step once per arm (`.off` / `.on`), the
@@ -472,7 +474,16 @@ export function perArmPlan(
   const out: Step[] = [];
   const compare: Step = {
     tool: 'memlab_ab_compare',
-    args: {run_dir: runDir, ...(probeSet != null ? {probes: probeSet} : {})},
+    args: {
+      run_dir: runDir,
+      // React update records are the population whose per-cycle growth most
+      // often IS the fix being judged (no-op `setState` per event). Without
+      // it the verdict table held only heap totals and any saved probes, and
+      // the per-arm rate came from reading two `.off`/`.on` reports side by
+      // side.
+      census: [...AB_CENSUS],
+      ...(probeSet != null ? {probes: probeSet} : {}),
+    },
   };
   let placed = false;
   for (const st of plan) {

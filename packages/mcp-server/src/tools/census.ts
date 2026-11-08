@@ -93,6 +93,17 @@ export const BUILTIN: Metric[] = [
     match: (_n, p) => p.has('treeBaseDuration') && p.has('memoizedProps'),
   },
   {
+    name: 'react_update_records',
+    describe:
+      'React state-update records (`action` + `lane` + `next`, with `hasEagerState` or `eagerState`). Pending records on a mounted component that never re-renders do not drain; a no-op `setState(sameValue)` per event grows this linearly.',
+    needsProps: true,
+    match: (_n, p) =>
+      p.has('action') &&
+      p.has('lane') &&
+      p.has('next') &&
+      (p.has('hasEagerState') || p.has('eagerState')),
+  },
+  {
     name: 'array_buffers',
     describe: 'ArrayBuffer instances.',
     needsProps: false,

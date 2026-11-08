@@ -560,7 +560,9 @@ side, and `wait_for_rungs: "all"` queues a battery until the round's
 `round.done` marker appears. On an A/B round (run.json has an `ab` section
 and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one
-`memlab_ab_compare` verdict table. Every profile also runs
+`memlab_ab_compare` verdict table. That table always has a row for React
+state-update records (the `react_update_records` census population), the
+population a no-op `setState` fix removes. Every profile also runs
 `memlab_blink_native_census`, which counts native (Blink) objects per rung and
 rates a fixed list of uncapped browser holders (ordered scopes, performance
 entries, User Timing marks, event-target data, style caches, observer
