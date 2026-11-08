@@ -149,7 +149,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_trace_all',
-        'Retainer-trace an ENTIRE population and cluster the paths server-side — finds the minority path a 10-instance sample cannot.',
+        'Retainer-trace an ENTIRE population and cluster the paths server-side — finds the minority path a 10-instance sample cannot. Clusters past `limit` are listed one line each, as path shapes.',
       ],
       [
         'memlab_retainer_diff',

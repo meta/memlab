@@ -53,6 +53,9 @@ export interface TraceCluster {
 }
 
 const MAX_IDS_PER_CLUSTER = 50000;
+/** Clusters past `limit` listed one line each, and the hops each shows. */
+const SHAPE_ROWS = 15;
+const SHAPE_TAIL_HOPS = 4;
 
 /**
  * Render a cluster's chain. When a path was truncated for grouping, its last
@@ -387,6 +390,25 @@ export function registerTraceAll(server: McpServer): void {
           lines.push(
             '',
             `_${formatNumber(clusters.length - rendered.length)} further path(s) hold ${formatNumber(restCount)} object(s) (${((restCount / totalTraced) * 100).toFixed(1)}%); raise \`limit\` to render them._`,
+          );
+          // The rare shapes are where a new leak class shows up first, so
+          // each gets one line: its count and the hops nearest the object.
+          const shapes = rest.slice(0, SHAPE_ROWS);
+          lines.push(
+            '',
+            `**Further path shapes** (${shapes.length < rest.length ? `the ${formatNumber(shapes.length)} largest of ${formatNumber(rest.length)}` : 'all'}; last ${SHAPE_TAIL_HOPS} hops):`,
+            '',
+            markdownTable(
+              ['Objects', 'Share', 'Example', 'Path end'],
+              shapes.map(c => [
+                formatNumber(c.count),
+                `${((c.count / totalTraced) * 100).toFixed(1)}%`,
+                `@${c.exampleIds[0]}`,
+                (c.steps.length > SHAPE_TAIL_HOPS ? '… ' : '') +
+                  renderClusterChain(c.steps.slice(-SHAPE_TAIL_HOPS)),
+              ]),
+              new Set([0, 1]),
+            ),
           );
         }
 

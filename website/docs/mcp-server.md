@@ -486,6 +486,10 @@ figures are defined or grouped differently:
   (`memlab_island_doors`), since a fix that closes only the shortest path
   reclaims nothing while another holder remains. `island_doors: false` skips
   that heap walk.
+- **Rare path shapes.** Past its `limit` rendered clusters,
+  `memlab_trace_all` lists up to 15 more path shapes, one line each, with
+  their object count and the last four hops. New leak classes often first
+  appear as one of these small clusters.
 - **Long retainer paths are folded.** `memlab_retainer_trace` prints a
   repeating multi-hop pattern (a scope chain alternating closures and
   contexts) once, with its repeat count, on the first hop outside the
