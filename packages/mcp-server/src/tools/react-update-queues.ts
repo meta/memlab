@@ -27,6 +27,7 @@ import {
   scaledTimeoutMs,
 } from '../snapshot-borrow.js';
 import {resolveLadderInputs, segmentArg} from '../run-manifest.js';
+import {snapshotParam, withSnapshotRef} from '../snapshot-ref.js';
 import {
   nearestFiber,
   fiberComponentName,
@@ -654,6 +655,208 @@ export function hookSource(
   return {declaration, approximate, calls, shown};
 }
 
+/** One snapshot's queues: the active one, or the one `withSnapshotRef` lent. */
+function singleSnapshotReport(
+  max_chain: number,
+  max_hops: number,
+  limit: number,
+): ReturnType<typeof toolResult> {
+  const snapshot = getSnapshot();
+  const {reports, totalRecords, ranked, pendingRecords} = scanUpdateQueues(
+    snapshot,
+    max_chain,
+    max_hops,
+  );
+
+  if (reports.length === 0) {
+    return toolResult(
+      'No React update queue in this snapshot holds a pending chain.\n\n' +
+        `${formatNumber(totalRecords)} update record(s) exist in total. If that number is large while no queue holds one, the records are retained by something OTHER than a live queue — which is a different (and usually more interesting) finding: trace one with \`memlab_retainer_trace\`.`,
+    );
+  }
+
+  const shown = ranked.slice(0, limit);
+  const anyCapped = reports.some(r => r.terminated === 'cap');
+
+  const lines: string[] = [
+    '## React update queues holding a pending chain',
+    '',
+    `**Breadth: ${formatNumber(reports.length)} queue(s)** · **Length: ${formatNumber(pendingRecords)} pending record(s)** · ` +
+      `${formatNumber(totalRecords)} update record(s) exist in the heap in total.`,
+    '',
+    markdownTable(
+      ['Component', 'Queues', 'Pending records', 'Longest chain', 'Example'],
+      shown.map(b => [
+        b.component + (b.capped > 0 ? ' ⚠' : ''),
+        formatNumber(b.queues),
+        formatNumber(b.records),
+        formatNumber(b.longest),
+        `@${b.example}`,
+      ]),
+      new Set([1, 2, 3]),
+    ),
+    '',
+  ];
+  if (ranked.length > shown.length) {
+    lines.push(
+      `_${formatNumber(ranked.length - shown.length)} further component(s) not shown; raise \`limit\`._`,
+      '',
+    );
+  }
+  // The questions every eager-bailout finding asked by hand: WHICH hook
+  // (the stateful ordinal maps it to the Nth useState in source), what
+  // is being dispatched, and whether each pending action equals the
+  // last rendered state — the bailout signature.
+  const details = shown.slice(0, 10).flatMap(b => {
+    const queue = snapshot.getNodeById(b.example);
+    if (queue == null) return [];
+    return [{b, d: describeQueue(queue, queueFiber(queue, max_hops))}];
+  });
+  const bailouts = details.filter(({d}) => d.bailout === true);
+  if (bailouts.length > 0) {
+    lines.push(
+      `### Eager-state bailout sites (${bailouts.length})`,
+      '',
+      ...bailouts.map(({b, d}) => {
+        const queue = snapshot.getNodeById(b.example);
+        const setter = queue != null ? dispatchSetter(queue) : null;
+        const module =
+          setter?.context != null
+            ? sourceOfNode(snapshot, setter.context).module
+            : null;
+        const call = `${setter?.variable ?? 'setState'}(${d.lastRenderedState})`;
+        return (
+          `- \`eager-bailout: ${call} @ ${b.component}\`${module != null ? ` (setter in \`${module}\`)` : ''}: ` +
+          `${formatNumber(b.records)} pending record(s) on ${formatNumber(b.queues)} queue(s), every one the value already rendered.`
+        );
+      }),
+      '',
+      '_Each no-op `setState(sameValue)` that misses the eager-state fast path leaves its record on the queue until the component next renders. Guard the call site, or keep the value in a ref._',
+      '',
+    );
+  }
+  if (details.length > 0) {
+    lines.push(
+      '### Hook detail (longest chain per component)',
+      '',
+      markdownTable(
+        [
+          'Component',
+          'Hook #',
+          'Stateful #',
+          'Kind',
+          'Pending actions (top 3)',
+          'lastRenderedState',
+          'Bailout?',
+          'Setter (scope module)',
+          'dispatch held by',
+        ],
+        details.map(({b, d}) => [
+          b.component,
+          d.hook != null ? String(d.hook.index) : '?',
+          d.hook?.statefulOrdinal != null
+            ? String(d.hook.statefulOrdinal)
+            : '?',
+          d.hook?.kind ?? '?',
+          d.actions
+            .map(a => `${a.value} ×${formatNumber(a.count)}`)
+            .join(', ') || '—',
+          d.lastRenderedState,
+          d.bailout == null ? '?' : d.bailout ? '**yes**' : 'no',
+          (() => {
+            const queue = snapshot.getNodeById(b.example);
+            const setter = queue != null ? dispatchSetter(queue) : null;
+            if (setter == null) return '—';
+            const module =
+              setter.context != null
+                ? sourceOfNode(snapshot, setter.context).module
+                : null;
+            return `\`${setter.variable}\`${module != null ? ` (${module})` : ''}`;
+          })(),
+          d.dispatchHolders.join('; ') || '—',
+        ]),
+      ),
+      '',
+      "_**Setter** is the variable the setter was destructured into, and the module whose scope holds it — for a custom hook, the hook's own file. **Stateful #** counts only hooks with a queue (useState/useReducer), so `Stateful # 3` is the third such call in the component source. **Bailout? yes** means every pending action is the very value last rendered — the eager-bailout shape, where a no-op `setState(sameValue)` leaves its record on the queue forever. `smi` = an inline small integer, which the snapshot does not record._",
+      '',
+    );
+    const sourceLines: string[] = [];
+    const seenSetters = new Set<string>();
+    for (const {b, d} of details) {
+      const queue = snapshot.getNodeById(b.example);
+      const setter = queue != null ? dispatchSetter(queue) : null;
+      const module =
+        setter?.context != null
+          ? sourceOfNode(snapshot, setter.context).module
+          : null;
+      if (module == null) continue;
+      // One entry per setter: several rows can share a custom hook's.
+      const key = `${module}\u0000${setter?.variable ?? b.component}`;
+      if (seenSetters.has(key)) continue;
+      seenSetters.add(key);
+      const src = hookSource(
+        snapshot,
+        module,
+        setter?.variable ?? null,
+        d.hook?.statefulOrdinal ?? null,
+      );
+      if (src == null || (src.declaration == null && src.calls === 0)) {
+        continue;
+      }
+      sourceLines.push(
+        `- **${b.component}** (\`${module}\`): ` +
+          (src.declaration != null
+            ? `\`${src.declaration.replace(/`/g, "'")}\`${src.approximate ? ` _(stateful hook call #${d.hook?.statefulOrdinal} in the module; no line names the setter)_` : ''}`
+            : 'declaration not found'),
+      );
+      if (src.calls > 0) {
+        sourceLines.push(
+          `  - ${formatNumber(src.calls)} call site(s) of \`${setter?.variable}\`: ${src.shown.map(c => `\`${c.replace(/`/g, "'")}\``).join(', ')}${src.calls > src.shown.length ? ', …' : ''}`,
+        );
+      }
+      if (d.bailout === true) {
+        sourceLines.push(
+          `  - **eager-bailout: the setter is called with an unchanged value.** Each such call still queues a record. Guard the call (\`if (next !== current) ${setter?.variable ?? 'setX'}(next)\`) or keep the value in a ref.`,
+        );
+      }
+    }
+    if (sourceLines.length > 0) {
+      lines.push('### Hook → source (served code)', '', ...sourceLines, '');
+    }
+  }
+  if (anyCapped) {
+    lines.push(
+      `⚠ ${formatNumber(reports.filter(r => r.terminated === 'cap').length)} chain(s) hit the ${formatNumber(max_chain)}-link cap — those lengths are FLOORS, not measurements. Raise \`max_chain\`.`,
+      '',
+    );
+  }
+
+  lines.push(
+    '### How to read this across a ladder',
+    '',
+    '- **Queue count (breadth) FLAT, pending records rising** → existing queues are accumulating. This is the leak shape, and it is what to file.',
+    '- **Queue count rising, records-per-queue ~1** → more components are mounted. Not a leak; the population scales with the UI.',
+    '- **Both rising** → separate them before concluding, or the write-up will attribute mounting to leaking.',
+    '',
+    'One measured round found `REPRODUCED` on record count and `REPRODUCED_FLAT` on breadth across independent runs, which is exactly what proved the chains were lengthening rather than multiplying. (`REPRODUCED_FLAT` is the verdict for a breadth that agreed across runs AND sat at zero; `NOT_REPRODUCED` now means the runs disagreed, or moved consistently in one direction, so it is not the paired-control result.)',
+  );
+
+  if (
+    !suggestionsSuppressed('memlab_react_update_queues') &&
+    shown.length > 0
+  ) {
+    lines.push(
+      '',
+      '**Suggested next steps**',
+      `- \`memlab_ladder_probe\` on this tool's two numbers across the rungs — breadth and total pending records, separately.`,
+      `- \`memlab_replicate\` before filing: this family has produced a retraction when a single run was trusted.`,
+      `- \`memlab_verify_fix({metric_kind: "pending_chain", locator: "<Owner>.<property>"})\` once both arms are driven — no runtime gate needed, it takes two sets of snapshot files.`,
+    );
+  }
+
+  return toolResult(lines.join('\n'));
+}
+
 export function registerReactUpdateQueues(server: McpServer): void {
   server.tool(
     'memlab_react_update_queues',
@@ -689,8 +892,17 @@ export function registerReactUpdateQueues(server: McpServer): void {
           'Ordered snapshot paths (oldest first), as an alternative to `run_dir`. Ignored when `run_dir` is given.',
         ),
       segment: segmentArg(),
+      snapshot: snapshotParam(),
     },
-    async ({max_chain, limit, max_hops, paths, run_dir, segment}) => {
+    async ({
+      max_chain,
+      limit,
+      max_hops,
+      paths,
+      run_dir,
+      segment,
+      snapshot: snapshotRef,
+    }) => {
       try {
         // Ladder mode: the breadth-vs-length split this tool exists to report
         // is only decidable across rungs, so it can now read a whole run.
@@ -708,208 +920,12 @@ export function registerReactUpdateQueues(server: McpServer): void {
           });
         }
 
-        const snapshot = getSnapshot();
-        const {reports, totalRecords, ranked, pendingRecords} =
-          scanUpdateQueues(snapshot, max_chain, max_hops);
-
-        if (reports.length === 0) {
-          return toolResult(
-            'No React update queue in this snapshot holds a pending chain.\n\n' +
-              `${formatNumber(totalRecords)} update record(s) exist in total. If that number is large while no queue holds one, the records are retained by something OTHER than a live queue — which is a different (and usually more interesting) finding: trace one with \`memlab_retainer_trace\`.`,
+        if (snapshotRef != null && snapshotRef !== '') {
+          return await withSnapshotRef(snapshotRef, () =>
+            singleSnapshotReport(max_chain, max_hops, limit),
           );
         }
-
-        const shown = ranked.slice(0, limit);
-        const anyCapped = reports.some(r => r.terminated === 'cap');
-
-        const lines: string[] = [
-          '## React update queues holding a pending chain',
-          '',
-          `**Breadth: ${formatNumber(reports.length)} queue(s)** · **Length: ${formatNumber(pendingRecords)} pending record(s)** · ` +
-            `${formatNumber(totalRecords)} update record(s) exist in the heap in total.`,
-          '',
-          markdownTable(
-            [
-              'Component',
-              'Queues',
-              'Pending records',
-              'Longest chain',
-              'Example',
-            ],
-            shown.map(b => [
-              b.component + (b.capped > 0 ? ' ⚠' : ''),
-              formatNumber(b.queues),
-              formatNumber(b.records),
-              formatNumber(b.longest),
-              `@${b.example}`,
-            ]),
-            new Set([1, 2, 3]),
-          ),
-          '',
-        ];
-        if (ranked.length > shown.length) {
-          lines.push(
-            `_${formatNumber(ranked.length - shown.length)} further component(s) not shown; raise \`limit\`._`,
-            '',
-          );
-        }
-        // The questions every eager-bailout finding asked by hand: WHICH hook
-        // (the stateful ordinal maps it to the Nth useState in source), what
-        // is being dispatched, and whether each pending action equals the
-        // last rendered state — the bailout signature.
-        const details = shown.slice(0, 10).flatMap(b => {
-          const queue = snapshot.getNodeById(b.example);
-          if (queue == null) return [];
-          return [{b, d: describeQueue(queue, queueFiber(queue, max_hops))}];
-        });
-        const bailouts = details.filter(({d}) => d.bailout === true);
-        if (bailouts.length > 0) {
-          lines.push(
-            `### Eager-state bailout sites (${bailouts.length})`,
-            '',
-            ...bailouts.map(({b, d}) => {
-              const queue = snapshot.getNodeById(b.example);
-              const setter = queue != null ? dispatchSetter(queue) : null;
-              const module =
-                setter?.context != null
-                  ? sourceOfNode(snapshot, setter.context).module
-                  : null;
-              const call = `${setter?.variable ?? 'setState'}(${d.lastRenderedState})`;
-              return (
-                `- \`eager-bailout: ${call} @ ${b.component}\`${module != null ? ` (setter in \`${module}\`)` : ''}: ` +
-                `${formatNumber(b.records)} pending record(s) on ${formatNumber(b.queues)} queue(s), every one the value already rendered.`
-              );
-            }),
-            '',
-            '_Each no-op `setState(sameValue)` that misses the eager-state fast path leaves its record on the queue until the component next renders. Guard the call site, or keep the value in a ref._',
-            '',
-          );
-        }
-        if (details.length > 0) {
-          lines.push(
-            '### Hook detail (longest chain per component)',
-            '',
-            markdownTable(
-              [
-                'Component',
-                'Hook #',
-                'Stateful #',
-                'Kind',
-                'Pending actions (top 3)',
-                'lastRenderedState',
-                'Bailout?',
-                'Setter (scope module)',
-                'dispatch held by',
-              ],
-              details.map(({b, d}) => [
-                b.component,
-                d.hook != null ? String(d.hook.index) : '?',
-                d.hook?.statefulOrdinal != null
-                  ? String(d.hook.statefulOrdinal)
-                  : '?',
-                d.hook?.kind ?? '?',
-                d.actions
-                  .map(a => `${a.value} ×${formatNumber(a.count)}`)
-                  .join(', ') || '—',
-                d.lastRenderedState,
-                d.bailout == null ? '?' : d.bailout ? '**yes**' : 'no',
-                (() => {
-                  const queue = snapshot.getNodeById(b.example);
-                  const setter = queue != null ? dispatchSetter(queue) : null;
-                  if (setter == null) return '—';
-                  const module =
-                    setter.context != null
-                      ? sourceOfNode(snapshot, setter.context).module
-                      : null;
-                  return `\`${setter.variable}\`${module != null ? ` (${module})` : ''}`;
-                })(),
-                d.dispatchHolders.join('; ') || '—',
-              ]),
-            ),
-            '',
-            "_**Setter** is the variable the setter was destructured into, and the module whose scope holds it — for a custom hook, the hook's own file. **Stateful #** counts only hooks with a queue (useState/useReducer), so `Stateful # 3` is the third such call in the component source. **Bailout? yes** means every pending action is the very value last rendered — the eager-bailout shape, where a no-op `setState(sameValue)` leaves its record on the queue forever. `smi` = an inline small integer, which the snapshot does not record._",
-            '',
-          );
-          const sourceLines: string[] = [];
-          const seenSetters = new Set<string>();
-          for (const {b, d} of details) {
-            const queue = snapshot.getNodeById(b.example);
-            const setter = queue != null ? dispatchSetter(queue) : null;
-            const module =
-              setter?.context != null
-                ? sourceOfNode(snapshot, setter.context).module
-                : null;
-            if (module == null) continue;
-            // One entry per setter: several rows can share a custom hook's.
-            const key = `${module}\u0000${setter?.variable ?? b.component}`;
-            if (seenSetters.has(key)) continue;
-            seenSetters.add(key);
-            const src = hookSource(
-              snapshot,
-              module,
-              setter?.variable ?? null,
-              d.hook?.statefulOrdinal ?? null,
-            );
-            if (src == null || (src.declaration == null && src.calls === 0)) {
-              continue;
-            }
-            sourceLines.push(
-              `- **${b.component}** (\`${module}\`): ` +
-                (src.declaration != null
-                  ? `\`${src.declaration.replace(/`/g, "'")}\`${src.approximate ? ` _(stateful hook call #${d.hook?.statefulOrdinal} in the module; no line names the setter)_` : ''}`
-                  : 'declaration not found'),
-            );
-            if (src.calls > 0) {
-              sourceLines.push(
-                `  - ${formatNumber(src.calls)} call site(s) of \`${setter?.variable}\`: ${src.shown.map(c => `\`${c.replace(/`/g, "'")}\``).join(', ')}${src.calls > src.shown.length ? ', …' : ''}`,
-              );
-            }
-            if (d.bailout === true) {
-              sourceLines.push(
-                `  - **eager-bailout: the setter is called with an unchanged value.** Each such call still queues a record. Guard the call (\`if (next !== current) ${setter?.variable ?? 'setX'}(next)\`) or keep the value in a ref.`,
-              );
-            }
-          }
-          if (sourceLines.length > 0) {
-            lines.push(
-              '### Hook → source (served code)',
-              '',
-              ...sourceLines,
-              '',
-            );
-          }
-        }
-        if (anyCapped) {
-          lines.push(
-            `⚠ ${formatNumber(reports.filter(r => r.terminated === 'cap').length)} chain(s) hit the ${formatNumber(max_chain)}-link cap — those lengths are FLOORS, not measurements. Raise \`max_chain\`.`,
-            '',
-          );
-        }
-
-        lines.push(
-          '### How to read this across a ladder',
-          '',
-          '- **Queue count (breadth) FLAT, pending records rising** → existing queues are accumulating. This is the leak shape, and it is what to file.',
-          '- **Queue count rising, records-per-queue ~1** → more components are mounted. Not a leak; the population scales with the UI.',
-          '- **Both rising** → separate them before concluding, or the write-up will attribute mounting to leaking.',
-          '',
-          'One measured round found `REPRODUCED` on record count and `REPRODUCED_FLAT` on breadth across independent runs, which is exactly what proved the chains were lengthening rather than multiplying. (`REPRODUCED_FLAT` is the verdict for a breadth that agreed across runs AND sat at zero; `NOT_REPRODUCED` now means the runs disagreed, or moved consistently in one direction, so it is not the paired-control result.)',
-        );
-
-        if (
-          !suggestionsSuppressed('memlab_react_update_queues') &&
-          shown.length > 0
-        ) {
-          lines.push(
-            '',
-            '**Suggested next steps**',
-            `- \`memlab_ladder_probe\` on this tool's two numbers across the rungs — breadth and total pending records, separately.`,
-            `- \`memlab_replicate\` before filing: this family has produced a retraction when a single run was trusted.`,
-            `- \`memlab_verify_fix({metric_kind: "pending_chain", locator: "<Owner>.<property>"})\` once both arms are driven — no runtime gate needed, it takes two sets of snapshot files.`,
-          );
-        }
-
-        return toolResult(lines.join('\n'));
+        return singleSnapshotReport(max_chain, max_hops, limit);
       } catch (err) {
         return errorResult(err);
       }

@@ -97,14 +97,23 @@ function closestKey(key: string, known: string[]): string | null {
 }
 
 /**
- * Parameter names that mean another parameter: `{alias: canonical}`, applied
- * when the tool declares the canonical name but not the alias. Six calls of one
- * sweep failed on these alone.
+ * Parameter names that mean another parameter: `{alias: canonicals}`, read as
+ * the first canonical name the tool declares, when it does not declare the
+ * alias itself. Six calls of one sweep failed on the first three alone, and a
+ * later one lost round trips to `snapshot_path` on `memlab_retainer_trace`.
  */
-const PARAM_ALIASES: Record<string, string> = {
-  path: 'file_path',
-  file: 'file_path',
-  snapshots: 'paths',
+const PARAM_ALIASES: Record<string, string[]> = {
+  path: ['file_path', 'snapshot'],
+  file: ['file_path', 'snapshot'],
+  snapshots: ['paths'],
+  snapshot_path: ['snapshot', 'file_path'],
+  snapshot_file: ['snapshot', 'file_path'],
+  file_path: ['snapshot'],
+  node: ['node_id'],
+  nodeId: ['node_id'],
+  id: ['node_id'],
+  className: ['class_name'],
+  runDir: ['run_dir'],
 };
 
 /**
@@ -122,9 +131,10 @@ export function translateAliases(
   }
   const out = {...(args as Record<string, unknown>)};
   const notes: string[] = [];
-  for (const [alias, canon] of Object.entries(PARAM_ALIASES)) {
-    if (!(alias in out) || alias in shape || !(canon in shape)) continue;
-    if (canon in out) continue;
+  for (const [alias, canons] of Object.entries(PARAM_ALIASES)) {
+    if (!(alias in out) || alias in shape) continue;
+    const canon = canons.find(c => c in shape);
+    if (canon == null || canon in out) continue;
     out[canon] = out[alias];
     delete out[alias];
     notes.push(`\`${alias}\` as \`${canon}\``);

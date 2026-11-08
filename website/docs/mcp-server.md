@@ -532,7 +532,8 @@ figures are defined or grouped differently:
   (`setIsActive(false)`, with the hook's position and the module whose scope
   holds the setter) and whether every pending record is the value already
   rendered. Components whose records grow linearly from such no-op calls are
-  listed separately: each is a call site to guard.
+  listed separately: each is a call site to guard. For one snapshot, pass
+  `snapshot` (a handle or a path) to read it without loading it first.
 - **Named dev-build patterns.** `memlab_dev_artifacts` tags the known
   development-build patterns it finds: `react-compiler-hook-guard`,
   `owner-stack-event-path`, `devtools-console` and `fast-refresh-registry`.
@@ -543,7 +544,8 @@ figures are defined or grouped differently:
 
 A tool that compares two snapshots by `baseline` and `target` also takes a
 round's `run_dir` (and `rungs: [i, j]`, default the first and last rung), and
-`path` / `snapshots` are read as `file_path` / `paths`. Each load gets a handle,
+`path` / `snapshots` are read as `file_path` / `paths` (and `snapshot_path` as
+`snapshot`, `id` as `node_id`, among a few others). Each load gets a handle,
 by default its file name; when that name is already resident, say two rounds
 that both have a `rung_00_c0`, the reply names the holder and gives the new one
 `rung_00_c0#2`, so pass `alias` to tell them apart.
