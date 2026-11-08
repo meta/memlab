@@ -343,7 +343,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_hypothesis',
-        'Test MANY predicates against every rung in ONE pass each, with an `expect` per predicate for a PASS/FAIL column. Use it instead of hand-writing a `memlab_eval` per theory — a second forEach over a multi-million-node graph aborts on the cumulative node budget.',
+        'Test MANY predicates against every rung in ONE pass each, with an `expect` per predicate for a PASS/FAIL column. Use it instead of hand-writing a `memlab_eval` per theory — a second forEach over a multi-million-node graph aborts on the cumulative node budget. `watch: true` keeps them for the sweep, and each later battery reports which ones flipped.',
       ],
       [
         'memlab_verify_fix',

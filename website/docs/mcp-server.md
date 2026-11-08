@@ -659,7 +659,11 @@ folded into one "N check(s) unchanged since …" line; the verdict always shows.
 `memlab_round_audit` also names each recorded fix (`memlab_finding_index`)
 whose `fixed_behind` prop the build does not serve: absent from the registry,
 or defined but read by no served code. That round runs without the fix, so its
-finding can reappear without a regression. You can
+finding can reappear without a regression.
+`memlab_hypothesis({run_dir, predicates, watch: true})` keeps those
+predicates, each with its `expect`, for the round's sweep. Every later
+battery in that sweep judges them again and names any whose PASS or FAIL
+changed since the previous round; `unwatch: [label]` drops one. You can
 give a ladder in three ways:
 
 - **`paths`:** an ordered list of snapshot files. Cycle counts are read from

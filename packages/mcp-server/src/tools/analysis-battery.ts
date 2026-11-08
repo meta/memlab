@@ -37,6 +37,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {z} from 'zod';
+import {watchedFor} from '../hypothesis-watch.js';
 import type {RunManifest} from '../run-manifest.js';
 import {
   ladderSegments,
@@ -295,6 +296,17 @@ function buildPlan(
     ...(hasInvariants
       ? [{tool: 'memlab_judges', args: {run_dir: runDir}}]
       : []),
+    // Hypotheses kept for this sweep with `memlab_hypothesis({watch: true})`,
+    // re-judged so a round says which of them changed.
+    ...(watchedFor(runDir).length > 0
+      ? [
+          {
+            tool: 'memlab_hypothesis',
+            args: {run_dir: runDir, watch: true},
+            stem: 'memlab_hypothesis.watch',
+          },
+        ]
+      : []),
   ];
 
   const deep: Step[] = [
@@ -512,7 +524,12 @@ export function perArmPlan(
           stem: `${st.tool}.${arm}`,
         });
       }
-    } else if (st.tool !== 'memlab_blink_native_census') {
+    } else if (
+      st.tool !== 'memlab_blink_native_census' &&
+      // Its `grows`/`flat` verdicts would span both arms, and the kept
+      // results would then record the fix as a flip.
+      st.tool !== 'memlab_hypothesis'
+    ) {
       // The native census has no `segment`; over the whole round it would
       // fit one rate across two isolates.
       out.push(st);
@@ -588,6 +605,11 @@ const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
     {tool: /stale_collections/, re: /^\| @/, max: 5},
     {tool: /growth_signals/, re: /^\| @/, max: 5},
     {tool: /react_update_queues/, re: /^\*\*Breadth|^\| [A-Za-z]/, max: 7},
+    {
+      tool: /hypothesis/,
+      re: /FLIPPED since|^No result changed|^First round for these/,
+      max: 1,
+    },
     {tool: /async_census/, re: /scheduler task record|UNSETTLED/, max: 3},
     {
       tool: /detached_dom/,

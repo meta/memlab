@@ -13,6 +13,13 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import vm from 'vm';
 import {z} from 'zod';
+import {
+  recordWatch,
+  unwatch,
+  watchedFor,
+  type WatchExpectation,
+  type WatchOutcome,
+} from '../hypothesis-watch.js';
 import memlabHeapAnalysis from '@memlab/heap-analysis';
 const {getFullHeapFromFile} = memlabHeapAnalysis;
 import {resolveSnapshotPath} from './load-snapshot.js';
@@ -261,6 +268,41 @@ const AUTO_HYPOTHESES: ReadonlyArray<{
   },
 ];
 
+function resultLabel(pass: boolean | null): string {
+  return pass == null ? 'undecidable' : pass ? 'PASS' : 'FAIL';
+}
+
+function watchSection(outcomes: WatchOutcome[]): string[] {
+  const flipped = outcomes.filter(
+    o => o.before != null && o.before.pass !== o.pass,
+  );
+  return [
+    `### Watched for this sweep (${outcomes.length})`,
+    '',
+    flipped.length > 0
+      ? `**${flipped.length} FLIPPED since the previous round:** ${flipped
+          .map(
+            o =>
+              `\`${o.label}\` ${resultLabel(o.before?.pass ?? null)} in ${o.before?.round} → ${resultLabel(o.pass)}`,
+          )
+          .join('; ')}.`
+      : outcomes.some(o => o.before != null)
+        ? 'No result changed since the previous round.'
+        : 'First round for these; a later round will say which results changed.',
+    '',
+    markdownTable(
+      ['Hypothesis', 'This round', 'Previous'],
+      outcomes.map(o => [
+        o.label,
+        resultLabel(o.pass),
+        o.before != null
+          ? `${resultLabel(o.before.pass)} (${o.before.round})`
+          : '—',
+      ]),
+    ),
+  ];
+}
+
 export function registerHypothesis(server: McpServer): void {
   server.tool(
     'memlab_hypothesis',
@@ -334,6 +376,19 @@ export function registerHypothesis(server: McpServer): void {
         .number()
         .optional()
         .describe('Per-file size ceiling in MB; see memlab_load_snapshot.'),
+      watch: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "With `run_dir`: keep these `predicates` (each needs an `expect`) for the round's sweep, its parent directory, and say which results changed since the previous round. Without `predicates`, re-judges the ones already kept. `memlab_analysis_battery` does that on every round of a sweep with a kept list.",
+        ),
+      unwatch: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "With `run_dir`: stop keeping these labels for the round's sweep.",
+        ),
     },
     async ({
       run_dir,
@@ -344,8 +399,50 @@ export function registerHypothesis(server: McpServer): void {
       group_by_shape,
       limit,
       max_file_size_mb,
+      watch,
+      unwatch: unwatchLabels,
     }) => {
       try {
+        if (unwatchLabels != null && unwatchLabels.length > 0) {
+          if (run_dir == null || run_dir === '') {
+            return errorResult('`unwatch` needs `run_dir`.');
+          }
+          const removed = unwatch(run_dir, unwatchLabels);
+          const left = watchedFor(run_dir).map(w => `\`${w.label}\``);
+          return toolResult(
+            `Stopped watching ${removed} hypothesis(es) for this sweep. Still watched: ${left.length > 0 ? left.join(', ') : 'none'}.`,
+          );
+        }
+        if (watch) {
+          if (run_dir == null || run_dir === '') {
+            return errorResult(
+              '`watch` needs `run_dir`: hypotheses are kept per sweep, the parent directory of a round.',
+            );
+          }
+          if (predicate != null || auto) {
+            return errorResult(
+              '`watch` takes `predicates` with an `expect` each, or none to re-judge the kept list.',
+            );
+          }
+          if (predicates == null || predicates.length === 0) {
+            predicates = watchedFor(run_dir).map(w => ({
+              label: w.label,
+              predicate: w.predicate,
+              expect: w.expect,
+            }));
+            if (predicates.length === 0) {
+              return errorResult(
+                'No hypotheses are watched for this sweep. Pass `predicates` (each with an `expect`) and `watch: true` to start.',
+              );
+            }
+          }
+          const unexpected = predicates.filter(p => p.expect == null);
+          if (unexpected.length > 0) {
+            return errorResult(
+              `A watched hypothesis needs an \`expect\`, so a later round can say it changed: ${unexpected.map(p => `\`${p.label}\``).join(', ')}.`,
+            );
+          }
+        }
         // `run_dir` resolves the ladder, and `auto` supplies the predicates.
         // Both are conveniences over the same machinery below, so an `auto`
         // run is byte-for-byte a `predicates` run with a list nobody had to
@@ -613,6 +710,22 @@ export function registerHypothesis(server: McpServer): void {
             lines.push(
               '',
               '> ⚠️ With 2 rungs "↑ every step" is the same statement as "grew overall" and cannot separate a trend from a single GC-band sample. Add a third rung.',
+            );
+          }
+          if (watch && run_dir != null) {
+            lines.push(
+              '',
+              ...watchSection(
+                recordWatch(
+                  run_dir,
+                  specs.map((sp, t) => ({
+                    label: sp.label,
+                    predicate: sp.predicate,
+                    expect: sp.expect as WatchExpectation,
+                    pass: verdicts[t]?.pass ?? null,
+                  })),
+                ),
+              ),
             );
           }
         } else {
