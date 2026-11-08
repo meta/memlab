@@ -124,6 +124,66 @@ function queueFiber(queue: IHeapNode, maxHops: number): IHeapNode | null {
   return boundFiber(queue) ?? nearestFiber(queue, maxHops);
 }
 
+interface SiteDetail {
+  /** `setX(value)` as it would be written at the call site. */
+  call: string;
+  module: string | null;
+  bailout: boolean | null;
+  statefulOrdinal: number | null;
+}
+
+/**
+ * Hook, setter and bailout verdict for each component's longest queue.
+ *
+ * Single-snapshot mode prints these for the snapshot it was given; a ladder
+ * read them nowhere, so the rows that grew named a component but not the
+ * `setState` call to guard, and every finding re-ran the single-snapshot mode
+ * on the last rung to get it.
+ */
+function siteDetails(
+  snapshot: IHeapSnapshot,
+  ranked: readonly Bucket[],
+  maxHops: number,
+  cap: number,
+): Map<string, SiteDetail> {
+  const out = new Map<string, SiteDetail>();
+  for (const b of ranked.slice(0, cap)) {
+    const queue = snapshot.getNodeById(b.example);
+    if (queue == null) continue;
+    const d = describeQueue(queue, queueFiber(queue, maxHops));
+    const setter = dispatchSetter(queue);
+    const module =
+      setter?.context != null
+        ? sourceOfNode(snapshot, setter.context).module
+        : null;
+    out.set(b.component, {
+      call: `${setter?.variable ?? 'setState'}(${d.lastRenderedState})`,
+      module,
+      bailout: d.bailout,
+      statefulOrdinal: d.hook?.statefulOrdinal ?? null,
+    });
+  }
+  return out;
+}
+
+/** The ladder table's cell for one component's site. */
+function siteCell(site: SiteDetail | undefined): string {
+  if (site == null) return '—';
+  const verdict =
+    site.bailout === true
+      ? '**no-op**'
+      : site.bailout === false
+        ? 'changes value'
+        : '?';
+  const where = [
+    site.statefulOrdinal != null ? `state #${site.statefulOrdinal}` : null,
+    site.module,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return `\`${site.call}\` ${verdict}${where !== '' ? ` (${where})` : ''}`;
+}
+
 /**
  * The component name, with its module when the name is minified.
  *
@@ -302,11 +362,24 @@ async function ladderReport(args: {
   armScanBudgetFor(scaledTimeoutMs(largestMB));
 
   const perRung: ScanResult[] = [];
-  for (const rung of rungs) {
+  let sites = new Map<string, SiteDetail>();
+  for (const [i, rung] of rungs.entries()) {
     armScanBudgetFor(scaledTimeoutMs(largestMB));
-    const res = await withSnapshotAt(rung.localPath, snap =>
-      scanUpdateQueues(snap, args.max_chain, args.max_hops),
-    );
+    const isLast = i === rungs.length - 1;
+    const res = await withSnapshotAt(rung.localPath, snap => {
+      const scan = scanUpdateQueues(snap, args.max_chain, args.max_hops);
+      // The last rung holds the longest chains, so its example queue per
+      // component is the one whose setter and pending values decide the fix.
+      if (isLast) {
+        sites = siteDetails(
+          snap,
+          scan.ranked,
+          args.max_hops,
+          Math.max(args.limit, 20),
+        );
+      }
+      return scan;
+    });
     perRung.push(res);
   }
 
@@ -436,6 +509,7 @@ async function ladderReport(args: {
         'Δ/cycle/queue',
         'Shape',
         'Longest chain',
+        'Setter (last rung)',
       ],
       rows
         .slice(0, args.limit)
@@ -448,10 +522,34 @@ async function ladderReport(args: {
           perQueuePerCycle(r.r0, r.r1, r.q1),
           seriesShape(r.series),
           formatNumber(r.longest),
+          siteCell(sites.get(r.name)),
         ]),
       new Set([3, 4, 5, 7]),
     ),
     '',
+  );
+  // The rows to fix first: they grow linearly and every pending record is
+  // the value already rendered, so a guard at the named call removes them.
+  const noOps = rows
+    .filter(
+      r =>
+        r.r1 > r.r0 &&
+        seriesShape(r.series) === 'linear' &&
+        sites.get(r.name)?.bailout === true,
+    )
+    .slice(0, args.limit);
+  if (noOps.length > 0) {
+    lines.push(
+      `### No-op \`setState\` sites that grow linearly (${noOps.length})`,
+      '',
+      ...noOps.map(r => {
+        const site = sites.get(r.name);
+        return `- \`${site?.call}\` in **${r.name}**${site?.module != null ? ` (setter in \`${site.module}\`)` : ''}: ${rate(r.r0, r.r1)} records/cycle, every pending record the value already rendered. Skip the call when the value is unchanged.`;
+      }),
+      '',
+    );
+  }
+  lines.push(
     '_`Δ/cycle/queue` is the number that TRANSFERS. `Δ/cycle` scales with how many instances this round happened to mount, so it predicts nothing about another surface or about production; per instance per cycle is the unit cost, and multiplying it by the mounted count on any surface predicts that surface. A quotient that lands on a whole number is the mechanism itself — "one record per instance per event" — and is flagged inline._',
     '',
     '_A component whose QUEUES stay flat while its RECORDS climb is lengthening one chain — the eager-bailout shape. One whose queues climb in step with its records is just mounting more hooks._',
@@ -559,7 +657,7 @@ export function hookSource(
 export function registerReactUpdateQueues(server: McpServer): void {
   server.tool(
     'memlab_react_update_queues',
-    'The React eager-bailout leak family as one report. A `useState` update whose eager comparison bails out still leaves its record on `queue.pending`, which then never drains — four separate findings in this workstream have been that same shape, and each round re-derived the same three things by hand. This returns: how many queues hold a pending chain (BREADTH), how long each chain is (LENGTH), and which component owns it. The breadth-vs-length split is the part that decides the finding — a flat queue count with growing records is accumulation in existing queues, which is the leak; a rising queue count with one record each is just more hooks mounted, which is not. Getting that backwards is the difference between a filing and a retraction. Pass `run_dir` (or `paths`) to read a WHOLE LADDER in one call: breadth and length per rung, the per-cycle rate for each component, and the breadth-vs-length verdict — otherwise that comparison has to be assembled by hand from N single-snapshot calls. The ladder table also reports `Δ/cycle/queue`, the PER-INSTANCE rate: that is the number that transfers between surfaces and predicts production cost, since `Δ/cycle` alone scales with however many instances this round happened to mount. A quotient landing on a whole number is the mechanism ("one record per instance per event") and is flagged inline. Single-snapshot mode maps each hook to its served source when the snapshot keeps script source: the `useState` declaration (also in transpiled `_useState[1]` form) and the setter\'s call sites, with a guard hint when every pending action equals the rendered state.',
+    'The React eager-bailout leak family as one report. A `useState` update whose eager comparison bails out still leaves its record on `queue.pending`, which then never drains — four separate findings in this workstream have been that same shape, and each round re-derived the same three things by hand. This returns: how many queues hold a pending chain (BREADTH), how long each chain is (LENGTH), and which component owns it. The breadth-vs-length split is the part that decides the finding — a flat queue count with growing records is accumulation in existing queues, which is the leak; a rising queue count with one record each is just more hooks mounted, which is not. Getting that backwards is the difference between a filing and a retraction. Pass `run_dir` (or `paths`) to read a WHOLE LADDER in one call: breadth and length per rung, the per-cycle rate for each component, and the breadth-vs-length verdict — otherwise that comparison has to be assembled by hand from N single-snapshot calls. The ladder table also reports `Δ/cycle/queue`, the PER-INSTANCE rate: that is the number that transfers between surfaces and predicts production cost, since `Δ/cycle` alone scales with however many instances this round happened to mount. A quotient landing on a whole number is the mechanism ("one record per instance per event") and is flagged inline. Ladder mode also names, per component, the setter of its longest queue on the last rung and whether every pending record is the value already rendered, and lists the linearly growing no-op `setState` sites to guard. Single-snapshot mode maps each hook to its served source when the snapshot keeps script source: the `useState` declaration (also in transpiled `_useState[1]` form) and the setter\'s call sites, with a guard hint when every pending action equals the rendered state.',
     {
       max_chain: z
         .number()

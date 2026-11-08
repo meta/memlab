@@ -477,6 +477,12 @@ figures are defined or grouped differently:
   render function (`C [ChatListItem.react]`), read from the module
   registry, and takes a queue's fiber from its setter's bound arguments, so
   a mounted component is not reported as "(no fiber)".
+- **No-op `setState` calls.** Over a ladder, `memlab_react_update_queues`
+  names the setter of each component's longest queue on the last rung
+  (`setIsActive(false)`, with the hook's position and the module whose scope
+  holds the setter) and whether every pending record is the value already
+  rendered. Components whose records grow linearly from such no-op calls are
+  listed separately: each is a call site to guard.
 - **Named dev-build patterns.** `memlab_dev_artifacts` tags the known
   development-build patterns it finds: `react-compiler-hook-guard`,
   `owner-stack-event-path`, `devtools-console` and `fast-refresh-registry`.
