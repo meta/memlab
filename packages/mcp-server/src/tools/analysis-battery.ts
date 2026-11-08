@@ -38,7 +38,11 @@ import os from 'os';
 import path from 'path';
 import {z} from 'zod';
 import type {RunManifest} from '../run-manifest.js';
-import {ladderSegments, loadRunManifest} from '../run-manifest.js';
+import {
+  ladderSegments,
+  loadRunManifest,
+  uaMemorySummary,
+} from '../run-manifest.js';
 import {readArms} from './ab-compare.js';
 import type {Arm} from './ab-compare.js';
 import {hasInvariants} from '../judges.js';
@@ -1644,6 +1648,15 @@ export function registerAnalysisBattery(server: McpServer): void {
                 : '') +
               '.',
             '',
+            ...(() => {
+              const ua = uaMemorySummary(manifest);
+              return ua != null
+                ? [
+                    `UA memory, every realm (\`measureUserAgentSpecificMemory\`, from run.json): ${ua}. Workers and wasm are not in any page snapshot; this is where their growth shows.`,
+                    '',
+                  ]
+                : [];
+            })(),
             ...(lowDisk
               ? [
                   `> ⚠️ **Low disk: ${formatBytes(freeBytes)} free, against a ${formatBytes(ladderBytes)} ladder** (the tighter of the output volume and the temp volume a compressed rung expands into). ` +

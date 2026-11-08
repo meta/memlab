@@ -586,7 +586,12 @@ population a no-op `setState` fix removes. Every profile also runs
 rates a fixed list of uncapped browser holders (ordered scopes, performance
 entries, User Timing marks, event-target data, style caches, observer
 registrations) by name, so native growth that no JavaScript-side step sees is
-in the digest; it is left out on A/B rounds. The digest ends with the next calls worth
+in the digest; it is left out on A/B rounds. When the round recorded
+`performance.measureUserAgentSpecificMemory()` per rung (the page must be
+cross-origin isolated), the header gives its first and last value per segment,
+with the dedicated-worker share: workers and wasm are in no page snapshot, so
+this is the only place their growth shows. `memlab_hunt_report` lists the same
+two numbers per rung in its off-heap table. The digest ends with the next calls worth
 making for that round; a call already suggested in an earlier round of the
 same sweep, for the same class, is named once instead of repeated. Likewise a
 `memlab_round_audit` row an earlier round of the sweep showed word for word is

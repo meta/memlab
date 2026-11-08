@@ -67,6 +67,17 @@ interface RunManifest {
   stop_reason?: string;
 }
 
+/** Dedicated-worker MB from `measureUserAgentSpecificMemory`, as a cell. */
+function workersMb(offHeap: Record<string, unknown> | undefined): string {
+  const byScope = offHeap?.uasm_by_scope_mb as
+    Record<string, unknown> | undefined;
+  if (byScope == null) return '—';
+  const mb = Object.entries(byScope)
+    .filter(([scope, v]) => scope.includes('Worker') && typeof v === 'number')
+    .reduce((sum, [, v]) => sum + (v as number), 0);
+  return mb.toFixed(1);
+}
+
 function comboTable(log: Array<{combo: string; ok: boolean}>): string {
   const per = new Map<string, {ok: number; fail: number}>();
   for (const entry of log) {
@@ -233,6 +244,10 @@ export function registerHuntReport(server: McpServer): void {
                   )
                 : '—',
               String(r.off_heap?.dom_nodes ?? '—'),
+              typeof r.off_heap?.uasm_total_mb === 'number'
+                ? r.off_heap.uasm_total_mb.toFixed(1)
+                : '—',
+              workersMb(r.off_heap),
               String(r.off_heap?.longtasks ?? '—'),
               // every cell must be a string: markdownTable pads them, so a
               // single undefined from a partial manifest throws
@@ -251,10 +266,12 @@ export function registerHuntReport(server: McpServer): void {
                   'Renderer anon (MB)',
                   'Outside JS heap (MB)',
                   'DOM nodes',
+                  'UA memory (MB)',
+                  'Workers (MB)',
                   'Longtasks',
                 ],
                 offHeapRows,
-                new Set([1, 2, 3, 4, 5, 6]),
+                new Set([1, 2, 3, 4, 5, 6, 7, 8]),
               ),
               '',
             );

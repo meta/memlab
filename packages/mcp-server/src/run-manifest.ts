@@ -56,6 +56,13 @@ export interface RunManifest {
   wallClockSeconds: number | null;
   /** Wall clock at each rung, so a SEGMENT can report its own span. */
   elapsedPerRung: Array<number | null>;
+  /**
+   * `performance.measureUserAgentSpecificMemory()` at each rung, in MB: every
+   * realm, and the dedicated-worker share. Null where the runner recorded none
+   * (the page is not cross-origin isolated). A page snapshot holds neither
+   * the workers nor wasm memory, so this is where their growth shows.
+   */
+  uaMemoryPerRung: Array<{totalMb: number; workersMb: number} | null>;
   /** Rung indices after which the runner detected a ladder split. */
   splitAfterRung: number[];
   /** Caveats the runner recorded, verbatim. */
@@ -300,6 +307,18 @@ function asStringArray(v: unknown): string[] {
  * a half-read manifest would reintroduce exactly the silent-wrong-axis problem
  * this module exists to remove.
  */
+function uaMemoryOf(
+  offHeap: unknown,
+): {totalMb: number; workersMb: number} | null {
+  const o = offHeap as Record<string, unknown> | null | undefined;
+  if (o == null || typeof o.uasm_total_mb !== 'number') return null;
+  const byScope = numericRecord(o.uasm_by_scope_mb) ?? {};
+  const workersMb = Object.entries(byScope)
+    .filter(([scope]) => scope.includes('Worker'))
+    .reduce((sum, [, mb]) => sum + mb, 0);
+  return {totalMb: o.uasm_total_mb, workersMb};
+}
+
 export function loadRunManifest(runDir: string): RunManifest {
   const file = runDir.endsWith('.json')
     ? runDir
@@ -340,6 +359,7 @@ export function loadRunManifest(runDir: string): RunManifest {
   const paths: string[] = [];
   const cyclesPerRung: number[] = [];
   const elapsedPerRung: Array<number | null> = [];
+  const uaMemoryPerRung: RunManifest['uaMemoryPerRung'] = [];
   for (const r of rungs as Array<Record<string, unknown>>) {
     if (typeof r.path !== 'string') {
       throw new Error(
@@ -349,6 +369,7 @@ export function loadRunManifest(runDir: string): RunManifest {
     paths.push(r.path);
     cyclesPerRung.push(typeof r.cycles === 'number' ? r.cycles : NaN);
     elapsedPerRung.push(typeof r.elapsed_s === 'number' ? r.elapsed_s : null);
+    uaMemoryPerRung.push(uaMemoryOf(r.off_heap));
   }
 
   // A rung without a recorded cycle count would poison the fit silently.
@@ -397,6 +418,7 @@ export function loadRunManifest(runDir: string): RunManifest {
     cycles,
     wallClockSeconds: elapsed,
     elapsedPerRung,
+    uaMemoryPerRung,
     splitAfterRung: Array.isArray(raw.ladder_splits_after_rung)
       ? (raw.ladder_splits_after_rung as unknown[]).filter(
           (n): n is number => typeof n === 'number',
@@ -491,6 +513,28 @@ export function ladderSegments(manifest: RunManifest): LadderSegment[] {
     });
   }
   return out;
+}
+
+/**
+ * First-to-last UA memory per segment, e.g. `590.4 → 588.6 MB (workers
+ * 227.3 → 214.7 MB)`; null when no rung recorded it.
+ */
+export function uaMemorySummary(manifest: RunManifest): string | null {
+  const segments = ladderSegments(manifest);
+  const parts: string[] = [];
+  for (const seg of segments) {
+    const series = manifest.uaMemoryPerRung
+      .slice(seg.firstRung, seg.lastRung + 1)
+      .filter((m): m is {totalMb: number; workersMb: number} => m != null);
+    if (series.length < 2) continue;
+    const [a, b] = [series[0], series[series.length - 1]];
+    const mb = (n: number) => n.toFixed(1);
+    parts.push(
+      (segments.length > 1 ? `segment ${seg.index}: ` : '') +
+        `${mb(a.totalMb)} → ${mb(b.totalMb)} MB (workers ${mb(a.workersMb)} → ${mb(b.workersMb)} MB)`,
+    );
+  }
+  return parts.length > 0 ? parts.join('; ') : null;
 }
 
 /** The `segment` parameter's description, shared so the three ladder tools agree. */
