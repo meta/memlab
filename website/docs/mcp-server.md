@@ -477,7 +477,12 @@ figures are defined or grouped differently:
   `SATURATING` in `memlab_leak_report` once its last step adds under 20% of
   what its first did. It is not counted as a leak candidate. A mount followed
   by steady growth reads `STEP+LINEAR`, with its post-step rate, which is the
-  leak rate; the overall Δ/cycle overstates it.
+  leak rate; the overall Δ/cycle overstates it. A class with at least 80% of
+  its growth in one step, wherever that step is, and less than
+  `min_growth_count` over the other steps reads `ONE-TIME` and is not a
+  candidate either. `memlab_settle_check` says "grew further at rest" only
+  when the class gained more than 10% of its growth (and more than two
+  instances) between the busy rung and the settle rung.
 - **Rows that grow together are one leak.** `memlab_leak_report` groups
   growing rows whose change is the same, or a whole multiple of it, at every
   step. A leaked subtree shows up as a detached element, the listener holding

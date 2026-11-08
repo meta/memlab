@@ -50,10 +50,19 @@ function histogram(snapshot: IHeapSnapshot): Map<string, ClassStats> {
 
 type Verdict = 'drained' | 'mostly-drained' | 'held' | 'still-growing';
 
+/**
+ * Did the population really grow while idle? A handful more instances after
+ * settling is GC timing, not growth: one round called classes "grew further at
+ * rest" for +9 on top of +108.
+ */
+function grewAtRest(base: number, busy: number, idle: number): boolean {
+  return idle - busy > Math.max(2, 0.1 * Math.max(busy - base, 0));
+}
+
 function classify(base: number, busy: number, idle: number): Verdict {
   const grew = busy - base;
-  if (grew <= 0) return idle > busy ? 'still-growing' : 'held';
-  if (idle > busy) return 'still-growing';
+  if (grewAtRest(base, busy, idle)) return 'still-growing';
+  if (grew <= 0) return 'held';
   const retainedFraction = (idle - base) / grew;
   if (retainedFraction <= 0.1) return 'drained';
   if (retainedFraction <= 0.5) return 'mostly-drained';
@@ -309,6 +318,7 @@ function heldPerCycleLine(
       key: r.key,
       rate: (r.idle - r.base) / cycles,
       share: r.busy > r.base ? (r.idle - r.base) / (r.busy - r.base) : 1,
+      atRest: grewAtRest(r.base, r.busy, r.idle),
     }))
     .filter(r => r.rate > 0)
     .sort((a, b) => b.rate - a.rate);
@@ -325,10 +335,9 @@ function heldPerCycleLine(
       const {type, name} = splitClassKey(r.key);
       const label = name.length > 40 ? `${name.slice(0, 39)}…` : name;
       // Above 1 the population kept growing after the interaction stopped.
-      const held =
-        r.share > 1
-          ? 'grew further at rest'
-          : `${Math.round(r.share * 100)}% held`;
+      const held = r.atRest
+        ? 'grew further at rest'
+        : `${Math.min(100, Math.round(r.share * 100))}% held`;
       return `${label} (${type}) +${r.rate.toFixed(2)} (${held})`;
     })
     .join(' · ');

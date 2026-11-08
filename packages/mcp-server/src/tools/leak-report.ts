@@ -409,6 +409,32 @@ function saturates(counts: number[], axis: number[] | null): boolean {
   return rates.every((v, i) => i === 0 || v < 0.8 * rates[i - 1]);
 }
 
+/**
+ * Nearly all of the growth in one step, and the rest of the ladder adding less
+ * than `minGrowth`: a one-time allocation (first mount, a lazy chunk, a cache
+ * filled once), not a rate. The SATURATING rule misses it whenever the big
+ * step is not the first or a later step is a little larger than the one before
+ * it: one production-like round reported three such classes as LEAK
+ * candidates, with +1/+104/+3, +290/+3/+9 and +167/+23/+7 per step.
+ */
+export function oneTimeStep(
+  counts: number[],
+  minGrowth: number,
+): {step: number; share: number; rest: number} | null {
+  if (counts.length < 3) return null;
+  const net = counts[counts.length - 1] - counts[0];
+  if (net <= 0) return null;
+  let step = 1;
+  for (let i = 2; i < counts.length; i++) {
+    if (counts[i] - counts[i - 1] > counts[step] - counts[step - 1]) step = i;
+  }
+  const jump = counts[step] - counts[step - 1];
+  const rest = net - jump;
+  return jump >= 0.8 * net && rest < minGrowth
+    ? {step, share: jump / net, rest}
+    : null;
+}
+
 function lastStepShare(counts: number[], axis: number[] | null): string {
   const r = stepRates(counts, axis);
   return r == null || r.first <= 0
@@ -918,6 +944,7 @@ export function registerLeakReport(server: McpServer): void {
 
         let leakCandidates = 0;
         let saturatingClasses = 0;
+        let oneTimeClasses = 0;
         let devOnlyClasses = 0;
         let drainedClasses = 0;
         let heldClasses = 0;
@@ -1076,6 +1103,17 @@ export function registerLeakReport(server: McpServer): void {
             verdict = '⏸ at the idle floor — grows without interaction';
           } else if (belowIdleFloor) {
             verdict = '⏸ BELOW the idle floor — idle alone produces more';
+          } else if (
+            r.trend === 'monotonic-up' &&
+            oneTimeStep(r.counts, min_growth_count) != null
+          ) {
+            const once = oneTimeStep(r.counts, min_growth_count) as {
+              step: number;
+              share: number;
+              rest: number;
+            };
+            oneTimeClasses++;
+            verdict = `↑ but ONE-TIME — ${Math.round(once.share * 100)}% of the growth in step ${once.step}, the other steps added ${formatNumber(once.rest)}; not a rate`;
           } else if (
             r.trend === 'monotonic-up' &&
             saturates(r.counts, ladderAxis)
@@ -1431,6 +1469,9 @@ export function registerLeakReport(server: McpServer): void {
               : '') +
             (saturatingClasses > 0
               ? `; ${formatNumber(saturatingClasses)} grew every step but SATURATING (the last step under 20% of the first: warm-up or a filling cache — \`memlab_rate_model\` and a longer ladder decide)`
+              : '') +
+            (oneTimeClasses > 0
+              ? `; ${formatNumber(oneTimeClasses)} ONE-TIME (at least 80% of the growth in a single step, and the other steps together under \`min_growth_count\`)`
               : '') +
             '.',
         );
