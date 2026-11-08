@@ -339,7 +339,12 @@ top level. A node's `references` and `referrers` take array methods
 to nodes.
 `helpers.ctxVars(closureOrContext)` lists a scope's variables,
 `helpers.arrayLen(node)` counts a collection's entries rather than its table
-slots, and `helpers.firstRetainer(node)` names the holder one hop up. Asking
+slots, and `helpers.firstRetainer(node)` names the holder one hop up. For
+React, `helpers.fiberOf(domNode)` returns a mounted element's fiber,
+`helpers.componentName(fiber)` its component, `helpers.hooks(fiber)` its hook
+list with pending updates, and `helpers.memoCacheSlots(fiber)` the React
+Compiler cache slots (`updateQueue.memoCache.data[block][slot]`) that can keep
+a stale closure or element alive. Asking
 for a helper that does not exist suggests the one that does the job, such as
 `histogram` for `groupBy`.
 `memlab_eval_across({run_dir, code, format: "table"})` runs one query on every

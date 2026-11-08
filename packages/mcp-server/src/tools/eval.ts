@@ -1498,6 +1498,7 @@ export function registerEval(server: McpServer): void {
             "familyOf(nodeOrId)->family|null (nearest framework family on the dominator chain, as memlab_memory_partition counts it), pathLabel(nodeOrId)->`module:<Name>.<export>`|`global:<name>`|… (first owner on the shortest path; minification-safe), shapeFamily(nodeOrId)->family|null (the node's own record family by property names) — all memoized per snapshot, " +
             'rootPathAvoidingDev(nodeOrId)->[{id,name,type,edge}]|null (shortest GC-root path using no React DEV/Fast Refresh/devtools edge; null = the node does not exist in a production build; throws if the analysis budget runs out first), ' +
             "fiberHooks(componentName, {limit?, onlyPending?, aggregate?})->[{fiber, hooks:[{index, statefulOrdinal, kind, memoizedState, pending, lastRenderedState, bailout}]}] (a component's hook list in order; statefulOrdinal counts only useState/useReducer, so it maps to the Nth such call in source; `pending` is null when nothing is queued, else [{value, count}]; `onlyPending` keeps only hooks (and fibers) with something queued; `aggregate` instead returns [{hookIndex, statefulOrdinal, kind, value, count, fibers}] summed over every fiber), " +
+            "fiberOf(nodeOrId)->fiberId|null (a DOM node's `__reactFiber$…` fiber, or the node itself if it is a fiber), componentName(nodeOrId)->string|null, hooks(nodeOrId)->[same rows as fiberHooks]|null (one fiber's hooks), memoCacheSlots(nodeOrId, {limit?})->[{block, slot, id, value}]|null (React Compiler cache: `updateQueue.memoCache.data[block][slot]`, the slots that keep a compiled component's stale closures and elements alive; [] when the fiber has no cache; small integers emit no edge and are not listed), " +
             'stringValue(nodeOrId, {maxLen?, slices?: "parent"|"marker"})->string (text of a flat, `(concatenated string)` or `(sliced string)` node; a slice is returned as its whole parent because the snapshot records no offset, or as `‹slice›` with slices:"marker"), ' +
             'props(nodeOrId)->{prop: scalar | {ref,name,type}} & getProp(nodeOrId, name) & shapeSignature(nodeOrId, {maxStringLen?}) (content signature for dedup checks), ' +
             'shapeKeys(nodeOrId)->Set<string> & ownProps(nodeOrId) & hasShape(nodeOrId, [names], {exact?,exclude?}) (own JS properties ONLY — USE THESE FOR SHAPE MATCHING; props() falls back to an internal-edge walk and injects length/map/__via/__note, which makes a props()-based shape test silently return zero matches), ' +
@@ -2439,6 +2440,93 @@ export async function runEval({
       return node == null ? null : shapeFamilyOf(node);
     };
 
+    const hookRows = (fiber: IHeapNode): FiberHookRow[] =>
+      hooksOfFiber(fiber).map(h => {
+        const d =
+          h.queue != null ? describeQueue(h.queue, fiber, undefined, h) : null;
+        return {
+          index: h.index,
+          statefulOrdinal: h.statefulOrdinal,
+          kind: h.kind,
+          memoizedState: describeValue(edgeTo(h.hook, 'memoizedState')),
+          // null, not [], when nothing is queued: an empty array is truthy,
+          // so `if (h.pending)` selected every hook.
+          pending: d != null && d.actions.length > 0 ? d.actions : null,
+          lastRenderedState: d?.lastRenderedState ?? null,
+          bailout: d?.bailout ?? null,
+        };
+      });
+
+    // The fiber behind a DOM node (its `__reactFiber$…` property), or the node
+    // itself when it is a fiber. Hand-walking that key was the first step of
+    // every React question asked of a detached element.
+    const fiberOf = (x: number | {id: number}): number | null => {
+      const node = resolveNode(x);
+      if (node == null) return null;
+      if (isFiberNode(node)) return node.id;
+      for (const e of node.references) {
+        if (String(e.name_or_index).startsWith('__reactFiber$')) {
+          return e.toNode.id;
+        }
+      }
+      return null;
+    };
+    const fiberNode = (x: number | {id: number}): IHeapNode | null => {
+      const id = fiberOf(x);
+      return id == null ? null : resolveNode(id);
+    };
+    const componentNameHelper = (x: number | {id: number}): string | null => {
+      const fiber = fiberNode(x);
+      return fiber == null ? null : fiberComponentName(fiber);
+    };
+    const hooksHelper = (x: number | {id: number}): FiberHookRow[] | null => {
+      const fiber = fiberNode(x);
+      return fiber == null ? null : hookRows(fiber);
+    };
+    // React Compiler cache slots: `updateQueue.memoCache.data[block][slot]`.
+    // A slot holding a stale closure or element is how a compiled component
+    // keeps a detached subtree alive (`memoCache.data[2][1]`, `[0][39]`).
+    const memoCacheSlots = (
+      x: number | {id: number},
+      opts: {limit?: number} = {},
+    ): Array<{
+      block: number;
+      slot: number;
+      id: number;
+      value: string;
+    }> | null => {
+      const fiber = fiberNode(x);
+      if (fiber == null) return null;
+      const queue = edgeTo(fiber, 'updateQueue');
+      const cache = queue != null ? edgeTo(queue, 'memoCache') : null;
+      const data = cache != null ? edgeTo(cache, 'data') : null;
+      if (data == null) return [];
+      const limit = opts.limit ?? 200;
+      const out: Array<{
+        block: number;
+        slot: number;
+        id: number;
+        value: string;
+      }> = [];
+      for (const b of data.references) {
+        if (b.type !== 'element' || typeof b.name_or_index !== 'number')
+          continue;
+        for (const s of b.toNode.references) {
+          if (s.type !== 'element' || typeof s.name_or_index !== 'number') {
+            continue;
+          }
+          if (out.length >= limit) return out;
+          out.push({
+            block: b.name_or_index,
+            slot: s.name_or_index,
+            id: s.toNode.id,
+            value: describeValue(s.toNode),
+          });
+        }
+      }
+      return out;
+    };
+
     // Hooks of every fiber rendering `componentName`, in list order, each with
     // its stateful ordinal and, for a stateful hook, its pending chain.
     const fiberHooks = (
@@ -2495,21 +2583,7 @@ export async function runEval({
         if (!isFiberNode(node) || fiberComponentName(node) !== componentName) {
           return undefined;
         }
-        const hooks: FiberHookRow[] = hooksOfFiber(node).map(h => {
-          const d =
-            h.queue != null ? describeQueue(h.queue, node, undefined, h) : null;
-          return {
-            index: h.index,
-            statefulOrdinal: h.statefulOrdinal,
-            kind: h.kind,
-            memoizedState: describeValue(edgeTo(h.hook, 'memoizedState')),
-            // null, not [], when nothing is queued: an empty array is truthy,
-            // so `if (h.pending)` selected every hook.
-            pending: d != null && d.actions.length > 0 ? d.actions : null,
-            lastRenderedState: d?.lastRenderedState ?? null,
-            bailout: d?.bailout ?? null,
-          };
-        });
+        const hooks = hookRows(node);
         const kept = opts.onlyPending
           ? hooks.filter(h => h.pending != null)
           : hooks;
@@ -4598,6 +4672,10 @@ export async function runEval({
       setElementNodes,
       stringValue,
       fiberHooks,
+      fiberOf,
+      componentName: componentNameHelper,
+      hooks: hooksHelper,
+      memoCacheSlots,
       rootPathAvoidingDev,
       module: moduleHelper,
       moduleSource: moduleSourceHelper,
