@@ -13,6 +13,7 @@ import type {IHeapNode, IHeapEdge, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {sizeInput, withSizeHint} from '../byte-size.js';
 import {getSnapshot, getSnapshotEnv} from '../heap-state.js';
+import {moduleColumn} from './module-attribution.js';
 import {
   formatBytes,
   formatNumber,
@@ -430,17 +431,23 @@ export function registerStaleCollections(server: McpServer): void {
         }
         const hasMultipleReasons =
           new Set(topResults.map(r => r.stale_reason)).size > 1;
+        const modules = moduleColumn(
+          snapshot,
+          topResults.map(r => r.collection),
+        );
         const headers = [
           'Collection ID',
           'Name',
+          'Module',
           'Stale / Total',
           'Stale Retained',
           ...(hasMultipleReasons ? ['Reason'] : []),
         ];
-        const rightCols = new Set([2, 3]);
-        const rows = topResults.map(r => [
+        const rightCols = new Set([3, 4]);
+        const rows = topResults.map((r, i) => [
           `@${r.collection.id}`,
           r.collection.name,
+          modules[i],
           `${formatNumber(r.stale_item_count)} / ${formatNumber(r.total_children)}`,
           formatBytes(r.stale_retained_size),
           ...(hasMultipleReasons ? [r.stale_reason] : []),

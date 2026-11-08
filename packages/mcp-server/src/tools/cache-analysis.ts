@@ -23,6 +23,7 @@ import {
 } from '../dev-edges.js';
 import {sizeInput, withSizeHint} from '../byte-size.js';
 import {getSnapshot, getSnapshotMetadata} from '../heap-state.js';
+import {moduleColumn} from './module-attribution.js';
 import {
   boundedDominatorRetainedSize,
   enumerateMapEntries,
@@ -823,6 +824,10 @@ export function registerCacheAnalysis(server: McpServer): void {
           if (longButSmall.length === 0) return [];
           longButSmall.sort((a, b) => b.entryCount - a.entryCount);
           const top = longButSmall.slice(0, 10);
+          const topModules = moduleColumn(
+            snapshot,
+            top.map(c => snapshot.getNodeById(c.nodeId)),
+          );
           return [
             '',
             `### Long but small — ${formatNumber(longButSmall.length)} collection(s) with >= ${formatNumber(min_entries)} entries but under ${formatBytes(min_retained_size)} retained`,
@@ -830,14 +835,15 @@ export function registerCacheAnalysis(server: McpServer): void {
             'These are excluded from the ranked table above by `min_retained_size`, but entry COUNT is the signal for unbounded growth — a collection that grows without bound is a leak whether or not its entries are large. Track these across a ladder.',
             '',
             markdownTable(
-              ['Collection', 'Entries', 'Retained', 'Owner', 'ID'],
-              top.map(c => [
+              ['Collection', 'Entries', 'Retained', 'Owner', 'Module', 'ID'],
+              top.map((c, i) => [
                 c.collectionType,
                 formatNumber(c.entryCount),
                 formatBytes(c.retainedSize),
                 c.ownerName.length > 40
                   ? c.ownerName.slice(0, 37) + '…'
                   : c.ownerName,
+                topModules[i],
                 `@${c.nodeId}`,
               ]),
               new Set([1, 2]),
@@ -877,6 +883,10 @@ export function registerCacheAnalysis(server: McpServer): void {
         // same sweep and nothing could parse it — it had to be read by eye on
         // every round. A missing value is `—`, which is information; a
         // missing COLUMN is a different schema.
+        const modules = moduleColumn(
+          snapshot,
+          caches.map(c => snapshot.getNodeById(c.nodeId)),
+        );
         const headers = [
           'ID',
           'Type',
@@ -890,6 +900,7 @@ export function registerCacheAnalysis(server: McpServer): void {
           '% Heap',
           'Owner',
           'Property',
+          'Module',
           'Weak?',
           'Prod?',
           'Framework',
@@ -938,7 +949,7 @@ export function registerCacheAnalysis(server: McpServer): void {
             });
           }
         }
-        const rows = caches.map(c => {
+        const rows = caches.map((c, i) => {
           const pct =
             totalSize > 0
               ? ((heldSize(c) / totalSize) * 100).toFixed(1) + '%'
@@ -965,6 +976,7 @@ export function registerCacheAnalysis(server: McpServer): void {
             pct,
             c.ownerName,
             c.ownerEdge,
+            modules[i],
             c.hasWeakRefs ? 'Yes' : 'No',
             // A dev-only MODULE holding ordinary references passes
             // `memlab_dev_artifacts`, which only sees dev ROOTS. See

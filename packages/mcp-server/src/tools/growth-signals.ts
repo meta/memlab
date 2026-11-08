@@ -18,6 +18,7 @@ import {
 } from '../dev-modules.js';
 import {sizeInput, withSizeHint} from '../byte-size.js';
 import {getSnapshot, getSnapshotMetadata} from '../heap-state.js';
+import {moduleColumn} from './module-attribution.js';
 import {
   formatBytes,
   formatNumber,
@@ -206,19 +207,25 @@ export function registerGrowthSignals(server: McpServer): void {
           );
         }
 
+        const modules = moduleColumn(
+          snapshot,
+          candidates.map(c => snapshot.getNodeById(c.nodeId)),
+        );
         const headers = [
           'ID',
           'Kind',
+          'Module',
           'Entries',
           'Retained',
           '% Heap',
           'Prod?',
           'Sample keys',
         ];
-        const rightCols = new Set([2, 3, 4]);
-        const rows = candidates.map(c => [
+        const rightCols = new Set([3, 4, 5]);
+        const rows = candidates.map((c, i) => [
           `@${c.nodeId}`,
           c.kind,
+          modules[i],
           formatNumber(c.entryCount),
           formatBytes(c.retainedSize),
           totalSize > 0

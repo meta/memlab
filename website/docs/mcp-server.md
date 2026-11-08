@@ -477,6 +477,13 @@ figures are defined or grouped differently:
   the object shape that holds them. Three values duplicated about 1,400 times
   each, held as three fields of one request-parameters shape, are reported as
   at least 1,400 copies of that object, which is the thing to deduplicate.
+- **Collection tables name the owning module.** `memlab_sparse_elements`,
+  `memlab_cache_analysis`, `memlab_stale_collections` and
+  `memlab_growth_signals` have a `Module` column: the module whose code holds
+  the row's object, read from the module scope its closures share. Module names
+  survive minification, so on a production build this is often the only
+  readable label. `memlab_sparse_elements` also splits stores that have no
+  named owner by module, instead of pooling them as one "(unattributed)" row.
 - **Minified builds rename variables, not record fields.** A probe that
   looks a collection up by its variable name finds nothing on a production
   bundle. A probe stuck at -1 (its own "not found" value) at every rung, and a

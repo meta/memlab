@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {sizeInput, withSizeHint} from '../byte-size.js';
 import {getSnapshot, shouldEmitNote} from '../heap-state.js';
+import {moduleColumn, sourceOfNode} from './module-attribution.js';
 import {
   errorResult,
   toolResult,
@@ -81,7 +82,7 @@ function diagnose(group: Group): string {
 export function registerSparseElements(server: McpServer): void {
   server.tool(
     'memlab_sparse_elements',
-    'Find integer-keyed objects and arrays whose ELEMENTS BACKING STORE is mostly holes — memory V8 has allocated and the application never uses. This is the waste a class histogram cannot see: the store is a `(object elements)` FixedArray charged to no class, and each instance is individually small, so the cost only appears once instances are grouped by owner. Two distinct causes are separated in the output: sparse/strided keys (indices scattered across a range the store must span) and over-allocation (capacity far past the highest key). Groups are labelled by the nearest named property up the retainer chain (`getterImpl.$$cache`), which is what you can grep for. Complements memlab_cache_analysis (entry counts in Maps/Sets) and memlab_object_cost_breakdown (where one class’s bytes go).',
+    'Find integer-keyed objects and arrays whose ELEMENTS BACKING STORE is mostly holes — memory V8 has allocated and the application never uses. This is the waste a class histogram cannot see: the store is a `(object elements)` FixedArray charged to no class, and each instance is individually small, so the cost only appears once instances are grouped by owner. Two distinct causes are separated in the output: sparse/strided keys (indices scattered across a range the store must span) and over-allocation (capacity far past the highest key). Groups are labelled by the nearest named property up the retainer chain (`getterImpl.$$cache`), which is what you can grep for; stores with no named owner are grouped by owning module, and every row names its module. Complements memlab_cache_analysis (entry counts in Maps/Sets) and memlab_object_cost_breakdown (where one class’s bytes go).',
     {
       min_capacity: z
         .number()
@@ -165,9 +166,14 @@ export function registerSparseElements(server: McpServer): void {
           const node = snapshot.getNodeById(index.ownerIds[i]);
           if (node == null) continue;
           const attributed = nearestNamedOwner(node, {maxHops: max_hops});
+          // Without a named owner, the owning module is the only label that
+          // separates unrelated stores; on a minified build it is most of them.
+          const module = attributed
+            ? null
+            : sourceOfNode(snapshot, node).module;
           const key = attributed
             ? attributed.label
-            : `(unattributed) ${node.name}`;
+            : `(unattributed) ${node.name}${module != null ? ` in ${module}` : ''}`;
           let group = groups.get(key);
           if (!group) {
             group = {
@@ -230,12 +236,17 @@ export function registerSparseElements(server: McpServer): void {
             `No group wastes ${formatBytes(min_group_bytes)} or more. Lower \`min_group_bytes\`, raise \`max_occupancy\`, or lower \`min_capacity\` to widen the scan.`,
           );
         } else {
+          const modules = moduleColumn(
+            snapshot,
+            shown.map(({g}) => snapshot.getNodeById(g.exampleId)),
+          );
           lines.push(
             `**${formatBytes(totalWaste)}** of unused slots across ${formatNumber(ranked.length)} owner group(s)${dropped > 0 ? `; ${formatNumber(dropped)} smaller group(s) below the ${formatBytes(min_group_bytes)} floor were dropped` : ''}.`,
             '',
             markdownTable(
               [
                 'Owner',
+                'Module',
                 'Class',
                 'Count',
                 'Slots used / cap',
@@ -243,8 +254,9 @@ export function registerSparseElements(server: McpServer): void {
                 'Slack',
                 'Wasted',
               ],
-              shown.map(({g, waste}) => [
+              shown.map(({g, waste}, i) => [
                 g.ring ? `${g.key} (ring)` : g.key,
+                modules[i],
                 g.className,
                 formatNumber(g.count),
                 `${formatNumber(g.used)} / ${formatNumber(g.capacity)} (${Math.round((g.used / g.capacity) * 100)}%)`,
@@ -252,15 +264,19 @@ export function registerSparseElements(server: McpServer): void {
                 formatBytes(g.slackSlots * slotBytes),
                 formatBytes(waste),
               ]),
-              new Set([2, 3, 4, 5, 6]),
+              new Set([3, 4, 5, 6, 7]),
             ),
             '',
             '### What to do about each',
             '',
           );
-          for (const {g, waste} of shown) {
+          for (const [i, {g, waste}] of shown.entries()) {
+            const mod =
+              modules[i] !== '—' && !g.key.startsWith('(unattributed)')
+                ? ` (module \`${modules[i]}\`)`
+                : '';
             lines.push(
-              `- **${g.key}** — ${formatBytes(waste)} across ${formatNumber(g.count)} instance(s). ${diagnose(g)}. Worst example \`@${g.exampleId}\`: ${formatNumber(g.exampleUsed)} value(s) spread over ${formatNumber(g.exampleSpan)} slot(s) in a ${formatNumber(g.exampleCapacity)}-slot store.`,
+              `- **${g.key}**${mod} — ${formatBytes(waste)} across ${formatNumber(g.count)} instance(s). ${diagnose(g)}. Worst example \`@${g.exampleId}\`: ${formatNumber(g.exampleUsed)} value(s) spread over ${formatNumber(g.exampleSpan)} slot(s) in a ${formatNumber(g.exampleCapacity)}-slot store.`,
             );
           }
         }

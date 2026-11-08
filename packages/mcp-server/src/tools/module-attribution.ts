@@ -513,6 +513,23 @@ export function sourceOfNode(
   return {module: null, via: null, hops: maxHops, script: null, location: null};
 }
 
+/**
+ * A `Module` table cell per row: the module that owns the row's node, or `—`.
+ * Minified builds keep module names, so this attribution survives when class
+ * and property names do not.
+ */
+export function moduleColumn(
+  snapshot: IHeapSnapshot,
+  nodes: ReadonlyArray<IHeapNode | null | undefined>,
+  width = 40,
+): string[] {
+  return nodes.map(n => {
+    const m = n != null ? sourceOfNode(snapshot, n).module : null;
+    if (m == null) return '—';
+    return m.length > width ? `${m.slice(0, width - 1)}…` : m;
+  });
+}
+
 // Percent-escapes the delimiters, so a module like `Foo.react` or an edge
 // name containing `.` survives the split in `resolveStableKey`.
 const escapeKeyPart = (s: string): string =>
