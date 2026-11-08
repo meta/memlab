@@ -456,6 +456,12 @@ figures are defined or grouped differently:
   at the first rung reads as a standing population, not the round's leak.
   Node ids can change between captures, so owners are matched by class, and a
   scope context by the names of the closures over it.
+- **One row per kind of owner.** `memlab_detached_dom({group_by: "dominator"})`
+  puts owners of the same class (a scope by its closures) and module in one
+  row, marked `×N` with the number of owner objects, instead of one row per
+  object. A component that leaks once per mount had printed the same scope 19
+  times. The output also gives the shortest retainer path of the top row's
+  largest owner, folded in the middle.
 - **Long retainer paths are folded.** `memlab_retainer_trace` prints a
   repeating multi-hop pattern (a scope chain alternating closures and
   contexts) once, with its repeat count, on the first hop outside the

@@ -47,6 +47,8 @@ import {
   resolveLadderInputs,
   segmentArg,
 } from '../run-manifest.js';
+import {formatProductionPath} from '../dev-edges.js';
+import {sourceOfNode} from './module-attribution.js';
 const {NumericSet} = memlabCore;
 
 /**
@@ -82,6 +84,21 @@ function stableOwnerLabel(owner: IHeapNode | null): string {
     if (fns.size > 0) return `scope of ${[...fns].sort().join(', ')}`;
   }
   return normalizeClassName(owner.name);
+}
+
+/** The node's shortest path from a GC root, root first, as path steps. */
+function shortestPathSteps(
+  node: IHeapNode,
+): Array<{node: IHeapNode; edgeName: string}> {
+  const up: Array<{node: IHeapNode; edgeName: string}> = [{node, edgeName: ''}];
+  let cur = node;
+  for (let i = 0; i < 200; i++) {
+    const edge: IHeapEdge | null = cur.pathEdge ?? null;
+    if (edge == null) break;
+    up.push({node: edge.fromNode, edgeName: String(edge.name_or_index)});
+    cur = edge.fromNode;
+  }
+  return up.reverse();
 }
 
 function groupKeyOf(
@@ -657,7 +674,7 @@ export function registerDetachedDom(server: McpServer): void {
   server.tool(
     'memlab_detached_dom',
     'Find detached DOM elements still retained in memory. These are common sources of memory leaks — DOM nodes removed from the document but kept alive by JavaScript references. Supports count-only and ids-only modes for large result sets. Use group_by to aggregate by dominator (accountable owner), element tag, retainer pattern, or data-testid. ' +
-      'Prefer group_by: "dominator" when you intend to act on the result: it groups by the nearest non-detached DOMINATOR, so releasing that one object provably frees the whole group. The other groupings key on a shortest retainer path, which need not dominate the nodes — they report an "Owners" column (distinct accountable dominators) so a group split across many owners is not mistaken for a single fix. ' +
+      'Prefer group_by: "dominator" when you intend to act on the result: it groups by the nearest non-detached DOMINATOR, so releasing the owner provably frees the whole group; owners of one class (a scope by its closures) and module share a row, marked ×N. The other groupings key on a shortest retainer path, which need not dominate the nodes — they report an "Owners" column (distinct accountable dominators) so a group split across many owners is not mistaken for a single fix. ' +
       'Reports a pinned-vs-GC-eligible split: detached nodes with a retainer path to a GC root are actual leaks, while nodes with no retainer path found are typically GC-eligible (transient / weak-only) and should be excluded from leak totals — set only_with_retainer_path to list/aggregate just the pinned ones. ' +
       'Pass `run_dir` (or `paths`) for a LADDER: the detached population per rung with a per-cycle rate and the per-element breakdown of what grew. A single census is a working-set number; the rate is what makes it a leak. ' +
       '⚠ Full-heap scan — slow on very large heaps (millions of nodes); use count-only / ids-only modes and group_by to bound output.',
@@ -783,6 +800,23 @@ export function registerDetachedDom(server: McpServer): void {
           const groups = new Map<string, GroupStats>();
           const resolveOwner = makeDominatorResolver();
           const labelOf = makeGroupLabeler(group_by);
+          // Dominator rows are one per owner CLASS (a scope by its closures)
+          // and module, not per owner object: a component that leaks once per
+          // mount has one owner per mount, and listing each printed the same
+          // row 19 times.
+          const ownerGroupKey = new Map<number, string>();
+          const keyFor = (node: IHeapNode, owner: IHeapNode | null): string => {
+            if (group_by !== 'dominator' || owner == null) {
+              return groupKeyOf(group_by, node, owner);
+            }
+            let k = ownerGroupKey.get(owner.id);
+            if (k == null) {
+              const module = sourceOfNode(snapshot, owner).module;
+              k = `${stableOwnerLabel(owner)}${module != null ? ` · ${module}` : ''}`;
+              ownerGroupKey.set(owner.id, k);
+            }
+            return k;
+          };
           let totalDetached = 0;
           let totalRetainedAll = 0;
           let devOnlyRetained = 0;
@@ -822,7 +856,7 @@ export function registerDetachedDom(server: McpServer): void {
             // need it to report how many distinct owners they span.
             const owner = resolveOwner(node);
 
-            const key = groupKeyOf(group_by, node, owner);
+            const key = keyFor(node, owner);
             const label = baselineCounts != null ? labelOf(key, owner) : key;
 
             const existing = groups.get(key);
@@ -831,10 +865,13 @@ export function registerDetachedDom(server: McpServer): void {
               existing.totalRetained += node.retainedSize;
               if (nodeIsDevOnly) existing.devOnlyCount++;
               if (owner) {
-                if (existing.ownerIds.size < MAX_TRACKED_OWNERS) {
-                  existing.ownerIds.add(owner.id);
-                } else if (!existing.ownerIds.has(owner.id)) {
-                  existing.ownersTruncated = true;
+                if (!existing.ownerIds.has(owner.id)) {
+                  if (existing.ownerIds.size < MAX_TRACKED_OWNERS) {
+                    existing.ownerIds.add(owner.id);
+                    existing.ownerRetained += owner.retainedSize;
+                  } else {
+                    existing.ownersTruncated = true;
+                  }
                 }
               } else {
                 existing.ownerlessCount++;
@@ -958,8 +995,13 @@ export function registerDetachedDom(server: McpServer): void {
                 ? ((stats.totalRetained / totalRetainedAll) * 100).toFixed(1) +
                   '%'
                 : '-';
+            const owners =
+              isDominatorMode && stats.ownerIds.size > 1
+                ? ` ×${ownerCountLabel(stats)}`
+                : '';
+            const shown = key.length > 60 ? key.slice(0, 57) + '...' : key;
             return [
-              key.length > 60 ? key.slice(0, 57) + '...' : key,
+              `${shown}${owners}`,
               formatNumber(stats.count),
               ...(baselineCounts != null
                 ? (() => {
@@ -1069,7 +1111,7 @@ export function registerDetachedDom(server: McpServer): void {
             );
             lines.push(
               '',
-              "_Grouped by the nearest non-detached **dominator**: releasing that object frees every detached node in its row. **Owner Frees** is the owner's own retained size — the true, non-overlapping figure, and the amount actually reclaimed (it also covers whatever else the owner holds). Total Retained is a plain sum over the group, so it double-counts nested detached subtrees and can exceed Owner Frees._",
+              "_Grouped by the nearest non-detached **dominator**, one row per owner class (a scope by the closures over it) and module; `×N` is how many owner objects the row covers. Releasing the owners frees every detached node in the row. **Owner Frees** is the owners' own retained size — the true, non-overlapping figure, and the amount actually reclaimed (it also covers whatever else the owners hold). Total Retained is a plain sum over the group, so it double-counts nested detached subtrees and can exceed Owner Frees._",
               ...(anyFlaggedProvenance
                 ? ['', DEV_ONLY_FOOTNOTE, GATED_FOOTNOTE]
                 : []),
@@ -1096,6 +1138,14 @@ export function registerDetachedDom(server: McpServer): void {
               })[0];
               const ownerNode = snapshot.getNodeById(ownerId);
               const refs = ownerNode?.numOfReferrers ?? 0;
+              const path =
+                ownerNode != null ? shortestPathSteps(ownerNode) : [];
+              if (path.length > 1) {
+                lines.push(
+                  '',
+                  `**Top row's largest owner, shortest path:** ${formatProductionPath(path, 10)}`,
+                );
+              }
               lines.push(
                 '',
                 `**Before sizing a fix against the top owner, check it is the only door:** ` +
