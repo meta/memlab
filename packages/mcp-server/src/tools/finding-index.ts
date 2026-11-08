@@ -122,8 +122,12 @@ interface Finding {
    * to learn which diffs to check, and a tool cannot reconcile it at all.
    */
   fixed_by_diffs?: string[];
-  /** Whether a real before/after A/B confirmed the fix, rather than reasoning. */
-  verified_by_ab?: boolean;
+  /**
+   * Whether a real before/after A/B confirmed the fix, rather than reasoning:
+   * `true`, or the A/B itself (`{round, metric, off, on}`), so the number that
+   * proved it is kept next to the claim.
+   */
+  verified_by_ab?: AbVerdict;
   /**
    * Whether the gate named in `fixed_behind` is actually SERVING the fix.
    *
@@ -159,6 +163,26 @@ interface Finding {
   sightings?: Array<{round: string; rate?: string; note?: string}>;
 }
 
+const AB_EVIDENCE = z.object({
+  round: z.string(),
+  metric: z.string(),
+  off: z.union([z.number(), z.string()]),
+  on: z.union([z.number(), z.string()]),
+});
+const AB_VERDICT = z.union([z.boolean(), AB_EVIDENCE]);
+type AbVerdict = z.infer<typeof AB_VERDICT>;
+
+function abVerified(v: AbVerdict | undefined): boolean {
+  return v != null && v !== false;
+}
+
+/** "A/B verified", with the measurement when one was recorded. */
+function abLabel(v: AbVerdict | undefined): string {
+  return typeof v === 'object'
+    ? `A/B verified: ${v.round}, ${v.metric} ${v.off} → ${v.on}`
+    : 'A/B verified';
+}
+
 const FIX_OUTCOMES = ['effective', 'no_effect', 'pending'] as const;
 type FixOutcome = (typeof FIX_OUTCOMES)[number];
 
@@ -175,6 +199,7 @@ const FINDING_KINDS = [
   'update-queue',
   'collection',
   'probe',
+  'optimization',
 ] as const;
 type FindingKind = (typeof FINDING_KINDS)[number];
 
@@ -183,6 +208,9 @@ const KIND_KEYS: Record<Exclude<FindingKind, 'retainer-path'>, string[][]> = {
   'update-queue': [['component'], ['hook_ordinal', 'setter']],
   collection: [['class']],
   probe: [['probe']],
+  // Not a leak: memory a fix can give back at a steady size (a sparse cache,
+  // a pre-sized buffer, duplicated strings). `property` and `module` narrow it.
+  optimization: [['owner'], ['waste_kind']],
 };
 
 interface CoverMeta {
@@ -314,7 +342,7 @@ const IMPORTED_FINDING_SCHEMA = z.object({
   fix_outcome_on: z.string().optional(),
   fixed_behind: z.string().optional(),
   fixed_by_diffs: z.array(z.string()).optional(),
-  verified_by_ab: z.boolean().optional(),
+  verified_by_ab: AB_VERDICT.optional(),
   retraction_reason: z.string().optional(),
   title: z.string().optional(),
   note: z.string().optional(),
@@ -566,7 +594,7 @@ interface RecordInput {
   fix_outcome?: FixOutcome;
   fix_outcome_on?: string;
   fixed_by_diffs?: string[];
-  verified_by_ab?: boolean;
+  verified_by_ab?: AbVerdict;
   retraction_reason?: string;
   title?: string;
   note?: string;
@@ -635,7 +663,7 @@ function describeRecorded({finding: f, requested}: RecordOutcome): string {
   if (f.fixed_by_diffs != null && f.fixed_by_diffs.length > 0) {
     extras.push(`fixed by ${f.fixed_by_diffs.join(', ')}`);
   }
-  if (f.verified_by_ab === true) extras.push('A/B verified');
+  if (abVerified(f.verified_by_ab)) extras.push(abLabel(f.verified_by_ab));
   if (f.fix_outcome != null) {
     extras.push(
       `outcome ${f.fix_outcome}${f.fix_outcome_on != null ? ` (${f.fix_outcome_on})` : ''}`,
@@ -1298,7 +1326,7 @@ export function registerFindingIndex(server: McpServer): void {
         .enum(FINDING_KINDS)
         .optional()
         .describe(
-          'What identifies the finding (default "retainer-path"). For populations whose path changes run to run, key by `keys` instead: "update-queue" needs `component` and `hook_ordinal` or `setter`; "collection" needs `class` (add `probe` for the probe that counts it); "probe" needs `probe` (add `set`). Works with check, record, import, amend and delete.',
+          'What identifies the finding (default "retainer-path"). For populations whose path changes run to run, key by `keys` instead: "update-queue" needs `component` and `hook_ordinal` or `setter`; "collection" needs `class` (add `probe` for the probe that counts it); "probe" needs `probe` (add `set`); "optimization" (memory a fix gives back at a steady size, not a leak) needs `owner` and `waste_kind`, e.g. {owner: "QPLLoomProviderInst._markerStartTimes", waste_kind: "sparse-elements", module: "WebLoom"}. Works with check, record, import, amend and delete.',
         ),
       keys: z
         .record(z.string(), z.union([z.string(), z.number()]))
@@ -1325,6 +1353,12 @@ export function registerFindingIndex(server: McpServer): void {
         .describe(
           'Round identifier (e.g. "r59"), recorded as first/last seen. With `list`: only findings first or last seen in this round. Defaults to the `run_dir` directory name when that is given.',
         ),
+      since_round: z
+        .string()
+        .optional()
+        .describe(
+          'With `list`: only findings last seen in this round or a later one, compared numerically ("r9" < "r10").',
+        ),
       rate: z
         .string()
         .optional()
@@ -1348,7 +1382,7 @@ export function registerFindingIndex(server: McpServer): void {
         ])
         .optional()
         .describe(
-          'Status to record; defaults to "known" for `record`, and leaves the existing value alone for `amend`. Use "fixed" together with `fixed_behind` and `fixed_by_diffs`. Use "retracted" with `retraction_reason` for a finding that was investigated and WITHDRAWN — a measurement error, a structural population mistaken for a rate. Use "artifact" for a population that is REAL and reproducible but is not the app: a devtools bridge, a dev-only cache, a Fast Refresh record. The two are different instructions to the next round — "do not trust this number" versus "this number is right and belongs to the harness" — and collapsing them into "retracted" is how an artifact gets re-investigated as a candidate leak. Use "candidate" (alias "lead") for a lead seen but NOT yet replicated: `check` reports it as CANDIDATE, so the next round replicates it rather than either re-discovering it or treating it as established.',
+          'Status to record; defaults to "known" for `record`, and leaves the existing value alone for `amend`. With `list`: only findings stored with this status ("new" lists "known", "lead" lists "candidate"). Use "fixed" together with `fixed_behind` and `fixed_by_diffs`. Use "retracted" with `retraction_reason` for a finding that was investigated and WITHDRAWN — a measurement error, a structural population mistaken for a rate. Use "artifact" for a population that is REAL and reproducible but is not the app: a devtools bridge, a dev-only cache, a Fast Refresh record. The two are different instructions to the next round — "do not trust this number" versus "this number is right and belongs to the harness" — and collapsing them into "retracted" is how an artifact gets re-investigated as a candidate leak. Use "candidate" (alias "lead") for a lead seen but NOT yet replicated: `check` reports it as CANDIDATE, so the next round replicates it rather than either re-discovering it or treating it as established.',
         ),
       fixed_behind: z
         .string()
@@ -1390,12 +1424,9 @@ export function registerFindingIndex(server: McpServer): void {
         .describe(
           `For action "stale": days without a confirmed outcome before a fixed finding is listed (default ${STALE_AFTER_DAYS}).`,
         ),
-      verified_by_ab: z
-        .boolean()
-        .optional()
-        .describe(
-          'True when a real before/after A/B confirmed the fix rather than reasoning about it. A fix recorded without this is a claim, not a result.',
-        ),
+      verified_by_ab: AB_VERDICT.optional().describe(
+        'True when a real before/after A/B confirmed the fix rather than reasoning about it, or the A/B itself: {round, metric, off, on}, e.g. {round: "r377", metric: "react_update_records/cycle", off: 95.3, on: 2.99}. A fix recorded without this is a claim, not a result.',
+      ),
       retraction_reason: z
         .string()
         .optional()
@@ -1471,6 +1502,7 @@ export function registerFindingIndex(server: McpServer): void {
       fingerprint: fingerprintArg,
       growing_classes,
       round,
+      since_round,
       status,
       fixed_behind,
       fixed_by_diffs,
@@ -1869,6 +1901,11 @@ export function registerFindingIndex(server: McpServer): void {
                 f.first_seen_round === round ||
                 f.last_seen_round === round) &&
               (kind == null || (f.kind ?? 'retainer-path') === kind) &&
+              (status == null || f.status === storableStatus(status)) &&
+              (since_round == null ||
+                f.last_seen_round.localeCompare(since_round, undefined, {
+                  numeric: true,
+                }) >= 0) &&
               (needle == null ||
                 [f.title, f.signature, f.note].some(
                   t => t?.toLowerCase().includes(needle) === true,
@@ -1877,6 +1914,10 @@ export function registerFindingIndex(server: McpServer): void {
           const filters = [
             round != null ? `round \`${round}\`` : null,
             kind != null ? `kind \`${kind}\`` : null,
+            status != null ? `status \`${storableStatus(status)}\`` : null,
+            since_round != null
+              ? `last seen at or after \`${since_round}\``
+              : null,
             title != null ? `title contains "${title}"` : null,
           ].filter((x): x is string => x != null);
           // Sort by round id rather than trusting object insertion order: a
@@ -1934,7 +1975,7 @@ export function registerFindingIndex(server: McpServer): void {
               '',
               ...(listed.length < matching.length
                 ? [
-                    `_Showing the ${formatNumber(listed.length)} most-seen of ${formatNumber(matching.length)}; narrow with \`round\`, \`title\` or \`kind\`._`,
+                    `_Showing the ${formatNumber(listed.length)} most-seen of ${formatNumber(matching.length)}; narrow with \`round\`, \`since_round\`, \`status\`, \`title\` or \`kind\`._`,
                     '',
                   ]
                 : []),
@@ -2380,7 +2421,7 @@ export function registerFindingIndex(server: McpServer): void {
               '',
               existing.fixed_by_diffs != null &&
               existing.fixed_by_diffs.length > 0
-                ? `Fixed by: ${existing.fixed_by_diffs.join(', ')}${existing.verified_by_ab === true ? ' (A/B verified)' : ' (NOT A/B verified — the fix is a claim, not a measured result)'}`
+                ? `Fixed by: ${existing.fixed_by_diffs.join(', ')}${abVerified(existing.verified_by_ab) ? ` (${abLabel(existing.verified_by_ab)})` : ' (NOT A/B verified — the fix is a claim, not a measured result)'}`
                 : '',
               ...existingStatus,
               existing.status === 'artifact'

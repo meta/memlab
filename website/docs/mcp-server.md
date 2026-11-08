@@ -380,14 +380,17 @@ normalized retainer path. Some populations have no stable path, so pass a
 | `update-queue` | `component`, and `hook_ordinal` or `setter` |
 | `collection` | `class` (optionally `probe`) |
 | `probe` | `probe` (optionally `set`) |
+| `optimization` | `owner` and `waste_kind` (optionally `module`): memory a fix gives back at a steady size, not a leak |
 
 ```js
 memlab_finding_index({action: 'record', kind: 'update-queue', round: 'r12',
   keys: {component: 'ChatList', hook_ordinal: 3, setter: 'setMenuOpen'}})
 ```
 
-`list` takes `round`, `title` (matches title, signature and note) and `kind`
-as filters. `cover` records the combos a round drove; with `run_dir` it also
+`list` takes `round`, `since_round` (last seen in that round or later),
+`status`, `title` (matches title, signature and note) and `kind` as filters.
+`verified_by_ab` takes `true` or the A/B itself, `{round, metric, off, on}`,
+which `record` and `check` then print next to the fix. `cover` records the combos a round drove; with `run_dir` it also
 reads the served revision and a hash of the gating values from run.json, so
 two rounds that drove the same combos against different code or gating can
 be told apart.
