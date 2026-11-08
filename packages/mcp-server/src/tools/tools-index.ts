@@ -99,6 +99,10 @@ const GROUPS: Group[] = [
         'Take fresh snapshots of a live page AND its dedicated workers (a page snapshot never contains them). Skips threads blocked in Atomics.wait instead of hanging.',
       ],
       [
+        'memlab_live_eval',
+        'Evaluate one expression in the live page and return its JSON value, with a deadline; side-effect-free expressions only unless allowed. Checks a snapshot hypothesis against the running app.',
+      ],
+      [
         'memlab_native_contexts',
         'Split ONE snapshot by realm (page, iframes, extension worlds, detached windows, Node `vm` contexts): bytes each NativeContext owns alone, shared bytes, unattributed bytes, and the largest classes in any of them.',
       ],

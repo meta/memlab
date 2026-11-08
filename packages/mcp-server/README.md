@@ -180,6 +180,7 @@ Every tool declares MCP annotations (`readOnlyHint`, `destructiveHint`, `idempot
 | Tool | What runs |
 | --- | --- |
 | `memlab_eval`, `memlab_eval_across` | The `code` (and `prelude`) you pass |
+| `memlab_live_eval` | The `code` you pass, in the live page over CDP, with the page's privileges and session. V8 refuses side effects unless `allow_side_effects` is set |
 | `memlab_for_each` | The `filter_code` / `map_code` / `reduce_code` strings |
 | `memlab_hypothesis` | The `predicate` / `predicates` |
 | `memlab_ladder_probe`, `memlab_replicate` | The probe `code` (and `prelude`); `memlab_ladder_probe` also a saved probe set (`probes`, or the set whose `match` is in the round's URL filter) |
@@ -262,6 +263,8 @@ Both `.heapsnapshot` files and `.heaptimeline` files (snapshots recorded with al
 
 Start Chrome with `--remote-debugging-port=9222 --user-data-dir=<temp dir>` (Chrome 136 and later ignore the port flag on the default profile), then call `memlab_capture` with an `out_dir`. It snapshots the page and its dedicated workers, which a page snapshot never contains. Load the resulting files with `memlab_load_snapshot`, or compare them with `memlab_realm_summary`.
 
+`memlab_live_eval({code, url_filter})` evaluates one expression in the same page and returns its JSON value, to check a hypothesis against the running app (is a global defined, how long is a queue now). It refuses expressions V8 cannot prove side-effect free unless `allow_side_effects` is set, and stops at `timeout_s` (default 10).
+
 `memlab_capture({list_targets: true})` lists the pages Chrome offers, to choose `url_filter`. Give each capture a `label` ("baseline", "after-10-opens") and it is recorded in `<out_dir>/checkpoints.json`. Any tool that takes a snapshot path then accepts `checkpoint:<label>` (or `checkpoint:<out_dir>#<label>`, and `checkpoint:<label>/<worker title>` for a worker), so "capture, interact, capture, compare" is `memlab_diff_snapshots({before: "checkpoint:baseline", after: "checkpoint:after-10-opens"})`, with each side's capture time in the report.
 
 ### Node.js
@@ -309,6 +312,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_timers` | Pending scheduler tasks grouped by the real callback and the payload it captures — a timer per record keeps the record alive for its whole delay. |
 | `memlab_framework_buffers` | The recurring framework buffers in one call: log arrays, module timing records, lazy-loader registry, scheduler queue, registry tables, giant objects, plus app-specific buffers from a probe file. |
 | `memlab_capture` | Take fresh snapshots of a live page AND its dedicated workers (a page snapshot never contains them). Skips threads blocked in Atomics.wait instead of hanging. |
+| `memlab_live_eval` | Evaluate one expression in the live page and return its JSON value, with a deadline; side-effect-free expressions only unless allowed. Checks a snapshot hypothesis against the running app. |
 | `memlab_native_contexts` | Split ONE snapshot by realm (page, iframes, extension worlds, detached windows, Node `vm` contexts): bytes each NativeContext owns alone, shared bytes, unattributed bytes, and the largest classes in any of them. |
 | `memlab_realm_summary` | Page + worker snapshots side by side: app / bundle / code per realm, with shared Wasm modules and SharedArrayBuffers counted once. |
 | `memlab_co_holders` | Clusters of Maps/Sets/Arrays holding the same objects, with bytes freed by cutting one holder vs all of them. |

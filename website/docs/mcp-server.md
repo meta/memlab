@@ -192,6 +192,12 @@ choose from. Give each capture a `label` and refer to it later as
 `checkpoint:<label>` anywhere a snapshot path is accepted, for example
 `memlab_diff_snapshots({before: "checkpoint:baseline", after: "checkpoint:after"})`.
 
+To check a hypothesis against the running app, `memlab_live_eval` evaluates
+one expression in the same page and returns its JSON value, for example
+`Object.keys(window.Debug ?? {})`. It refuses anything V8 cannot prove
+side-effect free unless `allow_side_effects` is set, and gives up after
+`timeout_s` seconds.
+
 ### From Node.js
 
 ```js
@@ -633,6 +639,8 @@ These tools run JavaScript passed in by the assistant, or read from a round
 directory's files, with the full privileges of the MCP server process:
 
 - `memlab_eval` and `memlab_eval_across`
+- `memlab_live_eval`, which runs its code in your live page, with the page's
+  session, rather than in the server
 - `memlab_for_each`
 - `memlab_hypothesis`
 - `memlab_ladder_probe` and `memlab_replicate`

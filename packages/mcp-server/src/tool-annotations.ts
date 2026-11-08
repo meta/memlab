@@ -31,6 +31,7 @@ export interface ToolAnnotations {
 const RUNS_CODE = new Set([
   'memlab_eval',
   'memlab_eval_across',
+  'memlab_live_eval',
   'memlab_for_each',
   'memlab_hypothesis',
   'memlab_ladder_probe',

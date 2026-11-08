@@ -230,9 +230,12 @@ export async function listPageTargets(
     .map(t => ({title: t.title ?? '', url: t.url ?? ''}));
 }
 
-export async function captureLive(opts: CaptureOptions): Promise<CaptureRow[]> {
-  const endpoint = `http://127.0.0.1:${opts.port}/json`;
-  const hint = `is Chrome running with --remote-debugging-port=${opts.port}?`;
+async function matchingPages(
+  port: number,
+  urlFilter: string,
+): Promise<Array<Record<string, string>>> {
+  const endpoint = `http://127.0.0.1:${port}/json`;
+  const hint = `is Chrome running with --remote-debugging-port=${port}?`;
   let res: Response;
   try {
     res = await fetch(endpoint);
@@ -247,13 +250,121 @@ export async function captureLive(opts: CaptureOptions): Promise<CaptureRow[]> {
   }
   const targets = body as Array<Record<string, string>>;
   const pages = targets.filter(
-    t => t.type === 'page' && (t.url ?? '').includes(opts.urlFilter),
+    t => t.type === 'page' && (t.url ?? '').includes(urlFilter),
   );
   if (pages.length === 0) {
-    throw new Error(
-      `no page target matching "${opts.urlFilter}" on port ${opts.port}`,
-    );
+    throw new Error(`no page target matching "${urlFilter}" on port ${port}`);
   }
+  return pages;
+}
+
+export interface LiveEvalOptions {
+  port: number;
+  urlFilter: string;
+  expression: string;
+  timeoutMs: number;
+  allowSideEffects: boolean;
+}
+
+export interface LiveEvalResult {
+  title: string;
+  url: string;
+  /** How many pages matched `urlFilter`; the first one was used. */
+  matches: number;
+  type: string;
+  /** The JSON value, when the result serializes. */
+  value?: unknown;
+  /** V8's one-line description, for results that do not serialize. */
+  description?: string;
+  exception?: string;
+}
+
+/**
+ * Evaluate one expression in a live page. Unless `allowSideEffects`, V8
+ * refuses anything it cannot prove side-effect free (`throwOnSideEffect`).
+ */
+export async function evaluateLive(
+  opts: LiveEvalOptions,
+): Promise<LiveEvalResult> {
+  const pages = await matchingPages(opts.port, opts.urlFilter);
+  const page = pages[0];
+  const conn = await CdpConnection.open(
+    page.webSocketDebuggerUrl,
+    Math.min(opts.timeoutMs, 10_000),
+  );
+  const group = 'memlab-live-eval';
+  const started = Date.now();
+  try {
+    let res: Record<string, unknown>;
+    try {
+      res = await conn.call(
+        'Runtime.evaluate',
+        {
+          expression: opts.expression,
+          objectGroup: group,
+          awaitPromise: true,
+          throwOnSideEffect: !opts.allowSideEffects,
+          timeout: opts.timeoutMs,
+        },
+        null,
+        // Past V8's own `timeout`, so a slow expression reports as its own error.
+        opts.timeoutMs + 2_000,
+      );
+    } catch (err) {
+      // V8 answers a terminated evaluation with a bare "Internal error".
+      if (Date.now() - started >= opts.timeoutMs) {
+        throw new Error(
+          `the expression ran past ${opts.timeoutMs / 1000} s and was terminated (${String(err)})`,
+        );
+      }
+      throw err;
+    }
+    const result = (res.result ?? {}) as Record<string, unknown>;
+    const details = res.exceptionDetails as
+      {text?: string; exception?: {description?: string}} | undefined;
+    let value: unknown = result.value;
+    if (details == null && typeof result.objectId === 'string') {
+      // Serialize separately: returnByValue on the evaluation itself loses
+      // the description (`body`, `Map(3)`) of a value that is not JSON.
+      try {
+        const byValue = await conn.call(
+          'Runtime.callFunctionOn',
+          {
+            functionDeclaration: 'function () { return this; }',
+            objectId: result.objectId,
+            returnByValue: true,
+          },
+          null,
+          opts.timeoutMs,
+        );
+        value = (byValue.result as Record<string, unknown> | undefined)?.value;
+      } catch {
+        value = undefined;
+      }
+    }
+    return {
+      title: page.title ?? '',
+      url: page.url ?? '',
+      matches: pages.length,
+      type: String(result.subtype ?? result.type ?? 'undefined'),
+      value,
+      description:
+        result.description != null ? String(result.description) : undefined,
+      exception:
+        details != null
+          ? (details.exception?.description ?? details.text ?? 'exception')
+          : undefined,
+    };
+  } finally {
+    await conn
+      .call('Runtime.releaseObjectGroup', {objectGroup: group}, null, 2_000)
+      .catch(() => undefined);
+    conn.close();
+  }
+}
+
+export async function captureLive(opts: CaptureOptions): Promise<CaptureRow[]> {
+  const pages = await matchingPages(opts.port, opts.urlFilter);
   fs.mkdirSync(opts.outDir, {recursive: true});
   const stamp = Date.now();
   const conn = await CdpConnection.open(
