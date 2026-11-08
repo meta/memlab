@@ -266,7 +266,9 @@ Ranked lists page the same way: `offset` skips rows, and every page ends with
 "Showing a–b of N … Next page: `offset: k`". Ties are broken by node id, so a
 given offset always shows the same rows. `memlab_snapshots` with
 `max_name_length` clips node names in every tool for the rest of the session,
-and `table_format: "csv"` renders tables as compact CSV.
+including the `name` in `memlab_eval` helper results, and
+`table_format: "csv"` renders tables as compact CSV. With `terse: true`,
+`memlab_retainer_trace` also leaves out sizes unless `show_sizes` is passed.
 The main list and lookup tools also return `structuredContent`: the same rows
 as JSON, with node ids scoped by a `snapshot` handle, raw byte counts, the
 filters that applied and a `pagination` object.

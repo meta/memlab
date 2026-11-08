@@ -17,7 +17,7 @@ import {
   type RetainerTree,
 } from '../node-distance.js';
 import {nodeRef, structuredResult} from '../structured.js';
-import {getSnapshot} from '../heap-state.js';
+import {getSnapshot, isTerse} from '../heap-state.js';
 import {
   classifyRetainerRoot,
   formatBytes,
@@ -245,9 +245,8 @@ export function registerRetainerTrace(server: McpServer): void {
       show_sizes: z
         .boolean()
         .optional()
-        .default(true)
         .describe(
-          'Show retained size at each node in the trace (default true). Makes it easy to see where memory concentrates along the path.',
+          'Show retained size at each node in the trace. Makes it easy to see where memory concentrates along the path. Default true, or false when the session is terse (`memlab_snapshots({terse: true})`), for a trace read only for who holds what.',
         ),
       expand: z
         .boolean()
@@ -270,10 +269,11 @@ export function registerRetainerTrace(server: McpServer): void {
       max_depth,
       max_nodes,
       max_siblings,
-      show_sizes,
+      show_sizes: showSizesArg,
       expand,
       exclude_dev,
     }) => {
+      const show_sizes = showSizesArg ?? !isTerse();
       try {
         const snapshot = getSnapshot();
         const node = snapshot.getNodeById(node_id);

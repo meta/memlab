@@ -71,6 +71,7 @@ import {formatEvalHints, hintsForEval} from '../eval-hints.js';
 import {findModuleSpans, scriptSources} from './module-source.js';
 import {
   abbreviateBlinkTypeName,
+  clampLabelTo,
   errorResult,
   toolResult,
   serializeNodeSummary,
@@ -2132,12 +2133,18 @@ export async function runEval({
     // there (keys, values, names and self sizes all survive a light load),
     // so propagating `retainedSize`'s refusal would refuse them too. A null
     // reads as "not measured"; a 0 would read as "measured and tiny".
+    // Full names unless the session asked for a width: an eval may key on
+    // them.
+    const briefWidth = getSessionConfig().maxNameLength;
     const nodeBrief = (n: IHeapNode | null | undefined) =>
       n == null
         ? null
         : {
             id: n.id,
-            name: n.name,
+            name:
+              briefWidth != null && n.name.length > briefWidth
+                ? clampLabelTo(n.name, briefWidth)
+                : n.name,
             type: n.type,
             self_size: n.self_size,
             retained_size: light ? null : retainedSize(n.id),
@@ -3812,10 +3819,12 @@ export async function runEval({
     // answers "where are the X"; this answers "what is in here at all",
     // which otherwise means a full manual walk every time.
     /** Cap a class name so one row cannot consume a whole result budget. */
-    const truncateClassName = (name: string): string =>
-      name.length <= MAX_CLASS_NAME_CHARS
+    const truncateClassName = (name: string): string => {
+      const max = getSessionConfig().maxNameLength ?? MAX_CLASS_NAME_CHARS;
+      return name.length <= max
         ? name
-        : `${name.slice(0, MAX_CLASS_NAME_CHARS)}… (+${formatNumber(name.length - MAX_CLASS_NAME_CHARS)} more chars)`;
+        : `${name.slice(0, max)}… (+${formatNumber(name.length - max)} more chars)`;
+    };
     const classCounts = (opts?: {
       pattern?: string;
       type?: string;
