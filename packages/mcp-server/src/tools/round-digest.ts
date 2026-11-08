@@ -476,7 +476,7 @@ export function registerRoundDigest(server: McpServer): void {
           lines.push(
             '## Round caveats (carry these into the write-up)',
             '',
-            ...(manifest.caveats ?? []).map(c => `- ${c}`),
+            ...[...new Set(manifest.caveats ?? [])].map(c => `- ${c}`),
             '',
           );
         }

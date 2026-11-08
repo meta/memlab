@@ -653,7 +653,7 @@ export function registerRoundAudit(server: McpServer): void {
         }
         if ((manifest.caveats ?? []).length > 0) {
           lines.push('', '### Caveats recorded by the runner', '');
-          for (const c of manifest.caveats ?? []) lines.push(`- ${c}`);
+          for (const c of new Set(manifest.caveats ?? [])) lines.push(`- ${c}`);
         }
         // Printed verbatim, like the caveats. The check above tells the reader
         // there are N observations to resolve; without the text it is an
