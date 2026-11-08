@@ -669,7 +669,7 @@ const GROUPS: Group[] = [
     tools: [
       [
         'memlab_round_digest',
-        'The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose.',
+        'The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round.',
       ],
       [
         'memlab_sweep_digest',

@@ -47,6 +47,12 @@ interface RunManifest {
   gating_verified?: Record<string, unknown>;
   caveats?: string[];
   stop_reason?: string;
+  ab?: {
+    patch?: {patch?: string};
+    off?: {prop?: string};
+  } | null;
+  settle_rung?: unknown;
+  environment?: {dev_build?: boolean | null};
 }
 
 /** `run.json`, whether given the file or the directory holding it. */
@@ -304,8 +310,21 @@ export function registerRoundDigest(server: McpServer): void {
         .optional()
         .default(25)
         .describe('Maximum metric rows to show (default 25).'),
+      format: z
+        .enum(['table', 'doc_markdown'])
+        .optional()
+        .default('table')
+        .describe(
+          '"table" (default) is the verdict table. "doc_markdown" is a short section for a team write-up: run, audit, heap and app_delta, leak candidates and settle from the battery output, with the interpretation lines left as TODO.',
+        ),
+      compare_to: z
+        .string()
+        .optional()
+        .describe(
+          'With "doc_markdown": the previous round directory, for a "vs <round>" line (candidates, post-GC change, app_delta).',
+        ),
     },
-    async ({run_dir, include_analysis, max_metrics}) => {
+    async ({run_dir, include_analysis, max_metrics, format, compare_to}) => {
       try {
         const manifestPath = resolveManifestPath(run_dir);
         if (manifestPath == null) {
@@ -317,6 +336,21 @@ export function registerRoundDigest(server: McpServer): void {
           fs.readFileSync(manifestPath, 'utf8'),
         ) as RunManifest;
         const dir = path.dirname(manifestPath);
+
+        if (format === 'doc_markdown') {
+          let prev: RoundFacts | null = null;
+          if (compare_to != null) {
+            const prevPath = resolveManifestPath(compare_to);
+            if (prevPath == null) {
+              return errorResult(`No run.json at ${compare_to}.`);
+            }
+            prev = roundFacts(
+              path.dirname(prevPath),
+              JSON.parse(fs.readFileSync(prevPath, 'utf8')) as RunManifest,
+            );
+          }
+          return toolResult(docMarkdown(roundFacts(dir, manifest), prev));
+        }
 
         const audit = auditManifest(manifest);
         const rungs = manifest.rungs ?? [];
@@ -516,6 +550,147 @@ function controlsVerdict(text: string | null): string {
   }
   if (fail === 0) return 'PASS';
   return pass === 0 ? 'FAIL' : `MIXED (${pass}/${fail})`;
+}
+
+/** The numbers a round's write-up quotes, from run.json and its battery files. */
+interface RoundFacts {
+  name: string;
+  combos: string;
+  cycles: number;
+  rungs: number;
+  verdict: string;
+  blocking: string[];
+  heap: [number, number] | null;
+  /** First and last post-GC heap of each A/B arm, when the ladder splits. */
+  armHeaps: Array<[number, number]> | null;
+  appDelta: string | null;
+  settle: string | null;
+  candidates: string[] | null;
+  splitAfter: number[];
+  ab: string | null;
+}
+
+function appDeltaOf(dir: string, tool: string): string | null {
+  const text = readToolOutput(dir, tool);
+  const m = text != null ? /^\*\*app_delta:\s*([^*]+)\*\*/m.exec(text) : null;
+  return m ? m[1].trim() : null;
+}
+
+function roundFacts(dir: string, m: RunManifest): RoundFacts {
+  const audit = auditManifest(m);
+  const rungs = m.rungs ?? [];
+  const first = rungs[0]?.post_gc_heap_mb;
+  const last = rungs[rungs.length - 1]?.post_gc_heap_mb;
+  // A round that ran no A/B still records `ab: {}`.
+  const ab =
+    m.ab?.patch?.patch != null
+      ? `patch \`${path.basename(m.ab.patch.patch)}\``
+      : m.ab?.off?.prop != null
+        ? `\`${m.ab.off.prop}\``
+        : null;
+  // An A/B round has one artifact budget per arm.
+  const off = appDeltaOf(dir, 'memlab_artifact_budget.off');
+  const on = appDeltaOf(dir, 'memlab_artifact_budget.on');
+  const appDelta =
+    off != null || on != null
+      ? `off ${off ?? 'n/a'}, on ${on ?? 'n/a'}`
+      : appDeltaOf(dir, 'memlab_artifact_budget');
+  const settleText = readToolOutput(dir, 'memlab_leak_report');
+  const settle =
+    settleText != null
+      ? (/\*\*Settle: (\d+) class\(es\) HELD \/ (\d+) DRAINED/
+          .exec(settleText)
+          ?.slice(1, 3) ?? null)
+      : null;
+  let candidates: string[] | null = null;
+  try {
+    candidates =
+      readToolOutput(dir, 'memlab_leak_report') != null
+        ? leakCandidates(dir)
+        : null;
+  } catch {
+    candidates = null;
+  }
+  return {
+    name: m.run_id ?? path.basename(dir),
+    combos:
+      (Array.isArray(m.config?.combos) ? m.config.combos : []).join(', ') +
+      (m.environment?.dev_build === false ? ' (prod-like)' : ''),
+    cycles: m.totals?.cycles ?? 0,
+    rungs: rungs.length,
+    verdict: audit.verdict,
+    blocking: audit.checks
+      .filter(c => c.status === 'blocking')
+      .map(c => c.name),
+    heap: first != null && last != null ? [first, last] : null,
+    armHeaps: (() => {
+      const cut = m.ladder_splits_after_rung?.[0];
+      if (ab == null || cut == null) return null;
+      const arms = [rungs.slice(0, cut + 1), rungs.slice(cut + 1)];
+      const ends = arms.map(a => [
+        a[0]?.post_gc_heap_mb,
+        a[a.length - 1]?.post_gc_heap_mb,
+      ]);
+      return ends.every(([a, b]) => a != null && b != null)
+        ? (ends as Array<[number, number]>)
+        : null;
+    })(),
+    appDelta,
+    settle: settle != null ? `${settle[0]} HELD / ${settle[1]} DRAINED` : null,
+    candidates,
+    splitAfter: m.ladder_splits_after_rung ?? [],
+    ab,
+  };
+}
+
+/**
+ * A round's section for a team write-up: the numbers filled in, and the lines
+ * that need a person (what it means, what to do next) left as TODO. Writing
+ * this by hand from the battery digest each round cost tokens and introduced
+ * transcription errors.
+ */
+function docMarkdown(f: RoundFacts, prev: RoundFacts | null): string {
+  const mb = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)} MB`;
+  const heapDelta = (x: RoundFacts) =>
+    x.heap != null ? mb(x.heap[1] - x.heap[0]) : 'n/a';
+  const cand = (x: RoundFacts) =>
+    x.candidates == null ? 'n/a' : String(x.candidates.length);
+  const run = [
+    `${formatNumber(f.cycles)} cycles, ${f.rungs} rungs`,
+    ...(f.ab != null ? [`A/B ${f.ab} (segment 0 off, segment 1 on)`] : []),
+    ...(f.splitAfter.length > 0
+      ? [`ladder split after rung ${f.splitAfter.join(', ')}`]
+      : []),
+  ].join('; ');
+  const lines = [
+    `### ${f.name} — ${f.combos || '?'}`,
+    '',
+    `- **Run:** ${run}.`,
+    `- **Audit:** ${f.verdict}${f.blocking.length > 0 ? ` (blocking: ${f.blocking.join(', ')})` : ''}.`,
+    `- **Heap:** post-GC ${
+      f.armHeaps != null
+        ? f.armHeaps
+            .map(
+              ([a, b], i) =>
+                `${i === 0 ? 'off' : 'on'} ${a.toFixed(1)} → ${b.toFixed(1)} MB (${mb(b - a)})`,
+            )
+            .join(', ')
+        : f.heap != null
+          ? `${f.heap[0].toFixed(1)} → ${f.heap[1].toFixed(1)} MB (${heapDelta(f)})`
+          : 'n/a'
+    }; app_delta ${f.appDelta ?? 'n/a (no artifact budget)'}.`,
+    `- **Leak report:** ${f.candidates == null ? 'n/a (no leak report)' : `${f.candidates.length} candidate(s)${f.candidates.length > 0 ? `: ${f.candidates.slice(0, 4).join('; ')}${f.candidates.length > 4 ? ` +${f.candidates.length - 4}` : ''}` : ''}`}${f.settle != null ? `; settle ${f.settle}` : ''}.`,
+  ];
+  if (prev != null) {
+    lines.push(
+      `- **vs ${prev.name}:** candidates ${cand(prev)} → ${cand(f)}; post-GC ${heapDelta(prev)} → ${heapDelta(f)}; app_delta ${prev.appDelta ?? 'n/a'} → ${f.appDelta ?? 'n/a'}.`,
+    );
+  }
+  lines.push(
+    '- **Reading:** TODO — what these numbers say about the surface.',
+    '- **Next:** TODO',
+  );
+  return lines.join('\n');
 }
 
 export function registerSweepDigest(server: McpServer): void {
