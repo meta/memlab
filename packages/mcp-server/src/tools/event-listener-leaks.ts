@@ -11,6 +11,7 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode} from '@memlab/core';
 import {z} from 'zod';
+import {fixPatternPointer} from '../fix-knowledge.js';
 import {getSnapshot} from '../heap-state.js';
 import {
   DEFAULT_MIN_REGISTRY_EVENTS,
@@ -719,6 +720,7 @@ export function registerEventListenerLeaks(server: McpServer): void {
         if (structuralNote) lines.push(structuralNote);
         lines.push('');
 
+        let wantsListenerPattern = false;
         for (const a of accumulations.slice(0, 5)) {
           lines.push(
             `### @${a.hostNodeId} \`${truncateNodeName(a.hostName, a.hostType, 0, 40)}\` — ${formatNumber(a.totalListeners)} listeners`,
@@ -736,6 +738,7 @@ export function registerEventListenerLeaks(server: McpServer): void {
               '**Duplicates: not determinable for this population.** It was collected by object shape across the whole heap, so it carries no emitter grouping, and "the same callback registered twice on one emitter" cannot be answered from it. Use `memlab_event_registry`, which walks real registries, if you need that verdict.',
             );
           } else if (a.duplicateCallbackCount > 0) {
+            wantsListenerPattern = true;
             lines.push(
               `**${formatNumber(a.duplicateCallbackCount)} duplicate callback(s)** — the same callback *instance* bound to the same context, registered more than once ON THE SAME EMITTER AND EVENT (a genuine double-registration). Counted within each event's own list: the same pair on two different emitters, or on two events of one emitter, is ordinary wiring and is not counted. One listener per distinct model is structural, not a duplicate.`,
             );
@@ -759,6 +762,7 @@ export function registerEventListenerLeaks(server: McpServer): void {
               lines.push(
                 `- **${formatNumber(cd.orphanedContextCount)} orphaned context(s)**${orphanPct} — only retained by listener registrations`,
               );
+              wantsListenerPattern = true;
             }
             if (cd.contextShapes.length > 0) {
               lines.push('- Context shapes:');
@@ -799,6 +803,9 @@ export function registerEventListenerLeaks(server: McpServer): void {
           lines.push('');
         }
 
+        if (wantsListenerPattern) {
+          lines.push(fixPatternPointer('listener-per-mount'), '');
+        }
         lines.push('**Suggested next steps:**');
         const top = accumulations[0];
         lines.push(

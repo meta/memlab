@@ -351,7 +351,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_fix_knowledge_check',
-        'Before writing a fix: true/false questions on the beliefs that most often send a leak fix the wrong way (WeakMap hops, React alternate fibers, shared closure contexts, caches filling up, dev-only chains), graded with the reason and what to measure.',
+        'Before writing a fix: true/false questions on the beliefs that most often send a leak fix the wrong way (WeakMap hops, React alternate fibers, shared closure contexts, caches filling up, dev-only chains), graded with the reason and what to measure. `action: "pattern"` gives the known fix and its test for a leak family (no-op `setState`, listener per mount, memo-cache strand).',
       ],
       [
         'memlab_ladder',

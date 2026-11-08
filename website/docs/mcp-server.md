@@ -237,7 +237,11 @@ it in conversation, with the assistant picking the tools:
 5. **Rule out noise** — "Is any of this retained only by DevTools or browser
    extensions?"
 6. **Explain the retention** — "Show me the retainer trace for node 48231, and
-   tell me which reference to break."
+   tell me which reference to break." For three common families (a no-op
+   `setState` that leaves update records, a listener added per mount, a
+   stale value in a React Compiler memo cache), the tool that finds it points
+   to `memlab_fix_knowledge_check({action: "pattern", family})`, which gives
+   the fix that has worked and the test that catches its usual mistake.
 7. **Confirm the fix** — capture a new set of snapshots after the fix and ask
    whether the per-cycle growth rate went down (`memlab_verify_fix`).
 

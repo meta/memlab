@@ -48,6 +48,7 @@ import {
   segmentArg,
 } from '../run-manifest.js';
 import {formatProductionPath} from '../dev-edges.js';
+import {fixPatternPointer, pathFixPattern} from '../fix-knowledge.js';
 import {sourceOfNode} from './module-attribution.js';
 const {NumericSet} = memlabCore;
 
@@ -1141,10 +1142,13 @@ export function registerDetachedDom(server: McpServer): void {
               const path =
                 ownerNode != null ? shortestPathSteps(ownerNode) : [];
               if (path.length > 1) {
+                const shown = formatProductionPath(path, 10);
                 lines.push(
                   '',
-                  `**Top row's largest owner, shortest path:** ${formatProductionPath(path, 10)}`,
+                  `**Top row's largest owner, shortest path:** ${shown}`,
                 );
+                const family = pathFixPattern(shown);
+                if (family != null) lines.push('', fixPatternPointer(family));
               }
               lines.push(
                 '',

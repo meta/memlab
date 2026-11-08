@@ -10,7 +10,13 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
-import {FIX_QUESTIONS, FIX_TOPICS, questionsFor} from '../fix-knowledge.js';
+import {
+  FIX_PATTERNS,
+  FIX_QUESTIONS,
+  FIX_TOPICS,
+  fixPatternFor,
+  questionsFor,
+} from '../fix-knowledge.js';
 import {errorResult, toolResult} from '../utils.js';
 
 export function registerFixKnowledgeCheck(server: McpServer): void {
@@ -18,9 +24,20 @@ export function registerFixKnowledgeCheck(server: McpServer): void {
     'memlab_fix_knowledge_check',
     'Before writing a leak fix, answer true/false questions on the beliefs that most often send a fix the wrong way: a WeakMap hop read as the cause, a field nulled on a copy React keeps, a cache filling up read as a leak, a dev-only chain, a cleanup removed with a different function. ' +
       '`action: "ask"` lists the questions (optionally only `topics`) without answers. `action: "grade"` takes `answers` (question id -> true/false), grades every answered question plus any unanswered one in `topics`, and says which are wrong, why, and what to measure. Answer from what you know before looking anything up; a wrong answer is the cue to re-check the trace before the fix is written. ' +
+      '`action: "pattern"` prints the fix that has worked for a leak family (`family`), the test that catches its usual mistake, and the questions to answer first; the tools that detect each family point here. ' +
       `Topics: ${FIX_TOPICS.join(', ')}. Reads nothing from disk or the snapshot.`,
     {
-      action: z.enum(['ask', 'grade']).describe('"ask" or "grade".'),
+      action: z
+        .enum(['ask', 'grade', 'pattern'])
+        .describe(
+          '"ask", "grade", or "pattern" (the known fix shape for a leak family).',
+        ),
+      family: z
+        .string()
+        .optional()
+        .describe(
+          `For "pattern": ${FIX_PATTERNS.map(p => `"${p.id}"`).join(', ')}. Omit for all of them.`,
+        ),
       topics: z
         .array(z.string())
         .optional()
@@ -30,8 +47,9 @@ export function registerFixKnowledgeCheck(server: McpServer): void {
         .optional()
         .describe('For "grade": question id -> your true/false answer.'),
     },
-    async ({action, topics, answers}) => {
+    async ({action, family, topics, answers}) => {
       try {
+        if (action === 'pattern') return patternReport(family);
         const unknownTopics = (topics ?? []).filter(
           t => !FIX_TOPICS.includes(t),
         );
@@ -103,4 +121,36 @@ export function registerFixKnowledgeCheck(server: McpServer): void {
       }
     },
   );
+}
+
+function patternReport(family: string | undefined) {
+  const picked =
+    family != null && family !== ''
+      ? [fixPatternFor(family)].filter(p => p != null)
+      : FIX_PATTERNS;
+  if (picked.length === 0) {
+    return errorResult(
+      `unknown family "${family}". Known: ${FIX_PATTERNS.map(p => p.id).join(', ')}.`,
+    );
+  }
+  const byId = new Map(FIX_QUESTIONS.map(q => [q.id, q]));
+  const lines: string[] = [];
+  for (const p of picked) {
+    lines.push(
+      `## Fix pattern \`${p.id}\`: ${p.family}`,
+      '',
+      `**Signal:** ${p.signal}`,
+      '',
+      '**Fix:**',
+      ...p.fix.map(f => `- ${f}`),
+      '',
+      `**Test:** ${p.test}`,
+      '',
+      `**Answer first** (\`action: "grade"\`): ${p.questions
+        .map(id => `\`${id}\` — ${byId.get(id)?.statement ?? ''}`)
+        .join(' ')}`,
+      '',
+    );
+  }
+  return toolResult(lines.join('\n'));
 }

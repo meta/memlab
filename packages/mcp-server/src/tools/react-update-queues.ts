@@ -16,6 +16,7 @@ import {
   dispatchSetter,
   fiberRenderFunction,
 } from '../react-shapes.js';
+import {fixPatternPointer} from '../fix-knowledge.js';
 import {sourceOfNode} from './module-attribution.js';
 import {findModuleSpans} from './module-source.js';
 import fs from 'fs';
@@ -560,6 +561,8 @@ async function ladderReport(args: {
         const site = sites.get(r.name);
         return `- \`${site?.call}\` in **${r.name}**${site?.module != null ? ` (setter in \`${site.module}\`)` : ''}: ${rate(r.r0, r.r1)} records/cycle, every pending record the value already rendered. Skip the call when the value is unchanged.`;
       }),
+      '',
+      fixPatternPointer('noop-setstate'),
       '',
     );
   }

@@ -16,6 +16,7 @@ import {
   type RetainerBranch,
   type RetainerTree,
 } from '../node-distance.js';
+import {fixPatternPointer, pathFixPattern} from '../fix-knowledge.js';
 import {nodeRef, structuredResult} from '../structured.js';
 import {getSnapshot, isTerse} from '../heap-state.js';
 import {
@@ -640,6 +641,11 @@ export function registerRetainerTrace(server: McpServer): void {
           }
           lines.push(parts.join(''));
         }
+
+        const family = pathFixPattern(
+          reverseItems.map(it => String(it.edgeName ?? '')).join(' '),
+        );
+        if (family != null) lines.push('', fixPatternPointer(family));
 
         // Root first, target last; `edge` is the edge into the next node.
         const pathRefs = reverseItems.map(it => ({

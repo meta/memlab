@@ -166,3 +166,74 @@ export function questionsFor(topics: string[] | undefined): FixQuestion[] {
   const wanted = new Set(topics);
   return FIX_QUESTIONS.filter(q => wanted.has(q.topic));
 }
+
+/**
+ * The fix that has worked for a leak family, with the test that catches its
+ * usual mistake. Printed by `memlab_fix_knowledge_check({action: "pattern"})`
+ * and pointed at by the tools that detect each family, so a fix starts from
+ * the known shape instead of being re-derived.
+ */
+export interface FixPattern {
+  id: string;
+  family: string;
+  /** What the detecting tool shows. */
+  signal: string;
+  fix: string[];
+  test: string;
+  /** `FIX_QUESTIONS` ids worth answering before writing it. */
+  questions: string[];
+}
+
+export const FIX_PATTERNS: FixPattern[] = [
+  {
+    id: 'noop-setstate',
+    family: 'React eager-bailout records (no-op `setState`)',
+    signal:
+      '`memlab_react_update_queues` lists the component under "No-op `setState` sites": records grow linearly and every pending record is the value already rendered.',
+    fix: [
+      'Guard the call: skip the setter when the value equals the last value SET. Keep that value in a ref the guard alone writes (`if (last.current === next) return; last.current = next; setX(next);`).',
+      'Do not compare against rendered state or a ref the render also writes: inside one batch it lags the queued value.',
+      'Put the guard behind a feature flag, so one A/B round can size it.',
+    ],
+    test: 'A change and a change back in one batch (`setX(a); setX(b)` with `b` the current value) must still render `b`. A guard reading rendered state drops the second call. Then `memlab_verify_fix({metric_kind: "pending_chain"})` on both arms: records per cycle should drop to 0.',
+    questions: ['gate-on-in-capture', 'partial-fix'],
+  },
+  {
+    id: 'listener-per-mount',
+    family: 'A listener added per mounted instance and never removed',
+    signal:
+      '`memlab_event_listener_leaks` reports orphaned contexts (retained only by listener registrations) or duplicate callbacks, growing with the number of mounts.',
+    fix: [
+      "Add the listener in an effect and remove it in that effect's cleanup, passing the same function object to both calls.",
+      'For a window- or document-level listener that every instance adds, register one shared listener and keep the mounted instances in a set it dispatches to.',
+    ],
+    test: 'Mount and unmount the component N times, then count listeners on the target (`memlab_event_registry`): the count returns to its baseline.',
+    questions: ['listener-reference', 'effect-cleanup'],
+  },
+  {
+    id: 'memo-cache-strand',
+    family: 'A stale value kept in a React Compiler memo cache',
+    signal:
+      'A retainer path through `updateQueue.memoCache.data[i][j]` to a detached element or an old object, typically bounded at one copy per mounted component.',
+    fix: [
+      "The compiler caches values made during render, including the initial value passed to `useRef` or `useState`. Replacing the value later leaves the first one in its cache slot for the component's lifetime.",
+      'Keep the identity and change it in place (truncate the array, clear the map) instead of assigning a new copy, or build the initial value lazily.',
+    ],
+    test: 'A ladder shows nothing for a bounded leak. Compare detached-node counts over several reload pairs, with the fix off and on, after the same first mount.',
+    questions: ['react-compiler-closures', 'react-null-state'],
+  },
+];
+
+export function fixPatternFor(id: string): FixPattern | undefined {
+  return FIX_PATTERNS.find(p => p.id === id);
+}
+
+/** One line a detecting tool prints under a finding of this family. */
+export function fixPatternPointer(id: string): string {
+  return `_Known fix shape for this family: \`memlab_fix_knowledge_check({action: "pattern", family: "${id}"})\`._`;
+}
+
+/** The family a printed retainer path belongs to, when it names one. */
+export function pathFixPattern(pathText: string): string | null {
+  return /\bmemoCache\b/.test(pathText) ? 'memo-cache-strand' : null;
+}
