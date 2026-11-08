@@ -677,7 +677,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_round_audit',
-        'Read a round’s run.json BEFORE analysing it, so a broken bring-up is caught before its numbers travel into a write-up.',
+        'Read a round’s run.json BEFORE analysing it, so a broken bring-up is caught before its numbers travel into a write-up. Also names recorded fixes whose `fixed_behind` prop the build does not serve (absent from the registry, or read by no served code).',
       ],
       [
         'memlab_load_snapshot',

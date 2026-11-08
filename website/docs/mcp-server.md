@@ -641,7 +641,11 @@ digest: on the first round, and again when a round's final rung is at least
 making for that round; a call already suggested in an earlier round of the
 same sweep, for the same class, is named once instead of repeated. Likewise a
 `memlab_round_audit` row an earlier round of the sweep showed word for word is
-folded into one "N check(s) unchanged since …" line; the verdict always shows. You can
+folded into one "N check(s) unchanged since …" line; the verdict always shows.
+`memlab_round_audit` also names each recorded fix (`memlab_finding_index`)
+whose `fixed_behind` prop the build does not serve: absent from the registry,
+or defined but read by no served code. That round runs without the fix, so its
+finding can reappear without a regression. You can
 give a ladder in three ways:
 
 - **`paths`:** an ordered list of snapshot files. Cycle counts are read from

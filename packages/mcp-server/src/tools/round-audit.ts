@@ -19,6 +19,7 @@ import {
   toolResult,
 } from '../utils.js';
 import {readSidecar} from '../snapshot-index.js';
+import {loadFindingIndex, workstreamFromRun} from './finding-index.js';
 
 /**
  * `info` does NOT move the verdict.
@@ -71,6 +72,8 @@ interface RunManifest {
     absent?: number;
     absent_props?: string[];
   };
+  /** hunt_runner's served-source gate check: props no served code reads. */
+  served_gates?: {dead?: string[]; not_served?: string[]};
   caveats?: string[];
   provisional_notes?: string[];
   stop_reason?: string;
@@ -485,13 +488,85 @@ const ICON: Record<CheckStatus, string> = {
   blocking: '❌',
 };
 
+/** A finding recorded as fixed (or with a fix) behind a gate. */
+export interface GatedFix {
+  label: string;
+  fixed_behind: string;
+}
+
+/**
+ * Recorded fixes whose gate this build does not serve.
+ *
+ * A fix behind a prop that is absent from the registry, or defined there but
+ * read by no served code, is not in the round at all: its finding can show up
+ * again with nothing having regressed. Unramped fix gates have been deleted by
+ * prop cleanups, and the first sign was a "fixed" leak growing again.
+ */
+export function fixGateCheck(
+  m: RunManifest,
+  fixes: readonly GatedFix[],
+): AuditCheck | null {
+  const why = new Map<string, string>();
+  for (const p of m.gating_summary?.absent_props ?? []) {
+    why.set(p, "absent from this build's registry");
+  }
+  const dead =
+    m.served_gates?.dead ??
+    (m.caveats ?? []).flatMap(c => /^DEAD PROP: (\S+)/.exec(c)?.[1] ?? []);
+  for (const p of dead) {
+    why.set(p, 'in the registry but read by no served code');
+  }
+  for (const p of m.served_gates?.not_served ?? []) {
+    if (!why.has(p)) why.set(p, 'not found in the served JavaScript');
+  }
+  if (why.size === 0) return null;
+  const hits: string[] = [];
+  for (const f of fixes) {
+    const props = f.fixed_behind.match(
+      /[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+/g,
+    );
+    for (const p of new Set(props ?? [])) {
+      const reason = why.get(p);
+      if (reason != null) hits.push(`${f.label} (\`${p}\`: ${reason})`);
+    }
+  }
+  if (hits.length === 0) return null;
+  return {
+    name: 'fix gates',
+    status: 'info',
+    detail:
+      `${hits.length} recorded fix(es) are not in this build: ${hits.join('; ')}. ` +
+      'This round runs without them, so their findings can reappear without a regression. ' +
+      'Check whether the prop was cleaned up before reading a reappearance as a failed fix.',
+  };
+}
+
+function gatedFixes(runDir: string): GatedFix[] {
+  try {
+    const {index} = loadFindingIndex(workstreamFromRun(runDir));
+    return Object.values(index.findings)
+      .filter(
+        f =>
+          f.fixed_behind != null &&
+          f.status !== 'retracted' &&
+          f.status !== 'artifact',
+      )
+      .map(f => ({
+        label: `\`${f.title ?? (f.growing_classes.join(', ') || f.fingerprint)}\``,
+        fixed_behind: f.fixed_behind as string,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export function registerRoundAudit(server: McpServer): void {
   server.tool(
     'memlab_round_audit',
     "Read a leak hunt's `run.json` and say whether the round can carry a conclusion at all — BEFORE anyone reads its numbers. " +
       'Checks rung count, ladder continuity (a mid-run page reload silently splits the ladder into two V8 isolates), ' +
       'per-step landing (a declared surface that never actually opened), step exceptions, the content-mutation confound, ' +
-      'verified gating, and the overall cycle landing rate.\n\n' +
+      'verified gating, and the overall cycle landing rate. It also names recorded fixes (`memlab_finding_index`) whose `fixed_behind` prop this build does not serve.\n\n' +
       'Every one of these is already in the manifest and nothing was reading it. The failures this catches are rounds ' +
       'that LOOK complete: one was written up as valid with two of its ten declared operations at 58/165 and 0/165; ' +
       'another was split by a page reload and read as "the app shrank, cleanest round on record" when its valid segment ' +
@@ -543,6 +618,11 @@ export function registerRoundAudit(server: McpServer): void {
           }
         }
         const {checks, verdict} = auditManifest(manifest, external);
+        const fixGates = fixGateCheck(
+          manifest,
+          gatedFixes(path.dirname(manifestPath)),
+        );
+        if (fixGates != null) checks.push(fixGates);
 
         const lines: string[] = [
           `## Round audit — \`${manifest.run_id ?? path.basename(path.dirname(manifestPath))}\``,
