@@ -18,6 +18,7 @@ import {
 } from '../react-shapes.js';
 import {sourceOfNode} from './module-attribution.js';
 import {findModuleSpans} from './module-source.js';
+import fs from 'fs';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {
@@ -360,6 +361,18 @@ async function ladderReport(args: {
     );
   }
   const {rungs, largestMB} = resolveRungs(inputs.paths);
+  const key = ladderKey(rungs, inputs, args);
+  const prior = key != null ? recentLadders.get(key) : undefined;
+  if (prior != null) {
+    return toolResult(
+      [
+        `_Same rungs and arguments as a call at ${new Date(prior.at).toLocaleTimeString('en-US', {hour12: false})} (the analysis battery runs this step); reused instead of rescanned._`,
+        '',
+        prior.text,
+        ...ladderTrailer(),
+      ].join('\n'),
+    );
+  }
   armScanBudgetFor(scaledTimeoutMs(largestMB));
 
   const perRung: ScanResult[] = [];
@@ -558,15 +571,55 @@ async function ladderReport(args: {
     '_Read the per-rung series, not just the endpoints. A `step` jumps once and then holds — that is first-mount cost, and filing it as a leak is a retraction waiting to happen. Only `linear` survives a per-cycle rate._',
   );
 
-  if (!suggestionsSuppressed('memlab_react_update_queues')) {
-    lines.push(
-      '',
-      '**Suggested next steps**',
-      '- `memlab_replicate` before filing: this family has produced a retraction when a single run was trusted.',
-      '- `memlab_verify_fix({metric_kind: "pending_chain", locator: "<Owner>.<property>"})` once both arms are driven.',
-    );
+  const text = lines.join('\n');
+  if (key != null) {
+    recentLadders.set(key, {at: Date.now(), text});
+    for (const k of recentLadders.keys()) {
+      if (recentLadders.size <= RECENT_LADDERS) break;
+      recentLadders.delete(k);
+    }
   }
-  return toolResult(lines.join('\n'));
+  return toolResult([text, ...ladderTrailer()].join('\n'));
+}
+
+function ladderTrailer(): string[] {
+  if (suggestionsSuppressed('memlab_react_update_queues')) return [];
+  return [
+    '',
+    '**Suggested next steps**',
+    '- `memlab_replicate` before filing: this family has produced a retraction when a single run was trusted.',
+    '- `memlab_verify_fix({metric_kind: "pending_chain", locator: "<Owner>.<property>"})` once both arms are driven.',
+  ];
+}
+
+/**
+ * Ladder reports by input, so a call repeating one the battery just made
+ * returns in milliseconds instead of re-walking every rung. A rung rewritten
+ * in place changes its size or mtime, and so its key.
+ */
+const RECENT_LADDERS = 8;
+const recentLadders = new Map<string, {at: number; text: string}>();
+
+function ladderKey(
+  rungs: readonly {localPath: string}[],
+  inputs: ReturnType<typeof resolveLadderInputs>,
+  args: {max_chain: number; max_hops: number; limit: number},
+): string | null {
+  try {
+    return JSON.stringify([
+      rungs.map(r => {
+        const st = fs.statSync(r.localPath);
+        return [r.localPath, st.size, st.mtimeMs];
+      }),
+      inputs.cyclesPerRung,
+      inputs.source,
+      args.max_chain,
+      args.max_hops,
+      args.limit,
+    ]);
+  } catch {
+    return null;
+  }
 }
 
 /** One statement around `at`, on one line, at most `max` characters. */
@@ -860,7 +913,7 @@ function singleSnapshotReport(
 export function registerReactUpdateQueues(server: McpServer): void {
   server.tool(
     'memlab_react_update_queues',
-    'The React eager-bailout leak family as one report. A `useState` update whose eager comparison bails out still leaves its record on `queue.pending`, which then never drains — four separate findings in this workstream have been that same shape, and each round re-derived the same three things by hand. This returns: how many queues hold a pending chain (BREADTH), how long each chain is (LENGTH), and which component owns it. The breadth-vs-length split is the part that decides the finding — a flat queue count with growing records is accumulation in existing queues, which is the leak; a rising queue count with one record each is just more hooks mounted, which is not. Getting that backwards is the difference between a filing and a retraction. Pass `run_dir` (or `paths`) to read a WHOLE LADDER in one call: breadth and length per rung, the per-cycle rate for each component, and the breadth-vs-length verdict — otherwise that comparison has to be assembled by hand from N single-snapshot calls. The ladder table also reports `Δ/cycle/queue`, the PER-INSTANCE rate: that is the number that transfers between surfaces and predicts production cost, since `Δ/cycle` alone scales with however many instances this round happened to mount. A quotient landing on a whole number is the mechanism ("one record per instance per event") and is flagged inline. Ladder mode also names, per component, the setter of its longest queue on the last rung and whether every pending record is the value already rendered, and lists the linearly growing no-op `setState` sites to guard. Single-snapshot mode maps each hook to its served source when the snapshot keeps script source: the `useState` declaration (also in transpiled `_useState[1]` form) and the setter\'s call sites, with a guard hint when every pending action equals the rendered state.',
+    'The React eager-bailout leak family as one report. A `useState` update whose eager comparison bails out still leaves its record on `queue.pending`, which then never drains — four separate findings in this workstream have been that same shape, and each round re-derived the same three things by hand. This returns: how many queues hold a pending chain (BREADTH), how long each chain is (LENGTH), and which component owns it. The breadth-vs-length split is the part that decides the finding — a flat queue count with growing records is accumulation in existing queues, which is the leak; a rising queue count with one record each is just more hooks mounted, which is not. Getting that backwards is the difference between a filing and a retraction. Pass `run_dir` (or `paths`) to read a WHOLE LADDER in one call: breadth and length per rung, the per-cycle rate for each component, and the breadth-vs-length verdict — otherwise that comparison has to be assembled by hand from N single-snapshot calls. The ladder table also reports `Δ/cycle/queue`, the PER-INSTANCE rate: that is the number that transfers between surfaces and predicts production cost, since `Δ/cycle` alone scales with however many instances this round happened to mount. A quotient landing on a whole number is the mechanism ("one record per instance per event") and is flagged inline. Ladder mode also names, per component, the setter of its longest queue on the last rung and whether every pending record is the value already rendered, and lists the linearly growing no-op `setState` sites to guard. A ladder call repeating an earlier one on unchanged rungs (as after `memlab_analysis_battery`) returns that report instead of rescanning. Single-snapshot mode maps each hook to its served source when the snapshot keeps script source: the `useState` declaration (also in transpiled `_useState[1]` form) and the setter\'s call sites, with a guard hint when every pending action equals the rendered state.',
     {
       max_chain: z
         .number()

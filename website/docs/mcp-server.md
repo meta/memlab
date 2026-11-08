@@ -532,7 +532,9 @@ figures are defined or grouped differently:
   (`setIsActive(false)`, with the hook's position and the module whose scope
   holds the setter) and whether every pending record is the value already
   rendered. Components whose records grow linearly from such no-op calls are
-  listed separately: each is a call site to guard. For one snapshot, pass
+  listed separately: each is a call site to guard. Repeating a ladder call on
+  unchanged rungs, such as the one `memlab_analysis_battery` makes, returns
+  the earlier report instead of rescanning. For one snapshot, pass
   `snapshot` (a handle or a path) to read it without loading it first.
 - **Named dev-build patterns.** `memlab_dev_artifacts` tags the known
   development-build patterns it finds: `react-compiler-hook-guard`,
