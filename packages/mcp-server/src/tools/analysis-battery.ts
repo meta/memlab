@@ -909,7 +909,7 @@ export function nextCalls(
         'A per-cycle rate that lands on a whole number, and a population that grew while `app_delta` was negative, are both invisible in one round.',
     );
   }
-  // hunt_report reads each round's battery output.
+  // sweep_digest reads each round's battery output.
   const analysed = siblings.filter(d =>
     fs.existsSync(path.join(d, 'analysis')),
   );
@@ -917,7 +917,7 @@ export function nextCalls(
     const REPORT_MAX = 8;
     const latest = analysed.slice(-(REPORT_MAX - 1));
     out.push(
-      `\`memlab_hunt_report({run_dirs: ${JSON.stringify([...latest, self])}})\` — ${analysed.length + 1} analysed rounds is a sweep${analysed.length + 1 > REPORT_MAX ? `; the call names the latest ${REPORT_MAX}` : ''}; the write-up is a tool call, not a document to assemble by hand.`,
+      `\`memlab_sweep_digest({run_dirs: ${JSON.stringify([...latest, self])}})\` — ${analysed.length + 1} analysed rounds is a sweep${analysed.length + 1 > REPORT_MAX ? `; the call names the latest ${REPORT_MAX}` : ''}; one row per round, with what each found that earlier rounds did not, so the write-up is a tool call, not a document to assemble by hand.`,
     );
   }
 

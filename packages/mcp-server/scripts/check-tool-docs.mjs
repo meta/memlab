@@ -22,6 +22,9 @@
  * Deliberately narrow: it only flags a backticked identifier that the
  * description actively tells the caller to use ("set `x`", "pass `x`", "with
  * `x`"). Mentioning another tool's parameter in passing is fine and common.
+ *
+ * Also fails when code outside comments suggests a call, `memlab_x({key: …})`,
+ * with a key that tool's schema does not have.
  */
 import fs from 'fs';
 import path from 'path';
@@ -197,12 +200,80 @@ for (const file of fs.readdirSync(toolsDir).sort()) {
   }
 }
 
+/** `src` with every comment replaced by spaces, so only code and strings remain. */
+function withoutComments(src) {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const commentEnd = skipComment(src, i);
+    if (commentEnd >= 0) {
+      out += src.slice(i, commentEnd).replace(/[^\n]/g, ' ');
+      i = commentEnd;
+      continue;
+    }
+    const c = src[i];
+    if (c === "'" || c === '"' || c === '`') {
+      const end = skipString(src, i);
+      out += src.slice(i, end);
+      i = end;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+// Suggested calls. Outputs and descriptions hand the caller ready-made calls
+// (`memlab_x({key: …})`); one suggested a key the tool does not have, so the
+// call it recommended was refused every time it was followed.
+const schemaKeys = new Map();
+for (const file of fs.readdirSync(toolsDir)) {
+  if (!file.endsWith('.ts')) continue;
+  const src = fs.readFileSync(path.join(toolsDir, file), 'utf8');
+  for (const m of src.matchAll(/server\.tool\(\s*'([^']+)'/g)) {
+    const start = findSchemaStart(src, m.index);
+    if (start >= 0) schemaKeys.set(m[1], topLevelSchemaKeys(src, start));
+  }
+}
+const srcDir = path.join(here, '..', 'src');
+const sourceFiles = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, {withFileTypes: true})) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name !== '__tests__') walk(p);
+    } else if (p.endsWith('.ts')) {
+      sourceFiles.push(p);
+    }
+  }
+})(srcDir);
+let calls = 0;
+for (const file of sourceFiles) {
+  const src = withoutComments(fs.readFileSync(file, 'utf8'));
+  for (const m of src.matchAll(
+    /(memlab_[a-z0-9_]+)\(\{([\s\S]{0,400}?)\}\)/g,
+  )) {
+    const keys = schemaKeys.get(m[1]);
+    if (keys == null) continue;
+    calls++;
+    for (const k of m[2].matchAll(/(?:^|[{,])\s*([a-z_][a-z0-9_]*)\s*:/g)) {
+      if (keys.has(k[1])) continue;
+      problems++;
+      console.error(
+        `${path.relative(srcDir, file)}: suggests \`${m[1]}({${k[1]}: …})\`, but \`${k[1]}\` is not one of its schema keys ` +
+          `(${[...keys].join(', ')}).`,
+      );
+    }
+  }
+}
+
 if (problems > 0) {
   console.error(
-    `\n${problems} description/schema mismatch(es) across ${checked} tools.`,
+    `\n${problems} description/schema mismatch(es) across ${checked} tools and ${calls} suggested calls.`,
   );
   process.exit(1);
 }
 console.log(
-  `check-tool-docs: ${checked} tools checked, no description/schema mismatches.`,
+  `check-tool-docs: ${checked} tools and ${calls} suggested calls checked, no description/schema mismatches.`,
 );
