@@ -223,7 +223,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_build_pair_compare',
-        'A dev-build round and a production-build round of the same combo, lined up per population by property set and unmangled class: dev-only, production-real or production-only, and how much of the dev heap growth a production build keeps.',
+        'A dev-build round and a production-build round of the same combo, lined up per population by property set and unmangled class: dev-only, production-real, production-saturating or production-only, and how much of the dev heap growth a production build keeps.',
       ],
       [
         'memlab_compare_rounds',

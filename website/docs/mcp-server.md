@@ -608,9 +608,12 @@ takes seconds over a ladder that already has one.
 `memlab_build_pair_compare({dev_run_dir, prod_run_dir})` lines up a round
 driven on a development build with one driven on a production build. Record
 fields survive minification, so populations are matched by property set, and by
-class where the name is not mangled. Each row is dev-only, production-real or
-production-only, and the summary says how much of the dev build's per-cycle
-growth the production build keeps.
+class where the name is not mangled. Each row is dev-only, production-real,
+production-saturating or production-only, and the summary says how much of the
+dev build's per-cycle growth the production build keeps. A row is
+production-saturating when it grows on dev but the production round's second
+half, from its middle rung, grew under 20% as fast as its first: the growth is
+bounded on production.
 
 Ladder tools can run longer than an assistant's tool timeout. Start them with
 `memlab_start_job` and collect the result with `memlab_job_status`. A large

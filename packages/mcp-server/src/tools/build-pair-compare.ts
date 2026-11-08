@@ -44,6 +44,8 @@ interface Side {
   cycles: number;
   first: SnapshotIndex;
   last: SnapshotIndex;
+  /** A middle driven rung, when the round has three or more. */
+  mid: {index: SnapshotIndex; fromStart: number} | null;
   combos: string[];
 }
 
@@ -68,20 +70,28 @@ async function loadSide(runDir: string, segment?: number): Promise<Side> {
   if (cycles <= 0) {
     throw new Error(`${runDir}: no cycles were driven between its rungs`);
   }
+  const last = inputs.paths.length - 1;
+  const midAt = last >= 2 ? Math.floor(last / 2) : null;
   const {rungs} = resolveRungs([
     inputs.paths[0],
-    inputs.paths[inputs.paths.length - 1],
+    inputs.paths[last],
+    ...(midAt != null ? [inputs.paths[midAt]] : []),
   ]);
   if (rungs.length < 2) {
     throw new Error(
       `${runDir}: its first and last rung did not resolve to two snapshots`,
     );
   }
+  const fromStart = midAt != null ? axis[midAt] - axis[0] : 0;
   return {
     label: runDir.replace(/\/+$/, '').replace(/^.*\//, ''),
     cycles,
     first: await indexOf(rungs[0].localPath),
     last: await indexOf(rungs[1].localPath),
+    mid:
+      rungs.length > 2 && fromStart > 0 && fromStart < cycles
+        ? {index: await indexOf(rungs[2].localPath), fromStart}
+        : null,
     combos: inputs.manifest?.combos ?? [],
   };
 }
@@ -89,6 +99,11 @@ async function loadSide(runDir: string, segment?: number): Promise<Side> {
 interface Rate {
   count: number;
   bytes: number;
+  /**
+   * Instances per cycle over the first and the second half of the ladder,
+   * split at the middle rung; null without one.
+   */
+  halves: [number, number] | null;
 }
 
 function rates(
@@ -97,13 +112,23 @@ function rates(
 ): Map<string, Rate> {
   const a = table(side.first);
   const b = table(side.last);
+  const m = side.mid != null ? table(side.mid.index) : null;
   const out = new Map<string, Rate>();
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
     const [c0 = 0, s0 = 0] = a[key] ?? [];
     const [c1 = 0, s1 = 0] = b[key] ?? [];
+    let halves: [number, number] | null = null;
+    if (m != null && side.mid != null) {
+      const [cm = 0] = m[key] ?? [];
+      halves = [
+        (cm - c0) / side.mid.fromStart,
+        (c1 - cm) / (side.cycles - side.mid.fromStart),
+      ];
+    }
     out.set(key, {
       count: (c1 - c0) / side.cycles,
       bytes: (s1 - s0) / side.cycles,
+      halves,
     });
   }
   return out;
@@ -122,13 +147,30 @@ function comparableClass(key: string): boolean {
   return type !== 'string' && type !== 'concatenated string';
 }
 
-type Verdict = 'dev-only' | 'prod-real' | 'prod-only' | 'flat';
+type Verdict =
+  'dev-only' | 'prod-real' | 'prod-saturating' | 'prod-only' | 'flat';
 
-function verdictOf(dev: number, prod: number, minRate: number): Verdict {
+/**
+ * The second half of the production ladder grew under 20% as fast as the
+ * first: the same rule `memlab_leak_report` uses for SATURATING.
+ */
+function saturates(r: Rate, minRate: number): boolean {
+  return (
+    r.halves != null &&
+    r.halves[0] >= minRate &&
+    r.halves[1] < 0.2 * r.halves[0]
+  );
+}
+
+function verdictOf(dev: number, prod: Rate, minRate: number): Verdict {
   const devGrows = dev >= minRate;
-  const prodGrows = prod >= minRate;
-  if (devGrows && !prodGrows) return 'dev-only';
-  if (devGrows && prodGrows) return 'prod-real';
+  const prodGrows = prod.count >= minRate;
+  if (devGrows && !prodGrows) {
+    return saturates(prod, minRate) ? 'prod-saturating' : 'dev-only';
+  }
+  if (devGrows && prodGrows) {
+    return saturates(prod, minRate) ? 'prod-saturating' : 'prod-real';
+  }
   if (prodGrows) return 'prod-only';
   return 'flat';
 }
@@ -143,7 +185,8 @@ export function registerBuildPairCompare(server: McpServer): void {
     'Line up a DEV-build round and a PRODUCTION-build round of the same interaction and say, per population, whether its growth is dev-only, production-real or production-only. ' +
       'Populations are matched by property set (record fields survive minification) and by class for classes a minifier does not rename (native, DOM, engine). ' +
       "Reports each side's per-cycle rate, the verdict, and the per-cycle heap growth split into the part a production build keeps and the part only a dev build has. " +
-      'Reads the sidecar index of the first and last driven rung of each round, so it takes seconds when the rungs were loaded before; otherwise it loads each of the four rungs once.',
+      'A row that grows on dev while production growth stops (its second half under 20% of its first, split at the middle rung) reads production-saturating: bounded on production. ' +
+      'Reads the sidecar index of the first, middle and last driven rung of each round, so it takes seconds when the rungs were loaded before; otherwise it loads each of them once.',
     {
       dev_run_dir: z
         .string()
@@ -236,9 +279,9 @@ export function registerBuildPairCompare(server: McpServer): void {
         for (const s of sections) {
           const rows: Array<{key: string; d: Rate; p: Rate; v: Verdict}> = [];
           for (const key of new Set([...s.d.keys(), ...s.p.keys()])) {
-            const d = s.d.get(key) ?? {count: 0, bytes: 0};
-            const p = s.p.get(key) ?? {count: 0, bytes: 0};
-            const v = verdictOf(d.count, p.count, min_rate);
+            const d = s.d.get(key) ?? {count: 0, bytes: 0, halves: null};
+            const p = s.p.get(key) ?? {count: 0, bytes: 0, halves: null};
+            const v = verdictOf(d.count, p, min_rate);
             if (v === 'flat') continue;
             rows.push({key, d, p, v});
           }
@@ -252,12 +295,17 @@ export function registerBuildPairCompare(server: McpServer): void {
               .filter(r => r.v === 'dev-only')
               .reduce((n, r) => n + Math.max(0, r.d.bytes), 0);
           }
-          const counts = {'dev-only': 0, 'prod-real': 0, 'prod-only': 0};
+          const counts = {
+            'dev-only': 0,
+            'prod-real': 0,
+            'prod-saturating': 0,
+            'prod-only': 0,
+          };
           for (const r of rows) counts[r.v as keyof typeof counts]++;
           lines.push(
             `### ${s.title}`,
             '',
-            `${formatNumber(counts['prod-real'])} production-real · ${formatNumber(counts['dev-only'])} dev-only · ${formatNumber(counts['prod-only'])} production-only (growing at ≥ ${min_rate}/cycle on a side).`,
+            `${formatNumber(counts['prod-real'])} production-real · ${formatNumber(counts['prod-saturating'])} production-saturating · ${formatNumber(counts['dev-only'])} dev-only · ${formatNumber(counts['prod-only'])} production-only (growing at ≥ ${min_rate}/cycle on a side).`,
             '',
           );
           if (rows.length === 0) continue;
@@ -283,7 +331,9 @@ export function registerBuildPairCompare(server: McpServer): void {
                   formatBytes(Math.round(r.p.bytes)),
                   r.v === 'prod-real'
                     ? `prod-real (${r.d.count > 0 ? `${((r.p.count / r.d.count) * 100).toFixed(0)}% of dev` : '—'})`
-                    : r.v,
+                    : r.v === 'prod-saturating' && r.p.halves != null
+                      ? `prod-saturating (${fmtRate(r.p.halves[0])} → ${fmtRate(r.p.halves[1])}/cycle)`
+                      : r.v,
                 ]),
               new Set([1, 2, 3, 4]),
             ),
@@ -298,7 +348,11 @@ export function registerBuildPairCompare(server: McpServer): void {
           '',
         );
         lines.push(
-          "_Rates are first-to-last driven rung over the cycles between them; the settle rung is not used. Verdicts compare rates, not counts, so two rounds of different lengths line up. A dev-only row is a population the production build does not grow under the same interaction: do not file it as a leak. A production-only row usually means the combo reached something on one build only — check both rounds' step counts before reading it as a build difference._",
+          '_Rates are first-to-last driven rung over the cycles between them; the settle rung is not used. ' +
+            (prod.mid != null
+              ? 'A production-saturating row grows on dev but, in the production round, its second half (from the middle rung) grew under 20% as fast as its first: bounded on production, not a leak there. '
+              : 'The production round has only two driven rungs, so saturation on production cannot be told apart. ') +
+            "Verdicts compare rates, not counts, so two rounds of different lengths line up. A dev-only row is a population the production build does not grow under the same interaction: do not file it as a leak. A production-only row usually means the combo reached something on one build only — check both rounds' step counts before reading it as a build difference._",
         );
         return toolResult(lines.join('\n'));
       } catch (err) {
