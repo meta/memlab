@@ -48,6 +48,7 @@ import {
   segmentArg,
 } from '../run-manifest.js';
 import {formatProductionPath} from '../dev-edges.js';
+import {getRegisteredTool} from '../tool-registry.js';
 import {fixPatternPointer, pathFixPattern} from '../fix-knowledge.js';
 import {sourceOfNode} from './module-attribution.js';
 const {NumericSet} = memlabCore;
@@ -643,6 +644,42 @@ function makeDominatorResolver(): (node: IHeapNode) => IHeapNode | null {
   };
 }
 
+/** Detached nodes in a group before its doors are listed unasked. */
+const ISLAND_DOORS_MIN_NODES = 1000;
+
+/**
+ * The door count, table and verdict from `memlab_island_doors` for the island
+ * around `seedId`. A fix sized against the shortest path alone measured zero
+ * once, because a second, independent holder kept the same island alive.
+ */
+async function doorsInto(seedId: number): Promise<string[]> {
+  const entry = getRegisteredTool('memlab_island_doors');
+  if (entry == null) return [];
+  try {
+    const args = {seed_node_ids: [seedId], limit: 5};
+    const parsed =
+      entry.shape != null ? z.object(entry.shape as never).parse(args) : args;
+    const res = (await entry.handler(parsed, {})) as {
+      isError?: boolean;
+      content?: Array<{text?: string}>;
+    };
+    if (res?.isError === true) return [];
+    const text = (res?.content ?? []).map(c => c.text ?? '').join('\n');
+    const body = text.split('\n');
+    const start = body.findIndex(l => /application-side door/.test(l));
+    if (start < 0) return [];
+    const end = body.findIndex((l, i) => i > start && l.startsWith('### '));
+    return [
+      '',
+      `### Doors into the top owner's island (\`memlab_island_doors({seed_node_ids: [${seedId}]})\`)`,
+      '',
+      ...body.slice(start, end < 0 ? undefined : end),
+    ];
+  } catch {
+    return [];
+  }
+}
+
 interface GroupStats {
   count: number;
   totalRetained: number;
@@ -738,6 +775,13 @@ export function registerDetachedDom(server: McpServer): void {
         .describe(
           'With `group_by`: an earlier snapshot of the same page session, e.g. the first rung. Each group then shows how many of its nodes were already detached there ("At baseline") and how many are new, and groups are sorted by new nodes: a group that was all there at baseline is a standing population, not what the round grew. Node ids are compared, so there must be no reload between the two.',
         ),
+      island_doors: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe(
+          `With \`group_by: "dominator"\`: when the top owner's group has at least ${ISLAND_DOORS_MIN_NODES.toLocaleString('en-US')} detached nodes, also list every application-side reference into it (\`memlab_island_doors\`), so a fix is sized against all of them (default true). It costs one walk of the heap.`,
+        ),
     },
     async ({
       output_mode,
@@ -750,6 +794,7 @@ export function registerDetachedDom(server: McpServer): void {
       paths,
       segment,
       baseline,
+      island_doors,
     }) => {
       try {
         // Ladder mode. A single detached census is a population; the RATE is
@@ -1159,6 +1204,9 @@ export function registerDetachedDom(server: McpServer): void {
                       `An object with several independent retainers RE-ATTRIBUTES rather than reclaims: cutting one edge moves the bytes to the next holder and the A/B measures zero.`
                     : ' — it reports whether cutting one edge frees the object or merely re-attributes it.'),
               );
+              if (island_doors && topOwner[1].count >= ISLAND_DOORS_MIN_NODES) {
+                lines.push(...(await doorsInto(topOwner[1].exampleId)));
+              }
             }
             if (ownerless) {
               lines.push(

@@ -481,7 +481,11 @@ figures are defined or grouped differently:
   row, marked `×N` with the number of owner objects, instead of one row per
   object. A component that leaks once per mount had printed the same scope 19
   times. The output also gives the shortest retainer path of the top row's
-  largest owner, folded in the middle.
+  largest owner, folded in the middle. When that row has 1,000 detached nodes
+  or more, it also lists every application-side reference into the island
+  (`memlab_island_doors`), since a fix that closes only the shortest path
+  reclaims nothing while another holder remains. `island_doors: false` skips
+  that heap walk.
 - **Long retainer paths are folded.** `memlab_retainer_trace` prints a
   repeating multi-hop pattern (a scope chain alternating closures and
   contexts) once, with its repeat count, on the first hop outside the
