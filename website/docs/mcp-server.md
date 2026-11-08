@@ -141,6 +141,12 @@ To avoid an out-of-memory crash, which would lose every loaded snapshot,
 Raising `--max-old-space-size` raises all three limits, with no other change.
 `force: true` attempts a one-off oversized load anyway.
 
+Analysis can also fill the heap between loads. When the server's heap use
+first passes 75%, 85% and 95% of its limit, the next tool result starts with a
+one-line warning that gives the heap use, RSS and the number of resident
+snapshots. Each level is announced once on the way up, so a session with room
+to spare never sees it.
+
 :::
 
 ## Command line (`memlab-cli`)

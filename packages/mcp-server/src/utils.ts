@@ -29,6 +29,7 @@ import {
   makeScanBudget,
   tickAnalysis,
 } from './analysis-budget.js';
+import {memoryPressureNotice} from './memory-pressure.js';
 import {snapshotsReadInScope} from './read-scope.js';
 export {ScanTimeoutError, makeScanBudget};
 
@@ -2167,7 +2168,9 @@ export function toolResult(text: string, headerOverride?: string | null) {
           ? snapshotHeader()
           : '';
   const notice = takeActiveNotice();
-  const body = [notice, header, text].filter(Boolean).join('\n\n');
+  const body = [notice, memoryPressureNotice(), header, text]
+    .filter(Boolean)
+    .join('\n\n');
   return {content: [{type: 'text' as const, text: body}]};
 }
 
