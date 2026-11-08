@@ -347,6 +347,12 @@ Compiler cache slots (`updateQueue.memoCache.data[block][slot]`) that can keep
 a stale closure or element alive. Asking
 for a helper that does not exist suggests the one that does the job, such as
 `histogram` for `groupBy`.
+Before any code runs, a lint refuses three mistakes that would otherwise cost
+a whole scan: a helper name that does not exist, code with no output (no
+`result`, `return`, `console` or `helpers.save`), and an
+`e.type === 'context'` filter in code that never reaches a scope object (a
+closure's hop to its scope is an `internal` edge named `context`). Pass
+`skip_lint: true` when the match is wrong.
 `memlab_eval_across({run_dir, code, format: "table"})` runs one query on every
 rung; when each returns a number or a flat object of scalars, the answer is
 one key × rung table with a first-to-last Δ.

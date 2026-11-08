@@ -1549,6 +1549,13 @@ export function registerEval(server: McpServer): void {
         .describe(
           'Report what the code WOULD scan and stop, without running it (default false). Returns the snapshot size, whether the code contains a full-heap walk, and the effective max_nodes budget. Use it before an exploratory scan on a multi-million-node heap, where the difference between an indexed lookup and a full walk is the difference between milliseconds and minutes.',
         ),
+      skip_lint: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          'Run the code even when the pre-scan lint refuses it (default false). The lint refuses, before anything runs, a `helpers.x` name that does not exist, code with no output (no `result`, `return`, `console` or `helpers.save`), and an `e.type === "context"` filter in code that never touches a scope object.',
+        ),
       sample: z
         .number()
         .int()
@@ -1785,6 +1792,7 @@ export async function runEval({
   sample,
   restrict_to_ids,
   dry_run,
+  skip_lint,
   max_result_bytes,
   ownsScanBudget,
   onResult,
@@ -1802,6 +1810,8 @@ export async function runEval({
   /** Restrict `snapshot.nodes.forEach` to these node ids. */
   restrict_to_ids?: number[];
   dry_run?: boolean;
+  /** Run even when `lintRefusals` objects. */
+  skip_lint?: boolean;
   max_result_bytes?: number;
   /**
    * True only for a direct `memlab_eval` MCP call, which owns the scan budget
@@ -4755,6 +4765,22 @@ export async function runEval({
      */
     const helperNames = Object.keys(helpersImpl).sort();
     lastKnownHelperNames = helperNames;
+    if (skip_lint !== true) {
+      const refusals = lintRefusals(
+        prelude != null && prelude.trim() !== ''
+          ? `${prelude}\n;\n${code}`
+          : (code as string),
+        helperNames,
+      );
+      if (refusals.length > 0) {
+        return errorResult(
+          new Error(
+            `${LINT_REFUSED} nothing was run:\n${refusals.map(r => `- ${r}`).join('\n')}\n` +
+              'Fix the code, or pass `skip_lint: true` if the match is wrong (for example, inside a string).',
+          ),
+        );
+      }
+    }
     const helpers = new Proxy(helpersImpl, {
       get(target, prop, receiver) {
         if (typeof prop === 'string' && !(prop in target)) {
@@ -5421,6 +5447,10 @@ function lintEval(code: string, knownHelpers: string[] | null): string {
     );
   }
 
+  for (const r of contextTypeRefusal(stripComments(code))) {
+    lines.push(`- ❌ ${r}`);
+  }
+
   lines.push(
     '',
     syntaxOk
@@ -5428,6 +5458,74 @@ function lintEval(code: string, knownHelpers: string[] | null): string {
       : '_Fix the syntax error first._',
   );
   return lines.join('\n');
+}
+
+/** Start of a pre-scan refusal; `memlab_eval_across` stops on it. */
+export const LINT_REFUSED = 'Refused before the scan:';
+
+/**
+ * Mistakes decidable from the source alone, each of which otherwise costs a
+ * full scan: a helper typo used after a whole-heap walk throws only once the
+ * walk is done, code that never sets `result` returns nothing after it, and a
+ * closure-to-scope hop filtered on `e.type === 'context'` matches no edge on
+ * any heap and returns a confident zero.
+ */
+function lintRefusals(source: string, helperNames: string[]): string[] {
+  const code = stripComments(source);
+  const out: string[] = [];
+  const unknown = [
+    ...new Set(
+      [...code.matchAll(/helpers\.([A-Za-z_][A-Za-z0-9_]*)/g)].map(m => m[1]),
+    ),
+  ].filter(n => !helperNames.includes(n));
+  for (const name of unknown) {
+    const lower = name.toLowerCase();
+    const synonym = HELPER_SYNONYMS[name];
+    const near = [
+      ...(synonym != null ? [synonym] : []),
+      ...helperNames.filter(
+        n =>
+          n !== synonym &&
+          (n.toLowerCase().includes(lower) ||
+            lower.includes(n.toLowerCase()) ||
+            editDistanceWithin(n.toLowerCase(), lower, 2)),
+      ),
+    ];
+    out.push(
+      `\`helpers.${name}\` does not exist.` +
+        (near.length > 0
+          ? ` Did you mean ${near.slice(0, 4).join(', ')}?`
+          : ''),
+    );
+  }
+  // Printing, saving and defining are outputs too.
+  if (
+    !/\bresult\b/.test(code) &&
+    !/\bconsole\s*\.|helpers\.(save|remember|defineFn)\b/.test(code) &&
+    !hasTopLevelReturn(source)
+  ) {
+    out.push(
+      'Nothing sets `result` and there is no top-level `return`, so the call would run and return nothing.',
+    );
+  }
+  out.push(...contextTypeRefusal(code));
+  return out;
+}
+
+function contextTypeRefusal(code: string): string[] {
+  if (!/\.type\s*===?\s*['"`]context['"`]/.test(code)) return [];
+  // Code that reaches a scope object first is filtering that scope's
+  // variables, where `context` IS the edge type.
+  if (/Context|scope|byContextVar|name_or_index/.test(code)) return [];
+  return [
+    "`e.type === 'context'` with no scope object in sight: a closure's hop to its scope is an `internal` edge NAMED `context`, so this matches nothing on any heap. Use `e.name_or_index === 'context'`, or `helpers.byContextVar(name)` for a captured variable.",
+  ];
+}
+
+function stripComments(code: string): string {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 }
 
 function describeEnv(section?: string): string {

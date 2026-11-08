@@ -21,7 +21,7 @@ import {
   markdownTable,
   toolResult,
 } from '../utils.js';
-import {runEval} from './eval.js';
+import {LINT_REFUSED, runEval} from './eval.js';
 import {startJob} from './jobs.js';
 import {runWithReadScope} from '../read-scope.js';
 import {loadRunManifest} from '../run-manifest.js';
@@ -190,6 +190,13 @@ export function registerEvalAcross(server: McpServer): void {
         .describe(
           'Per-snapshot node-visit budget for full-heap walks. Defaults to a budget SCALED from each loaded graph (6 full passes, floored at 20,000,000). On overrun that rung reports a partial result instead of failing the whole run.',
         ),
+      skip_lint: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          'Run the code even when the pre-scan lint refuses it (default false), as in `memlab_eval`. A refused run stops after the first rung.',
+        ),
       stop_on_error: z
         .boolean()
         .optional()
@@ -236,6 +243,7 @@ async function runEvalAcross({
   timeout_ms,
   max_nodes,
   stop_on_error,
+  skip_lint,
   format = 'sections',
 }: {
   format?: 'sections' | 'table';
@@ -247,6 +255,7 @@ async function runEvalAcross({
   timeout_ms?: number;
   max_nodes?: number;
   stop_on_error: boolean;
+  skip_lint?: boolean;
 }) {
   try {
     const given = [
@@ -333,6 +342,7 @@ async function runEvalAcross({
             code,
             timeout_ms,
             max_nodes,
+            skip_lint,
             onResult: v => {
               value = tableCells(v);
             },
@@ -362,6 +372,12 @@ async function runEvalAcross({
           );
         }
         sections.push(`${header}\n\n${body}`);
+        if (body.includes(LINT_REFUSED)) {
+          sections.push(
+            '_Stopped here: the lint refuses the same code on every rung._',
+          );
+          break;
+        }
         if (stop_on_error && /^Error:/m.test(body)) {
           sections.push(
             '_Stopped here: stop_on_error is set and this rung failed._',
