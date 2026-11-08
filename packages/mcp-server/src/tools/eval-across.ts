@@ -179,9 +179,8 @@ export function registerEvalAcross(server: McpServer): void {
       timeout_ms: z
         .number()
         .optional()
-        .default(60000)
         .describe(
-          'Execution timeout in milliseconds, applied PER snapshot (default 60000).',
+          "Execution timeout in milliseconds, applied PER snapshot. Default: scaled from each rung's size (60 s floor, about 1 s per 40,000 nodes), as in `memlab_eval`.",
         ),
       max_nodes: z
         .number()
@@ -245,7 +244,7 @@ async function runEvalAcross({
   paths?: string[];
   run_dir?: string;
   rungs?: number[];
-  timeout_ms: number;
+  timeout_ms?: number;
   max_nodes?: number;
   stop_on_error: boolean;
 }) {

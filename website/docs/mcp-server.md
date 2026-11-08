@@ -584,6 +584,8 @@ give a ladder in three ways:
 
 `memlab_eval_across` takes `paths`, or `run_dir` with `rungs: [0, -1]`, to run
 one eval program over chosen rungs the same way, without loading them first.
+Each rung gets a timeout scaled from its size, as `memlab_eval` does, unless
+`timeout_ms` is given.
 
 The first load of a rung writes a sidecar index next to it
 (`<snapshot>.memlab-index.json`) with class counts, edge names and shape
