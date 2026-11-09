@@ -76,6 +76,8 @@ interface RunManifest {
   /** hunt_runner's served-source gate check: props no served code reads. */
   served_gates?: {dead?: string[]; not_served?: string[]};
   caveats?: string[];
+  /** `combos` is what was DRIVEN: the runner drops combos that fail smoke. */
+  config?: {combos?: string[]};
   provisional_notes?: string[];
   stop_reason?: string;
   /** `dev_build: false` is a production-like (minified, __DEV__=0) round. */
@@ -339,6 +341,22 @@ export function auditManifest(
           },
   );
 
+  // Its own row because `cycle landing` counts only the combos that survived
+  // smoke. One Ads round asked for seven combos, five failed smoke, and its
+  // 105/105 cycles of the other two read as a clean landing.
+  const dropped = droppedAtSmoke(m.caveats ?? []);
+  if (dropped.length > 0) {
+    const ran = m.config?.combos ?? [];
+    checks.push({
+      name: 'combos dropped at smoke',
+      status: 'caveat',
+      detail:
+        `${dropped.length} requested combo(s) failed smoke and were never driven: ${dropped.join(', ')}.` +
+        (ran.length > 0 ? ` Driven: ${ran.join(', ')}.` : '') +
+        ' Every rate here is for the combos that ran, not for the mix that was asked for.',
+    });
+  }
+
   const provisional = m.provisional_notes ?? [];
   if (provisional.length > 0) {
     checks.push({
@@ -490,6 +508,18 @@ const ICON: Record<CheckStatus, string> = {
 };
 
 /** A finding recorded as fixed (or with a fix) behind a gate. */
+/** Names from hunt_runner's `smoke failures: a=DID NOT LAND, b=…` caveat. */
+export function droppedAtSmoke(caveats: string[]): string[] {
+  const prefix = 'smoke failures: ';
+  const line = caveats.find(c => c.startsWith(prefix));
+  if (line == null) return [];
+  return line
+    .slice(prefix.length)
+    .split(', ')
+    .map(part => part.split('=')[0].trim())
+    .filter(name => name !== '');
+}
+
 export interface GatedFix {
   label: string;
   fixed_behind: string;
@@ -578,7 +608,7 @@ export function registerRoundAudit(server: McpServer): void {
     "Read a leak hunt's `run.json` and say whether the round can carry a conclusion at all — BEFORE anyone reads its numbers. " +
       'Checks rung count, ladder continuity (a mid-run page reload silently splits the ladder into two V8 isolates), ' +
       'per-step landing (a declared surface that never actually opened), step exceptions, the content-mutation confound, ' +
-      'verified gating, and the overall cycle landing rate. It also names recorded fixes (`memlab_finding_index`) whose `fixed_behind` prop this build does not serve.\n\n' +
+      'verified gating, the overall cycle landing rate, and the requested combos that failed smoke and were never driven. It also names recorded fixes (`memlab_finding_index`) whose `fixed_behind` prop this build does not serve.\n\n' +
       'Every one of these is already in the manifest and nothing was reading it. The failures this catches are rounds ' +
       'that LOOK complete: one was written up as valid with two of its ten declared operations at 58/165 and 0/165; ' +
       'another was split by a page reload and read as "the app shrank, cleanest round on record" when its valid segment ' +
