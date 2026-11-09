@@ -385,10 +385,21 @@ async function ladderReport(args: {
       const scan = scanUpdateQueues(snap, args.max_chain, args.max_hops);
       // The last rung holds the longest chains, so its example queue per
       // component is the one whose setter and pending values decide the fix.
+      // Ranked by growth since the first rung, as the table below is: ranked
+      // by size, a component the table lists could fall past the cap and
+      // lose its setter and its place among the no-op sites.
       if (isLast) {
+        const before = new Map(
+          (perRung[0]?.ranked ?? []).map(b => [b.component, b.records]),
+        );
         sites = siteDetails(
           snap,
-          scan.ranked,
+          [...scan.ranked].sort(
+            (x, y) =>
+              y.records -
+              (before.get(y.component) ?? 0) -
+              (x.records - (before.get(x.component) ?? 0)),
+          ),
           args.max_hops,
           Math.max(args.limit, 20),
         );
