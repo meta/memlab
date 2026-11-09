@@ -655,6 +655,12 @@ const ISLAND_DOORS_MIN_NODES = 1000;
 async function doorsInto(seedId: number): Promise<string[]> {
   const entry = getRegisteredTool('memlab_island_doors');
   if (entry == null) return [];
+  // A listing that failed must not read as one that found nothing: the reader
+  // would size the fix against the shortest path alone.
+  const failed = (why: string): string[] => [
+    '',
+    `_The doors into the top owner's island could not be listed (${why}); run \`memlab_island_doors({seed_node_ids: [${seedId}]})\` before sizing a fix._`,
+  ];
   try {
     const args = {seed_node_ids: [seedId], limit: 5};
     const parsed =
@@ -663,11 +669,13 @@ async function doorsInto(seedId: number): Promise<string[]> {
       isError?: boolean;
       content?: Array<{text?: string}>;
     };
-    if (res?.isError === true) return [];
     const text = (res?.content ?? []).map(c => c.text ?? '').join('\n');
+    if (res?.isError === true) {
+      return failed(text.replace(/^Error:\s*/, '').split('\n')[0]);
+    }
     const body = text.split('\n');
     const start = body.findIndex(l => /application-side door/.test(l));
-    if (start < 0) return [];
+    if (start < 0) return failed('no door count in its output');
     const end = body.findIndex((l, i) => i > start && l.startsWith('### '));
     return [
       '',
@@ -675,8 +683,8 @@ async function doorsInto(seedId: number): Promise<string[]> {
       '',
       ...body.slice(start, end < 0 ? undefined : end),
     ];
-  } catch {
-    return [];
+  } catch (err) {
+    return failed(err instanceof Error ? err.message : String(err));
   }
 }
 
