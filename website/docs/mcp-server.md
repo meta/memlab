@@ -517,9 +517,9 @@ figures are defined or grouped differently:
   `memlab_round_digest({run_dir, format: "doc_markdown", compare_to})` prints
   a short Markdown section for a team document: the run, the audit verdict,
   post-GC heap (per arm on an A/B round) and `app_delta`, detached DOM nodes,
-  leak candidates and the settle split from the battery output, a "vs
-  <previous round>" line, and
-  TODO lines for the reading and the next step.
+  leak candidates and the settle split from the battery output, a
+  `vs <previous round>` line, and TODO lines for the reading and the next
+  step.
 - **A whole-number rate is a mechanism.** `memlab_compare_rounds` lists
   every population, in any round of a sweep, whose rate is a whole number per
   cycle or per landed step (from run.json `steps`), with the step it matches.
