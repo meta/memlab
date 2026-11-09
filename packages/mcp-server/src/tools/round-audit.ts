@@ -14,6 +14,7 @@ import path from 'path';
 import {z} from 'zod';
 import {
   errorResult,
+  escapeRegExp,
   formatNumber,
   markdownTable,
   toolResult,
@@ -512,7 +513,9 @@ export function fixGateCheck(
   }
   const dead =
     m.served_gates?.dead ??
-    (m.caveats ?? []).flatMap(c => /^DEAD PROP: (\S+)/.exec(c)?.[1] ?? []);
+    (m.caveats ?? []).flatMap(
+      c => /^DEAD PROP: ([A-Za-z0-9_$.-]*[A-Za-z0-9_$])/.exec(c)?.[1] ?? [],
+    );
   for (const p of dead) {
     why.set(p, 'in the registry but read by no served code');
   }
@@ -520,14 +523,18 @@ export function fixGateCheck(
     if (!why.has(p)) why.set(p, 'not found in the served JavaScript');
   }
   if (why.size === 0) return null;
+  // Each prop the build lacks, looked up as a whole word of `fixed_behind`,
+  // which is free text ("web_x, stacked on D1") and can name a prop of any
+  // shape.
   const hits: string[] = [];
   for (const f of fixes) {
-    const props = f.fixed_behind.match(
-      /[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+/g,
-    );
-    for (const p of new Set(props ?? [])) {
-      const reason = why.get(p);
-      if (reason != null) hits.push(`${f.label} (\`${p}\`: ${reason})`);
+    for (const [p, reason] of why) {
+      const word = new RegExp(
+        `(^|[^A-Za-z0-9_])${escapeRegExp(p)}($|[^A-Za-z0-9_])`,
+      );
+      if (word.test(f.fixed_behind)) {
+        hits.push(`${f.label} (\`${p}\`: ${reason})`);
+      }
     }
   }
   if (hits.length === 0) return null;
@@ -541,22 +548,27 @@ export function fixGateCheck(
   };
 }
 
-function gatedFixes(runDir: string): GatedFix[] {
+function gatedFixes(runDir: string): {fixes: GatedFix[]; error?: string} {
   try {
     const {index} = loadFindingIndex(workstreamFromRun(runDir));
-    return Object.values(index.findings)
-      .filter(
-        f =>
-          f.fixed_behind != null &&
-          f.status !== 'retracted' &&
-          f.status !== 'artifact',
-      )
-      .map(f => ({
-        label: `\`${f.title ?? (f.growing_classes.join(', ') || f.fingerprint)}\``,
-        fixed_behind: f.fixed_behind as string,
-      }));
-  } catch {
-    return [];
+    return {
+      fixes: Object.values(index.findings)
+        .filter(
+          f =>
+            f.fixed_behind != null &&
+            f.status !== 'retracted' &&
+            f.status !== 'artifact',
+        )
+        .map(f => ({
+          label: `\`${f.title ?? ((f.growing_classes ?? []).join(', ') || f.fingerprint)}\``,
+          fixed_behind: f.fixed_behind as string,
+        })),
+    };
+  } catch (err) {
+    return {
+      fixes: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -618,10 +630,15 @@ export function registerRoundAudit(server: McpServer): void {
           }
         }
         const {checks, verdict} = auditManifest(manifest, external);
-        const fixGates = fixGateCheck(
-          manifest,
-          gatedFixes(path.dirname(manifestPath)),
-        );
+        const gated = gatedFixes(path.dirname(manifestPath));
+        const fixGates =
+          gated.error != null
+            ? {
+                name: 'fix gates',
+                status: 'info' as const,
+                detail: `Not checked: the finding index could not be read (${gated.error}).`,
+              }
+            : fixGateCheck(manifest, gated.fixes);
         if (fixGates != null) checks.push(fixGates);
 
         const lines: string[] = [
