@@ -1902,10 +1902,16 @@ export function registerFindingIndex(server: McpServer): void {
                 f.last_seen_round === round) &&
               (kind == null || (f.kind ?? 'retainer-path') === kind) &&
               (status == null || f.status === storableStatus(status)) &&
+              // A legacy or imported record can lack `last_seen_round`; it
+              // cannot be shown to be at or after any round.
               (since_round == null ||
-                f.last_seen_round.localeCompare(since_round, undefined, {
-                  numeric: true,
-                }) >= 0) &&
+                (f.last_seen_round ?? '').localeCompare(
+                  since_round,
+                  undefined,
+                  {
+                    numeric: true,
+                  },
+                ) >= 0) &&
               (needle == null ||
                 [f.title, f.signature, f.note].some(
                   t => t?.toLowerCase().includes(needle) === true,
