@@ -364,7 +364,10 @@ async function ladderReport(args: {
   const {rungs, largestMB} = resolveRungs(inputs.paths);
   const key = ladderKey(rungs, inputs, args);
   const prior = key != null ? recentLadders.get(key) : undefined;
-  if (prior != null) {
+  if (key != null && prior != null) {
+    // Re-inserted so a report that keeps being reused is evicted last.
+    recentLadders.delete(key);
+    recentLadders.set(key, prior);
     return toolResult(
       [
         `_Same rungs and arguments as a call at ${new Date(prior.at).toLocaleTimeString('en-US', {hour12: false})} (the analysis battery runs this step); reused instead of rescanned._`,
