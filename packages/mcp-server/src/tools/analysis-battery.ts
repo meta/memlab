@@ -51,7 +51,7 @@ import {hasInvariants} from '../judges.js';
 import {resolveProbeSet} from '../probe-sets.js';
 import {getRegisteredTool} from '../tool-registry.js';
 import {makeProgressReporter} from '../progress.js';
-import {snapshotExists} from '../snapshot-index.js';
+import {flushSidecarWrites, snapshotExists} from '../snapshot-index.js';
 import {errorResult, formatBytes, formatNumber, toolResult} from '../utils.js';
 import {runWithReadScope} from '../read-scope.js';
 import {runWithRungRetention} from '../snapshot-borrow.js';
@@ -1690,6 +1690,35 @@ export function registerAnalysisBattery(server: McpServer): void {
               writePartial(tracked);
             }
           });
+
+          // The audit runs first, before any tool has written the sidecar
+          // index its baseline-detached check reads, so on a fresh round its
+          // file says "not computed yet". Re-run it once the rest has run and
+          // the sidecar writes, which are not awaited, have landed.
+          const auditText = perToolText.get('memlab_round_audit');
+          const auditEntry = getRegisteredTool('memlab_round_audit');
+          if (
+            auditText != null &&
+            auditEntry != null &&
+            /baseline detached\s*\|\s*not computed yet/.test(auditText)
+          ) {
+            try {
+              await flushSidecarWrites();
+              const args =
+                auditEntry.shape != null
+                  ? z.object(auditEntry.shape as never).parse({run_dir})
+                  : {run_dir};
+              const again = textOf(await auditEntry.handler(args, {}));
+              perToolText.set('memlab_round_audit', again);
+              fs.writeFileSync(
+                path.join(outDir, 'memlab_round_audit.txt'),
+                again,
+                'utf8',
+              );
+            } catch {
+              // The first audit's file stays; its row says to re-run it.
+            }
+          }
 
           // The one number every other number is read against, lifted out of
           // `artifact_budget` and put ABOVE the digest. A figure that has to

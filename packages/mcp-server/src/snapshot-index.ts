@@ -579,8 +579,19 @@ export function ensureSidecar(
   const existing = readSidecar(snapshotPath);
   if (existing != null) return existing;
   const built = buildSnapshotIndex(snapshot, snapshotPath, normalizeClassName);
-  if (indexCacheEnabled()) void writeSidecarAsync(snapshotPath, built);
+  if (indexCacheEnabled()) {
+    const write = writeSidecarAsync(snapshotPath, built);
+    pendingWrites.add(write);
+    void write.finally(() => pendingWrites.delete(write));
+  }
   return built;
+}
+
+const pendingWrites = new Set<Promise<string | null>>();
+
+/** Resolves once every sidecar write `ensureSidecar` started has finished. */
+export async function flushSidecarWrites(): Promise<void> {
+  await Promise.all([...pendingWrites]);
 }
 
 /** `classes` as the Map shape the ladder tools already pass around. */
