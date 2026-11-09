@@ -15,8 +15,10 @@
  * nothing warned while analysis itself filled the heap: a 5.3M-node rung plus
  * two dozen rungs held for reuse ran within a few percent of the limit, and an
  * out-of-memory crash there loses every resident snapshot and the session.
- * Each threshold is announced once on the way up, so a healthy session never
- * pays for the line.
+ * The highest threshold crossed is announced once on the way up, so a healthy
+ * session never pays for the line. A jump past several thresholds at once
+ * announces only the highest: the lower notices would say the same thing with
+ * less urgency.
  */
 
 import v8 from 'v8';

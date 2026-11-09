@@ -144,8 +144,9 @@ Raising `--max-old-space-size` raises all three limits, with no other change.
 Analysis can also fill the heap between loads. When the server's heap use
 first passes 75%, 85% and 95% of its limit, the next tool result starts with a
 one-line warning that gives the heap use, RSS and the number of resident
-snapshots. Each level is announced once on the way up, so a session with room
-to spare never sees it.
+snapshots. The highest level passed is announced once on the way up (a jump
+past two levels announces only the higher one), so a session with room to
+spare never sees it.
 
 :::
 
