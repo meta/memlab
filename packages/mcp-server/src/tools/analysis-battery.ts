@@ -946,8 +946,13 @@ export function nextCalls(
     // backing stores and `system /` internals are held BY the growth, and a
     // trace of one names its holder's holder at best: one sweep was told to
     // trace `heap number` after every round.
+    // The name starts with a non-space: an unnamed class (` (closure)`)
+    // otherwise matched as `" "`, and `class_name` is an exact match, so ""
+    // would select every unnamed array and closure as one population.
     const heldClass = [
-      ...settle.matchAll(/^\|\s*([^|]+?)\s*\([a-z ]+\)\s*\|.*\|\s*held\s+—/gm),
+      ...settle.matchAll(
+        /^\|\s*([^|\s][^|]*?)\s*\([a-z ]+\)\s*\|.*\|\s*held\s+—/gm,
+      ),
     ]
       .map(m => m[1])
       .find(c => !ENGINE_HELD_CLASS_RE.test(c));
