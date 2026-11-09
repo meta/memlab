@@ -10,6 +10,7 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
+import path from 'path';
 import {z} from 'zod';
 import {
   formatNumber,
@@ -112,7 +113,9 @@ export function registerHuntReport(server: McpServer): void {
     {
       run_json: z
         .string()
-        .describe('Path to the run.json written by the hunt runner.'),
+        .describe(
+          'Path to the run.json written by the hunt runner (or to the run directory containing it).',
+        ),
       include_interaction_log: z
         .boolean()
         .optional()
@@ -121,8 +124,12 @@ export function registerHuntReport(server: McpServer): void {
           'Append the raw ordered interaction log (default false: the per-combo summary is what a reader acts on).',
         ),
     },
-    async ({run_json, include_interaction_log}) => {
+    async ({run_json: given, include_interaction_log}) => {
       try {
+        const run_json =
+          fs.existsSync(given) && fs.statSync(given).isDirectory()
+            ? path.join(given, 'run.json')
+            : given;
         if (!fs.existsSync(run_json)) {
           return errorResult(
             `No manifest at ${run_json}. The hunt runner writes run.json into its --outdir after every rung, so an aborted run still has one.`,

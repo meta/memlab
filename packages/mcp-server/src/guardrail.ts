@@ -114,6 +114,7 @@ const PARAM_ALIASES: Record<string, string[]> = {
   id: ['node_id'],
   className: ['class_name'],
   runDir: ['run_dir'],
+  run_dir: ['run_json'],
 };
 
 /**
