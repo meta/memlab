@@ -372,7 +372,9 @@ async function runEvalAcross({
           );
         }
         sections.push(`${header}\n\n${body}`);
-        if (body.includes(LINT_REFUSED)) {
+        // The refusal is the error itself, not text a result happens to
+        // contain.
+        if (body.startsWith(`Error: ${LINT_REFUSED}`)) {
           sections.push(
             '_Stopped here: the lint refuses the same code on every rung._',
           );
