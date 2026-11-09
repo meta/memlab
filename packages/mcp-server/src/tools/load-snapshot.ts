@@ -110,15 +110,18 @@ export const WARN_NODE_COUNT = 2_000_000;
 export const NODES_PER_HEAP_MB = 1700;
 export const EDGES_PER_HEAP_MB = 6800;
 
-// Per-node / per-edge working-set estimate for a full load, fitted to a
-// measured browser capture: 4,185,734 nodes + 18,755,739 edges peaked at
-// ~1,500 MB RSS (200 B/node + 40 B/edge predicts ~1,588 MB). Deliberately a
-// slight OVER-estimate — the failure this guards against is an OOM that kills
-// every resident snapshot, so erring toward "not enough headroom" is the cheap
-// direction to be wrong in. File size is not used: it correlates poorly with
-// graph cost, which is why the node/edge ceilings exist at all.
-export const LOAD_BYTES_PER_NODE = 200;
-export const LOAD_BYTES_PER_EDGE = 40;
+// Per-node / per-edge old-space estimate for a full load, fitted to the
+// smallest --max-old-space-size each of five captures loads at (bisected,
+// MB): 9.04M nodes / 19.7M edges 1,262; 7.37M / 34.2M 1,408; 9.09M / 49.9M
+// 1,604; 11.95M / 67.4M 1,973; 16.1M / 44.2M 2,272. A least-squares fit is
+// ~110 B/node + ~10 B/edge above the server's own baseline; these rates
+// over-estimate every one of them, by 5-26%. Deliberately an OVER-estimate:
+// the failure this guards against is an OOM that kills every resident
+// snapshot, so erring toward "not enough headroom" is the cheap direction to
+// be wrong in. File size is not used: it correlates poorly with graph cost,
+// which is why the node/edge ceilings exist at all.
+export const LOAD_BYTES_PER_NODE = 140;
+export const LOAD_BYTES_PER_EDGE = 12;
 
 // Share of the full-load projection charged to a light load. The parsed graph
 // is mostly typed arrays outside the V8 heap; what a light load skips (the
