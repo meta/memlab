@@ -92,7 +92,7 @@ function judge(
       // downward trend. `flat` has to mean no material move at ANY step, which
       // means bounding the FALLS too: bounding only the rises still passed
       // 1,000 → 500 → 100, the second case this comment cites.
-      const {maxStepRise, maxStepFall} = shapeOf(counts);
+      const {upEveryStep, maxStepRise, maxStepFall} = shapeOf(counts);
       // 2% of the series' largest magnitude, not of `counts[0]` alone: a ladder
       // that starts at 0 (0 → 1 → 1) would otherwise collapse the tolerance to
       // the floor of 1 and read as "flat", when its later rungs are exactly what
@@ -109,7 +109,9 @@ function judge(
           note:
             net <= tolerance
               ? `rose ${formatNumber(maxStepRise)} at one step before returning`
-              : `rose ${formatNumber(maxStepRise)} at one step and stayed up (net +${formatNumber(net)})`,
+              : upEveryStep
+                ? `rose at every step (net +${formatNumber(net)})`
+                : `rose ${formatNumber(maxStepRise)} at one step and stayed up (net +${formatNumber(net)})`,
         };
       }
       if (maxStepFall > tolerance) {
