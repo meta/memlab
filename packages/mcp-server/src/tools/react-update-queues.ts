@@ -370,7 +370,7 @@ async function ladderReport(args: {
     recentLadders.set(key, prior);
     return toolResult(
       [
-        `_Same rungs and arguments as a call at ${new Date(prior.at).toLocaleTimeString('en-US', {hour12: false})} (the analysis battery runs this step); reused instead of rescanned._`,
+        `_Same rungs and arguments as a call at ${new Date(prior.at).toLocaleTimeString('en-US', {hour12: false})} in this session (yours, or the analysis battery's step); reused instead of rescanned._`,
         '',
         prior.text,
         ...ladderTrailer(),
