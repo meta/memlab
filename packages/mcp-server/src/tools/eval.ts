@@ -1085,15 +1085,107 @@ function maxTraversalNesting(code: string): number {
 }
 
 /**
- * The helper names from the most recent eval build in this process.
- *
- * `mode: "lint"` runs WITHOUT a snapshot, so it cannot construct the helpers
- * object to read its keys. Recording them here keeps the lint check honest:
- * when the list is unknown (a fresh server that has not run an eval yet) the
- * check is SKIPPED and said to be skipped, rather than reporting every real
- * helper as unknown.
+ * Every `helpers` name. `mode: "lint"` runs WITHOUT a snapshot, so it cannot
+ * construct the helpers object to read its keys; `helpersImpl` is checked
+ * against this list at compile time, so the two cannot drift.
  */
-let lastKnownHelperNames: string[] | null = null;
+const HELPER_NAMES = [
+  'ageRank',
+  'aggregateRetained',
+  'allByEdgeName',
+  'arrayLen',
+  'byClass',
+  'byContextSlot',
+  'byContextVar',
+  'byEdgeName',
+  'byReferrerEdge',
+  'byShape',
+  'byStableKey',
+  'byTypename',
+  'classCounts',
+  'closureCensus',
+  'componentName',
+  'contextOf',
+  'contextSlotCensus',
+  'countUniqueTargets',
+  'ctxVars',
+  'defineFn',
+  'derefPath',
+  'detachedNamed',
+  'dominates',
+  'edgeTarget',
+  'elements',
+  'entries',
+  'familyOf',
+  'fiberHooks',
+  'fiberOf',
+  'filterLargestObjects',
+  'findWithin',
+  'firstRetainer',
+  'fn',
+  'forgetFn',
+  'formatBytes',
+  'formatNumber',
+  'getProp',
+  'groupArrayElementsByProperty',
+  'groupReferrersByEdge',
+  'hasShape',
+  'histogram',
+  'hooks',
+  'isNodeWorthInspecting',
+  'isOrphaned',
+  'isRealDetached',
+  'iterByClass',
+  'iterByType',
+  'listFns',
+  'listSaved',
+  'listenerRecords',
+  'load',
+  'mapEntries',
+  'mapEntryNodes',
+  'markdownTable',
+  'maxObjectId',
+  'memoCacheSlots',
+  'minified',
+  'module',
+  'moduleExportProp',
+  'moduleSource',
+  'newest',
+  'nodeBrief',
+  'nodesByClass',
+  'ownProps',
+  'owner',
+  'pathBetween',
+  'pathLabel',
+  'pathTree',
+  'promiseReactions',
+  'props',
+  'queryNodes',
+  'recall',
+  'remember',
+  'retainedSize',
+  'retainedSizes',
+  'rootPath',
+  'rootPathAvoidingDev',
+  'sample',
+  'save',
+  'scripts',
+  'serializeNodeDetail',
+  'serializeNodeSummary',
+  'setElementNodes',
+  'setElements',
+  'shapeFamily',
+  'shapeKeys',
+  'shapeSignature',
+  'sourceOf',
+  'stableKey',
+  'stringValue',
+  'stringsBySize',
+  'stringsWithPrefix',
+  'walk',
+  'walkChain',
+  'withProp',
+] as const;
 
 /** True when `a` and `b` are within `max` single-character edits. Cheap bail-out. */
 function editDistanceWithin(a: string, b: string, max: number): boolean {
@@ -1888,7 +1980,7 @@ export async function runEval({
         prelude != null && prelude.trim() !== ''
           ? `${prelude}\n;\n${code ?? ''}`
           : (code ?? '');
-      return toolResult(lintEval(lintSource, lastKnownHelperNames));
+      return toolResult(lintEval(lintSource));
     }
     if (mode === 'describe_env') {
       return toolResult(describeEnv(section));
@@ -4764,7 +4856,7 @@ export async function runEval({
       listFns,
       forgetFn,
       sample,
-    };
+    } satisfies Record<(typeof HELPER_NAMES)[number], unknown>;
 
     /**
      * A mistyped helper name used to fail as `helpers.foo is not a function`,
@@ -4773,7 +4865,6 @@ export async function runEval({
      * the cheapest fix is to answer the question at the point it is asked.
      */
     const helperNames = Object.keys(helpersImpl).sort();
-    lastKnownHelperNames = helperNames;
     if (skip_lint !== true) {
       const refusals = lintRefusals(
         prelude != null && prelude.trim() !== ''
@@ -5340,16 +5431,6 @@ const LISTENER_CONTEXT_PROPS = new Set([
   'scope',
 ]);
 
-/** Helper names mentioned as `helpers.x(` anywhere in the describe_env text. */
-function documentedHelperNames(): string[] {
-  const doc = describeEnvLines().join('\n');
-  return [
-    ...new Set(
-      [...doc.matchAll(/helpers\.([A-Za-z_][A-Za-z0-9_]*)/g)].map(m => m[1]),
-    ),
-  ].sort();
-}
-
 /**
  * Syntax-check an eval and report what it references — WITHOUT a snapshot.
  *
@@ -5358,7 +5439,7 @@ function documentedHelperNames(): string[] {
  * ideas were never written down. Everything here is decidable from the source
  * text alone, so the cost of a wrong guess drops from minutes to seconds.
  */
-function lintEval(code: string, knownHelpers: string[] | null): string {
+function lintEval(code: string): string {
   const lines: string[] = ['## memlab_eval lint — nothing was executed', ''];
   if (code.trim() === '') {
     return 'Pass `code` to lint. Nothing to check.';
@@ -5389,21 +5470,11 @@ function lintEval(code: string, knownHelpers: string[] | null): string {
   ].sort();
   if (referenced.length > 0) {
     lines.push(`- **Helpers referenced:** ${referenced.join(', ')}.`);
-    // On a fresh server the live table has not been built yet (it needs a
-    // snapshot). The documented list is the next best source and is always
-    // available — worded as "not documented" so an undocumented-but-real helper
-    // is not reported as a typo.
-    const documented = documentedHelperNames();
-    const table = knownHelpers ?? documented;
-    const authoritative = knownHelpers != null;
+    const table: readonly string[] = HELPER_NAMES;
     {
       const unknown = referenced.filter(n => !table.includes(n));
       if (unknown.length === 0) {
-        lines.push(
-          authoritative
-            ? '  All exist.'
-            : '  All are documented (checked against `describe_env`; this server has not built the live helper table yet).',
-        );
+        lines.push('  All exist.');
       } else {
         for (const name of unknown) {
           const lower = name.toLowerCase();
