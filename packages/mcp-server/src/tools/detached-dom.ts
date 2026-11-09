@@ -674,7 +674,10 @@ async function doorsInto(seedId: number): Promise<string[]> {
       return failed(text.replace(/^Error:\s*/, '').split('\n')[0]);
     }
     const body = text.split('\n');
-    const start = body.findIndex(l => /application-side door/.test(l));
+    // Every successful listing has this count line, `**0 …**` included.
+    const start = body.findIndex(l =>
+      /^\*\*[\d,]+ application-side door\(s\)\*\*/.test(l),
+    );
     if (start < 0) return failed('no door count in its output');
     const end = body.findIndex((l, i) => i > start && l.startsWith('### '));
     return [
