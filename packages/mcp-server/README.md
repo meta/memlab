@@ -432,7 +432,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_dom_audit` | Budget the ATTACHED DOM and rank surfaces worth virtualizing. An OPTIMIZATION tool — these elements are correctly retained, there are simply too many. |
 | `memlab_detached_dom` | Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group's count at an earlier rung and sorts by the change. |
 | `memlab_event_listener_leaks` | Listeners that outlived their target. |
-| `memlab_event_registry` | What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`. |
+| `memlab_event_registry` | What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`; a growing row whose callback is a library wrapper (the Arbiter `→ r`) also names the subscriber behind it. |
 
 ### Collections and caches
 

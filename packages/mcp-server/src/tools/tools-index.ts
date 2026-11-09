@@ -509,7 +509,7 @@ const GROUPS: Group[] = [
       ['memlab_event_listener_leaks', 'Listeners that outlived their target.'],
       [
         'memlab_event_registry',
-        'What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`.',
+        'What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`; a growing row whose callback is a library wrapper (the Arbiter `→ r`) also names the subscriber behind it.',
       ],
     ],
   },

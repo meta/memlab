@@ -17,6 +17,7 @@ import {
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {getSnapshot} from '../heap-state.js';
 import {ladderShape} from '../ladder-shape.js';
+import {cachedModuleScopes, sourceOfNode} from './module-attribution.js';
 import {
   describeSegmentSelection,
   resolveLadderInputs,
@@ -66,6 +67,69 @@ function realContext(snap: IHeapSnapshot, contextId: number): IHeapNode | null {
   return ctx == null || ctx.name === 'undefined' || ctx.name === 'null'
     ? null
     : ctx;
+}
+
+/**
+ * The code behind a listener whose callback is a library wrapper. Arbiter
+ * registers `(data) => this._proxyListener(callback, type, data)`, so every
+ * Arbiter row reads `→ r` and names no subscriber. A wrapper's own scope holds
+ * exactly one closure, the callback it forwards to, so this follows such
+ * closures up to `maxHops` times and stops at the first closure that holds
+ * none or several. Returns the modules passed through and the strings the
+ * last closure's scope captured (a module id, an event name), or null when the
+ * callback is not a wrapper.
+ */
+export function subscriberOf(
+  snap: IHeapSnapshot,
+  callback: IHeapNode,
+  maxHops = 3,
+): {modules: string[]; strings: string[]} | null {
+  const moduleScopeIds = cachedModuleScopes(snap);
+  // Variables of the closure's own scopes, stopping at its module's scope,
+  // which holds every function the module defines.
+  const scopeVars = (fn: IHeapNode): IHeapNode[] => {
+    const vars: IHeapNode[] = [];
+    let ctx = fn.getReferenceNode('context');
+    for (let d = 0; ctx != null && d < 3 && !moduleScopeIds.has(ctx.id); d++) {
+      for (const e of ctx.references) {
+        if (e.type === 'context') vars.push(e.toNode);
+      }
+      ctx = ctx.getReferenceNode('previous');
+    }
+    return vars;
+  };
+  const modules: string[] = [];
+  const seen = new Set<number>([callback.id]);
+  let cur = callback;
+  let hops = 0;
+  for (; hops < maxHops; hops++) {
+    const module = sourceOfNode(snap, cur, 0).module;
+    if (module != null && modules[modules.length - 1] !== module) {
+      modules.push(module);
+    }
+    const closures = scopeVars(cur).filter(
+      v => v.type === 'closure' && !seen.has(v.id),
+    );
+    if (closures.length !== 1) break;
+    cur = closures[0];
+    seen.add(cur.id);
+  }
+  if (hops === 0) return null;
+  const last = sourceOfNode(snap, cur, 0).module;
+  if (last != null && modules[modules.length - 1] !== last) modules.push(last);
+  const strings = scopeVars(cur)
+    .filter(v => v.type === 'string' || v.type === 'concatenated string')
+    .map(v => v.name)
+    .filter(t => t.length > 0 && t.length <= 80)
+    .slice(0, 4);
+  return {modules, strings};
+}
+
+function subscriberLabel(sub: {modules: string[]; strings: string[]}): string {
+  const via = sub.modules.length > 0 ? sub.modules.join(' → ') : '?';
+  return sub.strings.length > 0
+    ? `${via}, capturing ${sub.strings.map(t => `"${t}"`).join(', ')}`
+    : via;
 }
 
 /**
@@ -122,6 +186,7 @@ function listenerRecordsByGroup(
   snap: IHeapSnapshot,
   minEvents: number,
   groupBy: GroupKey[],
+  samples?: Map<string, number>,
 ): Map<string, number> {
   const out = new Map<string, number>();
   let skipped = 0;
@@ -143,7 +208,7 @@ function listenerRecordsByGroup(
       candidates++;
       const local = registryEvents(node, minEvents);
       if (local == null) return;
-      const counts: Array<[string, number]> = [];
+      const counts: Array<[string, number, number]> = [];
       const emitter = groupBy.includes('emitter') ? emitterOf(node) : '';
       const byContext = groupBy.includes('context');
       for (const {name: event, listeners} of local) {
@@ -159,12 +224,20 @@ function listenerRecordsByGroup(
               byContext ? realContext(snap, l.contextId) : null,
             ),
             1,
+            l.callbackId,
           ]);
         }
       }
       // Committed only once the node is fully read: a half-counted node
       // would bias the rung it was skipped from.
-      for (const [key, n] of counts) out.set(key, (out.get(key) ?? 0) + n);
+      for (const [key, n, callbackId] of counts) {
+        out.set(key, (out.get(key) ?? 0) + n);
+        // The newest callback (highest id): it belongs to the growth, not to
+        // whatever subscribed first.
+        if (samples != null && callbackId > (samples.get(key) ?? 0)) {
+          samples.set(key, callbackId);
+        }
+      }
     } catch (e) {
       if (e instanceof ScanTimeoutError) throw e;
       skipped++;
@@ -199,13 +272,38 @@ async function listenerLadder(args: {
   const {rungs, largestMB} = resolveRungs(inputs.paths);
   const perRung: Array<Map<string, number> | null> = [];
   const failures: string[] = [];
-  for (const rung of rungs) {
+  // Resolved on the last rung, while it is loaded, for the groups that changed
+  // since the first rung read.
+  const subscribers = new Map<string, string>();
+  const wantsCallback = args.groupBy.includes('callback');
+  for (const [i, rung] of rungs.entries()) {
     armScanBudgetFor(scaledTimeoutMs(largestMB));
     try {
       perRung.push(
-        await withSnapshotAt(rung.localPath, snap =>
-          listenerRecordsByGroup(snap, args.minEvents, args.groupBy),
-        ),
+        await withSnapshotAt(rung.localPath, snap => {
+          const isLast = i === rungs.length - 1;
+          const samples =
+            isLast && wantsCallback ? new Map<string, number>() : undefined;
+          const counts = listenerRecordsByGroup(
+            snap,
+            args.minEvents,
+            args.groupBy,
+            samples,
+          );
+          const first = perRung.find(m => m != null);
+          if (samples != null && first != null) {
+            for (const [key, callbackId] of samples) {
+              if ((counts.get(key) ?? 0) === (first.get(key) ?? 0)) continue;
+              const fn = snap.getNodeById(callbackId);
+              const sub =
+                fn != null && fn.type === 'closure'
+                  ? subscriberOf(snap, fn)
+                  : null;
+              if (sub != null) subscribers.set(key, subscriberLabel(sub));
+            }
+          }
+          return counts;
+        }),
       );
     } catch (err) {
       perRung.push(null);
@@ -258,6 +356,8 @@ async function listenerLadder(args: {
   if (rows.length === 0) {
     lines.push('_No listener population changed across the ladder._');
   } else {
+    const shown = rows.slice(0, args.limit);
+    const withSubscriber = shown.some(r => subscribers.has(r.k));
     lines.push(
       markdownTable(
         [
@@ -266,19 +366,25 @@ async function listenerLadder(args: {
           'Δ',
           'Δ/cycle',
           'Shape',
+          ...(withSubscriber ? ['Subscriber (through wrappers)'] : []),
         ],
-        rows
-          .slice(0, args.limit)
-          .map(r => [
-            renderKey(r.k, args.groupBy),
-            ...r.series.map(v => (v == null ? '—' : formatNumber(v))),
-            `${r.delta >= 0 ? '+' : ''}${formatNumber(r.delta)}`,
-            r.span != null && r.span > 0 ? (r.delta / r.span).toFixed(3) : '—',
-            ladderShape(r.series, shapeAxis),
-          ]),
+        shown.map(r => [
+          renderKey(r.k, args.groupBy),
+          ...r.series.map(v => (v == null ? '—' : formatNumber(v))),
+          `${r.delta >= 0 ? '+' : ''}${formatNumber(r.delta)}`,
+          r.span != null && r.span > 0 ? (r.delta / r.span).toFixed(3) : '—',
+          ladderShape(r.series, shapeAxis),
+          ...(withSubscriber ? [subscribers.get(r.k) ?? '—'] : []),
+        ]),
         new Set(rungs.map((_, i) => i + 1)),
       ),
     );
+    if (withSubscriber) {
+      lines.push(
+        '',
+        "_Subscriber: the callback is a library wrapper that forwards to one closure, so this follows those closures (up to 3) and names the modules passed and the strings the last one's scope captured (a module id, a key). One listener per row, the newest on the last rung._",
+      );
+    }
   }
   if (failures.length > 0) {
     lines.push('', `_Unreadable rungs: ${failures.join('; ')}._`);
