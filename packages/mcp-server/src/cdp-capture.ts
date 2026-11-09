@@ -325,8 +325,11 @@ export async function evaluateLive(
     let value: unknown = result.value;
     if (details == null && typeof result.objectId === 'string') {
       // Serialize separately: returnByValue on the evaluation itself loses
-      // the description (`body`, `Map(3)`) of a value that is not JSON.
+      // the description (`body`, `Map(3)`) of a value that is not JSON. Within
+      // what is left of `timeout_s`, so a slow serialization cannot double it.
+      const remaining = opts.timeoutMs - (Date.now() - started);
       try {
+        if (remaining <= 0) throw new Error('no time left to serialize');
         const byValue = await conn.call(
           'Runtime.callFunctionOn',
           {
@@ -335,7 +338,7 @@ export async function evaluateLive(
             returnByValue: true,
           },
           null,
-          opts.timeoutMs,
+          remaining,
         );
         value = (byValue.result as Record<string, unknown> | undefined)?.value;
       } catch {
