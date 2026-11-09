@@ -63,6 +63,12 @@ export interface RunManifest {
    * the workers nor wasm memory, so this is where their growth shows.
    */
   uaMemoryPerRung: Array<{totalMb: number; workersMb: number} | null>;
+  /**
+   * The dedicated workers' JS heap at each rung, in MB, as the runner read it
+   * over CDP. Recorded whether or not the page is cross-origin isolated; null
+   * where the rung lists no worker.
+   */
+  workerHeapPerRung: Array<number | null>;
   /** Rung indices after which the runner detected a ladder split. */
   splitAfterRung: number[];
   /** Caveats the runner recorded, verbatim. */
@@ -319,6 +325,15 @@ function uaMemoryOf(
   return {totalMb: o.uasm_total_mb, workersMb};
 }
 
+/** Summed `used_mb` of a rung's `workers` entries, or null when it lists none. */
+export function workerHeapOf(workers: unknown): number | null {
+  if (!Array.isArray(workers)) return null;
+  const used = workers
+    .map(w => (w as Record<string, unknown> | null)?.used_mb)
+    .filter((mb): mb is number => typeof mb === 'number');
+  return used.length > 0 ? used.reduce((a, b) => a + b, 0) : null;
+}
+
 export function loadRunManifest(runDir: string): RunManifest {
   const file = runDir.endsWith('.json')
     ? runDir
@@ -360,6 +375,7 @@ export function loadRunManifest(runDir: string): RunManifest {
   const cyclesPerRung: number[] = [];
   const elapsedPerRung: Array<number | null> = [];
   const uaMemoryPerRung: RunManifest['uaMemoryPerRung'] = [];
+  const workerHeapPerRung: Array<number | null> = [];
   for (const r of rungs as Array<Record<string, unknown>>) {
     if (typeof r.path !== 'string') {
       throw new Error(
@@ -370,6 +386,7 @@ export function loadRunManifest(runDir: string): RunManifest {
     cyclesPerRung.push(typeof r.cycles === 'number' ? r.cycles : NaN);
     elapsedPerRung.push(typeof r.elapsed_s === 'number' ? r.elapsed_s : null);
     uaMemoryPerRung.push(uaMemoryOf(r.off_heap));
+    workerHeapPerRung.push(workerHeapOf(r.workers));
   }
 
   // A rung without a recorded cycle count would poison the fit silently.
@@ -419,6 +436,7 @@ export function loadRunManifest(runDir: string): RunManifest {
     wallClockSeconds: elapsed,
     elapsedPerRung,
     uaMemoryPerRung,
+    workerHeapPerRung,
     splitAfterRung: Array.isArray(raw.ladder_splits_after_rung)
       ? (raw.ladder_splits_after_rung as unknown[]).filter(
           (n): n is number => typeof n === 'number',
@@ -532,6 +550,23 @@ export function uaMemorySummary(manifest: RunManifest): string | null {
     parts.push(
       (segments.length > 1 ? `segment ${seg.index}: ` : '') +
         `${mb(a.totalMb)} → ${mb(b.totalMb)} MB (workers ${mb(a.workersMb)} → ${mb(b.workersMb)} MB)`,
+    );
+  }
+  return parts.length > 0 ? parts.join('; ') : null;
+}
+
+/** First → last rung of the CDP worker heaps, per segment; null with fewer than two. */
+export function workerHeapSummary(manifest: RunManifest): string | null {
+  const segments = ladderSegments(manifest);
+  const parts: string[] = [];
+  for (const seg of segments) {
+    const series = manifest.workerHeapPerRung
+      .slice(seg.firstRung, seg.lastRung + 1)
+      .filter((mb): mb is number => mb != null);
+    if (series.length < 2) continue;
+    parts.push(
+      (segments.length > 1 ? `segment ${seg.index}: ` : '') +
+        `${series[0].toFixed(1)} → ${series[series.length - 1].toFixed(1)} MB`,
     );
   }
   return parts.length > 0 ? parts.join('; ') : null;

@@ -43,6 +43,7 @@ import {
   ladderSegments,
   loadRunManifest,
   uaMemorySummary,
+  workerHeapSummary,
 } from '../run-manifest.js';
 import {readArms} from './ab-compare.js';
 import type {Arm} from './ab-compare.js';
@@ -1748,9 +1749,16 @@ export function registerAnalysisBattery(server: McpServer): void {
             '',
             ...(() => {
               const ua = uaMemorySummary(manifest);
-              return ua != null
+              if (ua != null) {
+                return [
+                  `UA memory, every realm (\`measureUserAgentSpecificMemory\`, from run.json): ${ua}. Workers and wasm are not in any page snapshot; this is where their growth shows.`,
+                  '',
+                ];
+              }
+              const workers = workerHeapSummary(manifest);
+              return workers != null
                 ? [
-                    `UA memory, every realm (\`measureUserAgentSpecificMemory\`, from run.json): ${ua}. Workers and wasm are not in any page snapshot; this is where their growth shows.`,
+                    `Dedicated workers' JS heap (CDP, from run.json): ${workers}. No page snapshot holds a worker's heap; \`measureUserAgentSpecificMemory\` was not recorded, so wasm and the page's other realms are not covered.`,
                     '',
                   ]
                 : [];

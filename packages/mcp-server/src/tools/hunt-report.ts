@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
+import {workerHeapOf} from '../run-manifest.js';
 import {
   formatNumber,
   markdownTable,
@@ -62,17 +63,24 @@ interface RunManifest {
     reason: string;
     screenshot?: string | null;
     off_heap?: Record<string, unknown>;
+    workers?: unknown;
   }>;
   interaction_log?: Array<{i: number; combo: string; ok: boolean}>;
   caveats?: string[];
   stop_reason?: string;
 }
 
-/** Dedicated-worker MB from `measureUserAgentSpecificMemory`, as a cell. */
-function workersMb(offHeap: Record<string, unknown> | undefined): string {
+/**
+ * Dedicated-worker MB from `measureUserAgentSpecificMemory`, or else the
+ * workers' JS heap the runner read over CDP, as a cell.
+ */
+function workersMb(
+  offHeap: Record<string, unknown> | undefined,
+  workers: unknown,
+): string {
   const byScope = offHeap?.uasm_by_scope_mb as
     Record<string, unknown> | undefined;
-  if (byScope == null) return '—';
+  if (byScope == null) return workerHeapOf(workers)?.toFixed(1) ?? '—';
   const mb = Object.entries(byScope)
     .filter(([scope, v]) => scope.includes('Worker') && typeof v === 'number')
     .reduce((sum, [, v]) => sum + (v as number), 0);
@@ -254,7 +262,7 @@ export function registerHuntReport(server: McpServer): void {
               typeof r.off_heap?.uasm_total_mb === 'number'
                 ? r.off_heap.uasm_total_mb.toFixed(1)
                 : '—',
-              workersMb(r.off_heap),
+              workersMb(r.off_heap, r.workers),
               String(r.off_heap?.longtasks ?? '—'),
               // every cell must be a string: markdownTable pads them, so a
               // single undefined from a partial manifest throws
