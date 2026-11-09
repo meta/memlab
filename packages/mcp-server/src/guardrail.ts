@@ -115,6 +115,8 @@ const PARAM_ALIASES: Record<string, string[]> = {
   className: ['class_name'],
   runDir: ['run_dir'],
   run_dir: ['run_json'],
+  expression: ['code'],
+  js: ['code'],
 };
 
 /**
