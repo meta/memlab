@@ -1079,7 +1079,9 @@ export function registerDetachedDom(server: McpServer): void {
               pct,
               isDominatorMode
                 ? stats.ownerRetained > 0
-                  ? formatBytes(stats.ownerRetained)
+                  ? // Past the owner cap the sum stops: owners beyond it cannot
+                    // be told apart from ones already counted.
+                    `${stats.ownersTruncated ? '≥ ' : ''}${formatBytes(stats.ownerRetained)}`
                   : '-'
                 : ownerCountLabel(stats),
               ...(anyFlaggedProvenance
@@ -1157,7 +1159,7 @@ export function registerDetachedDom(server: McpServer): void {
             );
             lines.push(
               '',
-              "_Grouped by the nearest non-detached **dominator**, one row per owner class (a scope by the closures over it) and module; `×N` is how many owner objects the row covers. Releasing the owners frees every detached node in the row. **Owner Frees** is the owners' own retained size — the true, non-overlapping figure, and the amount actually reclaimed (it also covers whatever else the owners hold). Total Retained is a plain sum over the group, so it double-counts nested detached subtrees and can exceed Owner Frees._",
+              "_Grouped by the nearest non-detached **dominator**, one row per owner class (a scope by the closures over it) and module; `×N` is how many owner objects the row covers. Releasing the owners frees every detached node in the row. **Owner Frees** is the owners' own retained size — the true, non-overlapping figure, and the amount actually reclaimed (it also covers whatever else the owners hold); `≥` marks a row with more than 1,000 owners, where it is a lower bound. Total Retained is a plain sum over the group, so it double-counts nested detached subtrees and can exceed Owner Frees._",
               ...(anyFlaggedProvenance
                 ? ['', DEV_ONLY_FOOTNOTE, GATED_FOOTNOTE]
                 : []),
