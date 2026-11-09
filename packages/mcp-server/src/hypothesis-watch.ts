@@ -58,7 +58,16 @@ function sweepOf(runDir: string): string {
 function readLedger(): Ledger {
   try {
     const raw = JSON.parse(fs.readFileSync(ledgerFile(), 'utf8')) as unknown;
-    return raw != null && typeof raw === 'object' ? (raw as Ledger) : {};
+    if (raw == null || typeof raw !== 'object') return {};
+    const ledger: Ledger = {};
+    for (const [sweep, list] of Object.entries(raw)) {
+      if (!Array.isArray(list)) continue;
+      ledger[sweep] = list.filter(
+        (w): w is WatchedHypothesis =>
+          w != null && typeof w === 'object' && typeof w.label === 'string',
+      );
+    }
+    return ledger;
   } catch {
     return {};
   }
@@ -122,6 +131,7 @@ export function recordWatch(
     entry.last = {round, pass: r.pass};
     out.push({label: r.label, pass: r.pass, before});
   }
+  delete ledger[sweep];
   ledger[sweep] = list;
   writeLedger(ledger);
   return out;
