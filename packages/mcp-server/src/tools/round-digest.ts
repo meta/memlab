@@ -315,13 +315,13 @@ export function registerRoundDigest(server: McpServer): void {
         .optional()
         .default('table')
         .describe(
-          '"table" (default) is the verdict table. "doc_markdown" is a short section for a team write-up: run, audit, heap and app_delta, leak candidates and settle from the battery output, with the interpretation lines left as TODO.',
+          '"table" (default) is the verdict table. "doc_markdown" is a short section for a team write-up: run, audit, heap and app_delta, detached DOM, leak candidates and settle from the battery output, with the interpretation lines left as TODO.',
         ),
       compare_to: z
         .string()
         .optional()
         .describe(
-          'With "doc_markdown": the previous round directory, for a "vs <round>" line (candidates, post-GC change, app_delta).',
+          'With "doc_markdown": the previous round directory, for a "vs <round>" line (candidates, post-GC change, app_delta, detached DOM change).',
         ),
     },
     async ({run_dir, include_analysis, max_metrics, format, compare_to}) => {
@@ -564,6 +564,8 @@ interface RoundFacts {
   /** First and last post-GC heap of each A/B arm, when the ladder splits. */
   armHeaps: Array<[number, number]> | null;
   appDelta: string | null;
+  /** Detached DOM nodes, baseline → last rung, from the battery's dominator pass. */
+  detached: {from: string; to: string; delta: string} | null;
   settle: string | null;
   candidates: string[] | null;
   splitAfter: number[];
@@ -595,6 +597,10 @@ function roundFacts(dir: string, m: RunManifest): RoundFacts {
     off != null || on != null
       ? `off ${off ?? 'n/a'}, on ${on ?? 'n/a'}`
       : appDeltaOf(dir, 'memlab_artifact_budget');
+  const detachedMatch =
+    /\*\*([\d,]+) detached node\(s\) at the baseline, ([\d,]+) here \(([^)]+)\)\.\*\*/.exec(
+      readToolOutput(dir, 'memlab_detached_dom.dominator') ?? '',
+    );
   const settleText = readToolOutput(dir, 'memlab_leak_report');
   const settle =
     settleText != null
@@ -636,6 +642,14 @@ function roundFacts(dir: string, m: RunManifest): RoundFacts {
         : null;
     })(),
     appDelta,
+    detached:
+      detachedMatch != null
+        ? {
+            from: detachedMatch[1],
+            to: detachedMatch[2],
+            delta: detachedMatch[3],
+          }
+        : null,
     settle: settle != null ? `${settle[0]} HELD / ${settle[1]} DRAINED` : null,
     candidates,
     splitAfter: m.ladder_splits_after_rung ?? [],
@@ -679,11 +693,20 @@ function docMarkdown(f: RoundFacts, prev: RoundFacts | null): string {
           ? `${f.heap[0].toFixed(1)} → ${f.heap[1].toFixed(1)} MB (${heapDelta(f)})`
           : 'n/a'
     }; app_delta ${f.appDelta ?? 'n/a (no artifact budget)'}.`,
+    ...(f.detached != null
+      ? [
+          `- **Detached DOM:** ${f.detached.from} → ${f.detached.to} nodes (${f.detached.delta}).`,
+        ]
+      : []),
     `- **Leak report:** ${f.candidates == null ? 'n/a (no leak report)' : `${f.candidates.length} candidate(s)${f.candidates.length > 0 ? `: ${f.candidates.slice(0, 4).join('; ')}${f.candidates.length > 4 ? ` +${f.candidates.length - 4}` : ''}` : ''}`}${f.settle != null ? `; settle ${f.settle}` : ''}.`,
   ];
   if (prev != null) {
     lines.push(
-      `- **vs ${prev.name}:** candidates ${cand(prev)} → ${cand(f)}; post-GC ${heapDelta(prev)} → ${heapDelta(f)}; app_delta ${prev.appDelta ?? 'n/a'} → ${f.appDelta ?? 'n/a'}.`,
+      `- **vs ${prev.name}:** candidates ${cand(prev)} → ${cand(f)}; post-GC ${heapDelta(prev)} → ${heapDelta(f)}; app_delta ${prev.appDelta ?? 'n/a'} → ${f.appDelta ?? 'n/a'}${
+        prev.detached != null || f.detached != null
+          ? `; detached ${prev.detached?.delta ?? 'n/a'} → ${f.detached?.delta ?? 'n/a'}`
+          : ''
+      }.`,
     );
   }
   lines.push(
