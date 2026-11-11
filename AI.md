@@ -538,6 +538,9 @@ memlab analyze unbound-object --snapshot-dir ./snapshots
 memlab analyze string --snapshot path/to/heap.heapsnapshot
 memlab analyze detached-DOM --snapshot path/to/heap.heapsnapshot
 
+# Check a snapshot's size and the memory needed to analyze it, without parsing it
+memlab snapshot-header --snapshot path/to/heap.heapsnapshot
+
 # View/explore a heap snapshot interactively
 memlab view-heap --snapshot path/to/heap.heapsnapshot
 memlab heap --snapshot path/to/heap.heapsnapshot

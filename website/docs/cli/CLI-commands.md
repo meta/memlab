@@ -450,6 +450,31 @@ memlab analyze unmounted-fiber-node
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab snapshot-header
+
+Print node and edge counts and the memory needed to analyze a heap snapshot, read from its header without parsing the snapshot
+
+```bash
+memlab snapshot-header --snapshot <HEAP_SNAPSHOT_FILE>
+```
+
+#### examples
+
+```bash
+memlab snapshot-header --snapshot-dir <DIR_CONTAINING_SNAPSHOTS>
+memlab snapshot-header --snapshot <HEAP_SNAPSHOT_FILE> --output json
+```
+
+**Options**:
+ * **`--snapshot`**: set file path of the heap snapshot under analysis
+ * **`--snapshot-dir`**: set directory path containing all heap snapshots under analysis
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab heap
 
 Interactive command to explore a single heap snapshot

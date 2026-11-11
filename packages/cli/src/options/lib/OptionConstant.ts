@@ -44,6 +44,7 @@ const optionNames = {
   ML_CLUSTERING_MAX_DF: 'ml-clustering-max-df',
   ML_LINKAGE_MAX_DIST: 'ml-linkage-max-dist',
   NODE_ID: 'node-id',
+  OUTPUT_FORMAT: 'output',
   REWRITE_JS: 'rewrite-js',
   RUN_MODE: 'run-mode',
   RUN_NUM: 'run-num',

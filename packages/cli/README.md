@@ -66,6 +66,7 @@ leaked object alive.
 | `memlab heap --snapshot <file>` | Explore one heap snapshot interactively |
 | `memlab view-heap --snapshot <file>` | View one heap snapshot in an interactive terminal UI |
 | `memlab anonymize --snapshot <file> --output <file>` | Remove user data from a heap snapshot so it can be shared |
+| `memlab snapshot-header --snapshot <file>` | Print node and edge counts and the memory needed to analyze a heap snapshot, without parsing it |
 
 **Browser runs**
 
