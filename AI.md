@@ -553,6 +553,9 @@ memlab heap-stats --snapshot path/to/heap.heapsnapshot
 # Large strings kept alive only by short substrings of them
 memlab sliced-strings --snapshot path/to/heap.heapsnapshot
 
+# WeakRefs whose target is gone but whose entry is still kept
+memlab weakref-census --snapshot path/to/heap.heapsnapshot
+
 # View/explore a heap snapshot interactively
 memlab view-heap --snapshot path/to/heap.heapsnapshot
 memlab heap --snapshot path/to/heap.heapsnapshot

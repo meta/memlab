@@ -71,6 +71,7 @@ leaked object alive.
 | `memlab class-diff --baseline <file> --target <file>` | Compare objects and self size per class between two heap snapshots, and count objects allocated after the baseline |
 | `memlab heap-stats --snapshot <file>` | Split a heap snapshot into code, strings, JS arrays, system objects and native memory, and into loaded code vs memory the program allocated |
 | `memlab sliced-strings --snapshot <file>` | Find large strings kept alive only by short substrings of them |
+| `memlab weakref-census --snapshot <file>` | Count WeakRefs, live vs empty, by what holds them; flags collections that keep entries after their target is gone |
 
 **Browser runs**
 
