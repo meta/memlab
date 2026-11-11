@@ -10,6 +10,18 @@
 // @ts-check
 // Note: type annotations allow type checking and IDEs autocompletion
 
+const githubTheme = require('prism-react-renderer/themes/github');
+
+// github italicizes comments and vsDark does not; keep them upright in both
+const lightCodeTheme = {
+  ...githubTheme,
+  styles: githubTheme.styles.map((rule) =>
+    rule.types.includes('comment')
+      ? {...rule, style: {...rule.style, fontStyle: 'normal'}}
+      : rule,
+  ),
+};
+
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'memlab',
@@ -86,7 +98,7 @@ const config = {
         respectPrefersColorScheme: false,
       },
       prism: {
-        theme: require('prism-react-renderer/themes/github'),
+        theme: lightCodeTheme,
         darkTheme: require('prism-react-renderer/themes/vsDark'),
       },
       navbar: {
