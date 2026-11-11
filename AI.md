@@ -562,6 +562,9 @@ memlab weakref-census --snapshot path/to/heap.heapsnapshot
 # Script source text kept in the heap, and scripts loaded more than once
 memlab script-census --snapshot path/to/heap.heapsnapshot
 
+# Find objects by class, type, size or detached state, then trace one by its id
+memlab find-objects --snapshot path/to/heap.heapsnapshot --name-pattern '^Map$' --min-retained-size 1MB
+
 # View/explore a heap snapshot interactively
 memlab view-heap --snapshot path/to/heap.heapsnapshot
 memlab heap --snapshot path/to/heap.heapsnapshot

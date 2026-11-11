@@ -74,6 +74,7 @@ leaked object alive.
 | `memlab sliced-strings --snapshot <file>` | Find large strings kept alive only by short substrings of them |
 | `memlab weakref-census --snapshot <file>` | Count WeakRefs, live vs empty, by what holds them; flags collections that keep entries after their target is gone |
 | `memlab script-census --snapshot <file>` | Report the source text of loaded scripts kept in the heap, and scripts kept in memory more than once |
+| `memlab find-objects --snapshot <file>` | List objects by class name, node type, retained size or detached state, largest first, with their ids for `memlab trace` |
 
 **Browser runs**
 
