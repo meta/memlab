@@ -304,9 +304,9 @@ div[class*='codeBlockContainer'],
   overflow: hidden;
 }
 
-[data-theme='dark'] div[class*='codeBlockContainer'] pre,
-[data-theme='dark'] .theme-code-block pre {
-  background-color: #0e1117 !important;
+[data-theme='dark'] div[class*='codeBlockContainer'],
+[data-theme='dark'] .theme-code-block {
+  --prism-background-color: #0e1117 !important;
 }
 
 [data-theme='dark'] div[class*='codeBlockTitle'] {
