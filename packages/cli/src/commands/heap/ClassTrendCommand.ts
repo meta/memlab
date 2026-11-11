@@ -48,15 +48,21 @@ function formatCounts(counts: number[]): string {
   return shown.join(' > ');
 }
 
+function classes(n: number): string {
+  return `${formatCount(n)} ${n === 1 ? 'class' : 'classes'}`;
+}
+
 function printTrend(files: string[], rows: ClassTrendRow[], top: number): void {
   info.topLevel(
     `${formatCount(files.length)} snapshots, in order: ` +
       files.map(f => path.basename(f)).join(', '),
   );
   const grows = rows.filter(r => r.trend === 'grows').length;
+  const appeared = rows.filter(r => r.trend === 'appeared').length;
   info.lowLevel(
-    `  ${formatCount(grows)} classes grew at every step; ` +
-      `${formatCount(rows.length)} classes changed overall`,
+    `  ${classes(grows)} grew at every step; ` +
+      `${formatCount(appeared)} appeared after the first snapshot; ` +
+      `${classes(rows.length)} changed overall`,
   );
   if (rows.length === 0) {
     return;

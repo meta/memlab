@@ -43,7 +43,12 @@ test('classifies a series of counts', () => {
   expect(classifyTrend([1, 1, 2])).toBe('grew');
   expect(classifyTrend([3, 1, 2])).toBe('shrank');
   expect(classifyTrend([2, 5, 2])).toBe('flat');
-  expect(classifyTrend([0, 4])).toBe('grows');
+  // absent at first: created during the series, not grown at every step
+  expect(classifyTrend([0, 4])).toBe('appeared');
+  expect(classifyTrend([0, 10, 20, 30])).toBe('appeared');
+  expect(classifyTrend([0, 0, 7])).toBe('appeared');
+  expect(classifyTrend([1, 10, 20, 30])).toBe('grows');
+  expect(classifyTrend([0, 0, 0])).toBe('flat');
 });
 
 test('lines classes up across snapshots, steadily growing first', () => {
@@ -68,9 +73,9 @@ test('lines classes up across snapshots, steadily growing first', () => {
   ]);
   expect(rows.map(r => [r.name, r.trend, r.counts])).toEqual([
     ['Steady', 'grows', [10, 20, 30]],
+    // absent from the first two snapshots
+    ['Late', 'appeared', [0, 0, 7]],
     ['Bumpy', 'grew', [10, 40, 35]],
-    // absent from the first two snapshots: not growing at every step
-    ['Late', 'grew', [0, 0, 7]],
     ['Flat', 'flat', [3, 3, 3]],
     ['Gone', 'shrank', [5, 0, 0]],
   ]);
