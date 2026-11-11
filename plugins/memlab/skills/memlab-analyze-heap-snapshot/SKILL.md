@@ -48,7 +48,14 @@ references keeps an object alive.
   remote snapshots first.
 - For a file over about 1 GB, call `memlab_snapshot_header` first. It reads
   node and edge counts without parsing the graph and says whether the snapshot
-  will load.
+  will load. Without the MCP server, `memlab snapshot-header --snapshot <file>`
+  does the same.
+- For a one-off report or a script, the `memlab` CLI has non-interactive
+  commands that need no MCP server: `class-histogram`, `class-diff`,
+  `class-trend`, `heap-stats`, `find-objects`, `sliced-strings`,
+  `weakref-census`, `script-census`, `dom-audit` and `native-contexts`. Each
+  takes `--snapshot <file>` (or `--snapshot-dir`, `--baseline`/`--target`) and
+  `--output json`.
 - One snapshot shows what is in memory. To show what **grows**, you need two
   or more snapshots taken from the same page or process while an interaction
   repeats. If the user has none, see the `memlab-capture-heap-snapshots` skill

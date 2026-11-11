@@ -122,6 +122,15 @@ MemLab found 1 leak(s)
   To keep a custom rule, add a `leakFilter` to the scenario.
 - `memlab analyze unbound-object` (and the other `memlab analyze` plugins)
   works on the snapshots from the last run.
+- **What is there more of each time?** `memlab class-trend --snapshot-dir <dir>`
+  counts objects per class across the snapshots in a directory (for example
+  the run's `data/cur`) and lists the classes that grew at every step.
+  `memlab class-diff --baseline <file> --target <file>` compares two
+  snapshots; add `--output json` for a CI check.
+- `memlab find-objects --snapshot <file> --detached` (or `--name-pattern`,
+  `--min-retained-size 1MB`) lists matching objects with the ids
+  `memlab trace` takes. `memlab native-contexts --snapshot <file>` finds a
+  removed iframe or window that is still reachable.
 - For an interactive investigation of the saved snapshots, use the
   `memlab-analyze-heap-snapshot` skill or the memlab MCP server.
 
