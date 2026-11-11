@@ -19,21 +19,18 @@ import OutputFormatOption from '../../options/heap/OutputFormatOption';
 import {computeHeapStats} from '../../lib/heap/HeapStats';
 import {
   formatBytes,
+  formatPercent,
   isJsonOutput,
   renderTable,
   writeJsonOutput,
 } from '../../lib/heap/HeapReportFormat';
-
-function percent(part: number, total: number): string {
-  return total > 0 ? `${((part / total) * 100).toFixed(1)}%` : '-';
-}
 
 function printStats(file: string, stats: HeapStats): void {
   const {total, native, v8Heap, composition} = stats;
   const row = (label: string, size: number): string[] => [
     label,
     formatBytes(size),
-    percent(size, total),
+    formatPercent(size, total),
   ];
   info.topLevel(`Snapshot  ${file}`);
   const statistics = [
@@ -61,7 +58,7 @@ function printStats(file: string, stats: HeapStats): void {
   const share = (label: string, size: number): string[] => [
     label,
     formatBytes(size),
-    percent(size, nodesTotal),
+    formatPercent(size, nodesTotal),
   ];
   renderTable(
     ['why the memory exists', 'size', 'share'],
@@ -75,7 +72,7 @@ function printStats(file: string, stats: HeapStats): void {
   const loaded = composition.scriptSource + composition.compiledCode;
   if (nodesTotal > 0 && loaded / nodesTotal > 0.5) {
     info.warning(
-      `${percent(loaded, nodesTotal)} of this heap is loaded code, not ` +
+      `${formatPercent(loaded, nodesTotal)} of this heap is loaded code, not ` +
         'objects the program allocated. Compare totals across snapshots of ' +
         'the same build only.',
     );

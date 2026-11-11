@@ -34,6 +34,7 @@ import {
   sampleNodes,
 } from '../../lib/heap/ClassDiff';
 import {
+  clipText,
   formatBytes,
   formatCount,
   formatSignedBytes,
@@ -42,14 +43,6 @@ import {
   renderTable,
   writeJsonOutput,
 } from '../../lib/heap/HeapReportFormat';
-
-const MAX_NAME_LENGTH = 80;
-
-function clip(name: string): string {
-  return name.length > MAX_NAME_LENGTH
-    ? `${name.slice(0, MAX_NAME_LENGTH - 3)}...`
-    : name;
-}
 
 type DiffReport = {
   baseline: string;
@@ -131,7 +124,7 @@ function printReport(report: DiffReport, top: number): void {
   }
   const rows = shown.map(r => {
     const cells = [
-      clip(r.name),
+      clipText(r.name),
       r.type,
       formatCount(r.targetCount),
       formatSignedCount(r.countDelta),

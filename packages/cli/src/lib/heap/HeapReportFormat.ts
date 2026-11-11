@@ -45,6 +45,16 @@ export function formatSignedBytes(bytes: number): string {
   return bytes > 0 ? `+${formatBytes(bytes)}` : formatBytes(bytes);
 }
 
+/** `part` as a percentage of `total`, or `-` when the total is 0. */
+export function formatPercent(part: number, total: number): string {
+  return total > 0 ? `${((part / total) * 100).toFixed(1)}%` : '-';
+}
+
+/** Shorten text to `max` characters, ending in `...` when cut. */
+export function clipText(text: string, max = 80): string {
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
 export type ColumnAlign = 'left' | 'right';
 
 /**

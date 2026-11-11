@@ -20,24 +20,14 @@ import TopOption from '../../options/heap/TopOption';
 import NamePatternOption from '../../options/heap/NamePatternOption';
 import {buildClassHistogram} from '../../lib/heap/ClassHistogram';
 import {
+  clipText,
   formatBytes,
   formatCount,
+  formatPercent,
   isJsonOutput,
   renderTable,
   writeJsonOutput,
 } from '../../lib/heap/HeapReportFormat';
-
-const MAX_NAME_LENGTH = 80;
-
-function clip(name: string): string {
-  return name.length > MAX_NAME_LENGTH
-    ? `${name.slice(0, MAX_NAME_LENGTH - 3)}...`
-    : name;
-}
-
-function percent(part: number, total: number): string {
-  return total > 0 ? `${((part / total) * 100).toFixed(1)}%` : '-';
-}
 
 function printHistogram(
   file: string,
@@ -58,11 +48,11 @@ function printHistogram(
   const lines = renderTable(
     ['class', 'type', 'count', 'self size', 'share'],
     shown.map(row => [
-      clip(row.name),
+      clipText(row.name),
       row.type,
       formatCount(row.count),
       formatBytes(row.selfSize),
-      percent(row.selfSize, totalSelfSize),
+      formatPercent(row.selfSize, totalSelfSize),
     ]),
     ['left', 'left', 'right', 'right', 'right'],
   );
