@@ -19,6 +19,11 @@ export type WeakRefHolder = {
   empty: number;
   /** One holder object, to inspect with `memlab view-heap` or `trace`. */
   exampleId: number;
+  /**
+   * Mostly empty: the holder keeps entries after their target is collected.
+   * See {@link isSuspectHolder}.
+   */
+  suspect: boolean;
 };
 
 export type WeakRefCensus = {
@@ -28,6 +33,24 @@ export type WeakRefCensus = {
 };
 
 const MAX_SHAPE_KEYS = 8;
+
+// a holder this empty, with this many WeakRefs, is suspect
+export const SUSPECT_EMPTY_SHARE = 0.5;
+export const SUSPECT_MIN_COUNT = 5;
+
+/**
+ * Whether more than half of a holder's WeakRefs (and at least
+ * `SUSPECT_MIN_COUNT` of them) are empty.
+ */
+export function isSuspectHolder(holder: {
+  total: number;
+  empty: number;
+}): boolean {
+  return (
+    holder.total >= SUSPECT_MIN_COUNT &&
+    holder.empty / holder.total > SUSPECT_EMPTY_SHARE
+  );
+}
 
 /**
  * A WeakRef object, not `WeakRef.prototype`: both are named `WeakRef`, but
@@ -100,7 +123,13 @@ export function censusWeakRefs(snapshot: IHeapSnapshot): WeakRefCensus {
     const holder = holderNode != null ? describeHolder(holderNode) : '(none)';
     let row = holders.get(holder);
     if (row == null) {
-      row = {holder, total: 0, empty: 0, exampleId: holderNode?.id ?? 0};
+      row = {
+        holder,
+        total: 0,
+        empty: 0,
+        exampleId: holderNode?.id ?? 0,
+        suspect: false,
+      };
       holders.set(holder, row);
     }
     row.total++;
@@ -108,11 +137,17 @@ export function censusWeakRefs(snapshot: IHeapSnapshot): WeakRefCensus {
       row.empty++;
     }
   });
+  for (const row of holders.values()) {
+    row.suspect = isSuspectHolder(row);
+  }
   return {
     total,
     empty,
+    // suspects first, so that a `--top` cut never hides one behind a large
+    // but mostly live holder
     holders: [...holders.values()].sort(
       (a, b) =>
+        Number(b.suspect) - Number(a.suspect) ||
         b.empty - a.empty ||
         b.total - a.total ||
         a.holder.localeCompare(b.holder),

@@ -27,10 +27,6 @@ import {
   writeJsonOutput,
 } from '../../lib/heap/HeapReportFormat';
 
-// a holder this empty, with this many WeakRefs, is reported as suspect
-const SUSPECT_EMPTY_SHARE = 0.5;
-const SUSPECT_MIN_COUNT = 5;
-
 function printCensus(file: string, census: WeakRefCensus, top: number): void {
   info.topLevel(`Snapshot  ${file}`);
   if (census.total === 0) {
@@ -55,11 +51,7 @@ function printCensus(file: string, census: WeakRefCensus, top: number): void {
       ]),
     ['left', 'right', 'right', 'right', 'left'],
   ).forEach(line => info.topLevel(line));
-  const suspects = census.holders.filter(
-    h =>
-      h.total >= SUSPECT_MIN_COUNT && h.empty / h.total > SUSPECT_EMPTY_SHARE,
-  );
-  for (const h of suspects) {
+  for (const h of census.holders.filter(holder => holder.suspect)) {
     info.warning(
       `${formatPercent(h.empty, h.total)} of the WeakRefs held by ` +
         `${clipText(h.holder, 60)} are empty: entries are kept after their ` +
@@ -112,6 +104,8 @@ export default class WeakRefCensusCommand extends BaseCommand {
         ...census,
         holderCount: census.holders.length,
         holders: census.holders.slice(0, top),
+        // every suspect, whatever --top is
+        suspects: census.holders.filter(h => h.suspect),
       });
       return;
     }
