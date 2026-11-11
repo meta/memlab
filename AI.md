@@ -550,6 +550,9 @@ memlab class-diff --baseline s1.heapsnapshot --target s2.heapsnapshot
 # What the heap is made of: code, strings, arrays, native memory
 memlab heap-stats --snapshot path/to/heap.heapsnapshot
 
+# Large strings kept alive only by short substrings of them
+memlab sliced-strings --snapshot path/to/heap.heapsnapshot
+
 # View/explore a heap snapshot interactively
 memlab view-heap --snapshot path/to/heap.heapsnapshot
 memlab heap --snapshot path/to/heap.heapsnapshot

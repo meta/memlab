@@ -70,6 +70,7 @@ leaked object alive.
 | `memlab class-histogram --snapshot <file>` | Count objects and their self size per class (`--top`, `--name-pattern`) |
 | `memlab class-diff --baseline <file> --target <file>` | Compare objects and self size per class between two heap snapshots, and count objects allocated after the baseline |
 | `memlab heap-stats --snapshot <file>` | Split a heap snapshot into code, strings, JS arrays, system objects and native memory, and into loaded code vs memory the program allocated |
+| `memlab sliced-strings --snapshot <file>` | Find large strings kept alive only by short substrings of them |
 
 **Browser runs**
 
