@@ -568,6 +568,9 @@ memlab find-objects --snapshot path/to/heap.heapsnapshot --name-pattern '^Map$' 
 # How many DOM elements the page keeps attached, and which are repeated (lists to virtualize)
 memlab dom-audit --snapshot path/to/heap.heapsnapshot
 
+# Memory per JavaScript realm (page, iframes, detached windows)
+memlab native-contexts --snapshot path/to/heap.heapsnapshot
+
 # View/explore a heap snapshot interactively
 memlab view-heap --snapshot path/to/heap.heapsnapshot
 memlab heap --snapshot path/to/heap.heapsnapshot

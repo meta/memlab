@@ -76,6 +76,7 @@ leaked object alive.
 | `memlab script-census --snapshot <file>` | Report the source text of loaded scripts kept in the heap, and scripts kept in memory more than once |
 | `memlab find-objects --snapshot <file>` | List objects by class name, node type, retained size or detached state, largest first, with their ids for `memlab trace` |
 | `memlab dom-audit --snapshot <file>` | Count the DOM elements attached to the document, by tag and by repeated element (list virtualization candidates) |
+| `memlab native-contexts --snapshot <file>` | Split a heap snapshot by JavaScript realm (page, iframes, detached windows, `vm` contexts) and show what each detached one holds |
 
 **Browser runs**
 

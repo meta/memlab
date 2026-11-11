@@ -610,6 +610,30 @@ memlab heap-stats --snapshot <HEAP_SNAPSHOT_FILE> --output json
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab native-contexts
+
+Split a heap snapshot by JavaScript realm (page, iframes, extension worlds, detached windows, Node.js vm contexts) and report the memory each one owns
+
+```bash
+memlab native-contexts --snapshot <HEAP_SNAPSHOT_FILE>
+```
+
+#### examples
+
+```bash
+memlab native-contexts --snapshot <HEAP_SNAPSHOT_FILE> --output json
+```
+
+**Options**:
+ * **`--snapshot`**: set file path of the heap snapshot under analysis
+ * **`--top`**: number of rows to report (default 30)
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab script-census
 
 Report the source text of loaded scripts kept in a heap snapshot, and scripts kept in memory more than once
