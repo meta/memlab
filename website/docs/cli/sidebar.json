@@ -1,0 +1,142 @@
+[
+  {
+    "type": "doc",
+    "id": "cli/run",
+    "label": "run"
+  },
+  {
+    "type": "doc",
+    "id": "cli/anonymize",
+    "label": "anonymize"
+  },
+  {
+    "type": "doc",
+    "id": "cli/find-leaks",
+    "label": "find-leaks"
+  },
+  {
+    "type": "doc",
+    "id": "cli/class-diff",
+    "label": "class-diff"
+  },
+  {
+    "type": "doc",
+    "id": "cli/class-histogram",
+    "label": "class-histogram"
+  },
+  {
+    "type": "doc",
+    "id": "cli/class-trend",
+    "label": "class-trend"
+  },
+  {
+    "type": "doc",
+    "id": "cli/diff-leaks",
+    "label": "diff-leaks"
+  },
+  {
+    "type": "doc",
+    "id": "cli/dom-audit",
+    "label": "dom-audit"
+  },
+  {
+    "type": "doc",
+    "id": "cli/find-objects",
+    "label": "find-objects"
+  },
+  {
+    "type": "doc",
+    "id": "cli/trace",
+    "label": "trace"
+  },
+  {
+    "type": "doc",
+    "id": "cli/analyze",
+    "label": "analyze"
+  },
+  {
+    "type": "doc",
+    "id": "cli/heap-stats",
+    "label": "heap-stats"
+  },
+  {
+    "type": "doc",
+    "id": "cli/native-contexts",
+    "label": "native-contexts"
+  },
+  {
+    "type": "doc",
+    "id": "cli/script-census",
+    "label": "script-census"
+  },
+  {
+    "type": "doc",
+    "id": "cli/sliced-strings",
+    "label": "sliced-strings"
+  },
+  {
+    "type": "doc",
+    "id": "cli/snapshot-header",
+    "label": "snapshot-header"
+  },
+  {
+    "type": "doc",
+    "id": "cli/weakref-census",
+    "label": "weakref-census"
+  },
+  {
+    "type": "doc",
+    "id": "cli/heap",
+    "label": "heap"
+  },
+  {
+    "type": "doc",
+    "id": "cli/view-heap",
+    "label": "view-heap"
+  },
+  {
+    "type": "doc",
+    "id": "cli/version",
+    "label": "version"
+  },
+  {
+    "type": "doc",
+    "id": "cli/list",
+    "label": "list"
+  },
+  {
+    "type": "doc",
+    "id": "cli/reset",
+    "label": "reset"
+  },
+  {
+    "type": "doc",
+    "id": "cli/measure",
+    "label": "measure"
+  },
+  {
+    "type": "doc",
+    "id": "cli/warmup",
+    "label": "warmup"
+  },
+  {
+    "type": "doc",
+    "id": "cli/help",
+    "label": "help"
+  },
+  {
+    "type": "doc",
+    "id": "cli/get-default-work-dir",
+    "label": "get-default-work-dir"
+  },
+  {
+    "type": "doc",
+    "id": "cli/snapshot",
+    "label": "snapshot"
+  },
+  {
+    "type": "doc",
+    "id": "cli/warmup-and-snapshot",
+    "label": "warmup-and-snapshot"
+  }
+]

@@ -17,9 +17,18 @@ import BaseCommand, {CommandCategory} from '../../BaseCommand';
 import {config, fileManager, utils} from '@memlab/core';
 import universalOptions from '../../options/lib/UniversalOptions';
 
+const INDEX_DOC_NAME = 'CLI-commands';
+const SIDEBAR_FILE_NAME = 'sidebar.json';
+const UNIVERSAL_OPTIONS_ANCHOR = 'universal-options';
+
+type SidebarItem = {
+  type: 'doc';
+  id: string;
+  label: string;
+};
+
 export default class GenerateCLIDocCommand extends BaseCommand {
   private modules: Map<string, BaseCommand> = new Map();
-  private generatedCommandInIndex: Set<string> = new Set();
   private universalOptions: BaseOption[] = universalOptions;
 
   getCommandName(): string {
@@ -45,176 +54,206 @@ export default class GenerateCLIDocCommand extends BaseCommand {
     this.generateDocs(cliDocsDir);
   }
 
-  private generateDocs(cliDocsDir: string): void {
-    // first clean up the dir
+  // writes an index page, one page per top-level command, and the sidebar
+  // items listing those pages (required by website/sidebars.js)
+  generateDocs(cliDocsDir: string): void {
     fs.removeSync(cliDocsDir);
-    fs.mkdirSync(cliDocsDir);
-    // create index markdown file
-    const indexFile = path.join(cliDocsDir, 'CLI-commands.md');
-    this.writeCommandCategories(indexFile);
-  }
+    fs.mkdirSync(cliDocsDir, {recursive: true});
 
-  private writeCommandCategories(docFile: string): void {
-    this.writeTextWithNewLine(docFile, '# Command Line Interface');
-    this.writeTextWithNewLine(
-      docFile,
-      `Install the memlab command line tool with npm:
-\`\`\`bash
-npm install -g memlab
-\`\`\``,
-    );
+    const indexSections: string[] = [];
+    const sidebarItems: SidebarItem[] = [];
+    const documented = new Set<string>();
     for (const category in CommandCategory) {
-      const commandsToPrintFirst: BaseCommand[] = [];
-      this.writeCategory(
-        docFile,
+      const commands = this.getCommandsInCategory(
         category as CommandCategory,
-        commandsToPrintFirst,
+        documented,
       );
-    }
-  }
-
-  private writeCategory(
-    docFile: string,
-    category: CommandCategory,
-    commandsToPrintFirst: BaseCommand[],
-  ): void {
-    // commands defined in commandsToPrintFirst
-    const commands: BaseCommand[] = [];
-    for (const command of commandsToPrintFirst) {
-      const name = command.getCommandName();
-      if (this.generatedCommandInIndex.has(name)) {
+      if (commands.length === 0) {
         continue;
       }
-      commands.push(command);
+      indexSections.push(
+        this.getCategoryIndex(category as CommandCategory, commands),
+      );
+      for (const command of commands) {
+        const name = command.getCommandName();
+        documented.add(name);
+        this.writeFile(cliDocsDir, `${name}.md`, this.getCommandPage(command));
+        sidebarItems.push({type: 'doc', id: `cli/${name}`, label: name});
+      }
     }
-    // other commands in this category
-    for (const moduleEntries of this.modules) {
-      const command = moduleEntries[1];
+
+    this.writeFile(
+      cliDocsDir,
+      `${INDEX_DOC_NAME}.md`,
+      this.getIndexPage(indexSections),
+    );
+    this.writeFile(
+      cliDocsDir,
+      SIDEBAR_FILE_NAME,
+      JSON.stringify(sidebarItems, null, 2) + '\n',
+    );
+  }
+
+  private getCommandsInCategory(
+    category: CommandCategory,
+    documented: Set<string>,
+  ): BaseCommand[] {
+    const commands: BaseCommand[] = [];
+    for (const command of this.modules.values()) {
       if (category !== command.getCategory()) {
         continue;
       }
       if (command.isInternalCommand() && !config.verbose) {
         continue;
       }
-      const name = command.getCommandName();
-      if (this.generatedCommandInIndex.has(name)) {
+      if (documented.has(command.getCommandName())) {
         continue;
       }
       commands.push(command);
     }
-    if (commands.length === 0) {
-      return;
-    }
-    this.writeCategoryHeader(docFile, category);
-    for (const command of commands) {
-      this.writeCommand(docFile, command);
-      this.generatedCommandInIndex.add(command.getCommandName());
-    }
-    this.writeTextWithNewLine(docFile, '');
+    return commands;
   }
 
-  private writeCategoryHeader(
-    docFile: string,
+  private getIndexPage(categorySections: string[]): string {
+    const universalOptions = this.getOptionList(this.universalOptions);
+    return [
+      '---',
+      'custom_edit_url: null',
+      '---',
+      '',
+      '# Command Line Interface',
+      '',
+      'Install the memlab command line tool with npm:',
+      '',
+      '```bash\nnpm install -g memlab\n```',
+      '',
+      ...categorySections,
+      '## Universal Options',
+      '',
+      'These options work with every command:',
+      '',
+      universalOptions,
+      '',
+    ].join('\n');
+  }
+
+  private getCategoryIndex(
     category: CommandCategory,
-  ): void {
-    const categoryName = category.toUpperCase();
-    this.writeTextWithNewLine(docFile, `\n## ${categoryName} Commands\n`);
+    commands: BaseCommand[],
+  ): string {
+    const rows = commands.map(command => {
+      const name = command.getCommandName();
+      // keeps the `#memlab-<name>` anchors of the former single-page docs
+      const anchor = `<a id="memlab-${name}"></a>`;
+      const link = `[\`memlab ${name}\`](./${name}.md)`;
+      return `| ${anchor}${link} | ${this.getSummary(command)} |`;
+    });
+    return [
+      `## ${category.toUpperCase()} Commands`,
+      '',
+      '| Command | Description |',
+      '| --- | --- |',
+      ...rows,
+      '',
+    ].join('\n');
   }
 
-  private writeCommand(
-    docFile: string,
-    command: BaseCommand,
-    indent = '',
-  ): void {
+  private getCommandPage(command: BaseCommand): string {
+    const name = command.getCommandName();
+    return [
+      '---',
+      `title: memlab ${name}`,
+      `sidebar_label: ${name}`,
+      'custom_edit_url: null',
+      '---',
+      '',
+      this.getCommandBody(command, '##'),
+    ].join('\n');
+  }
+
+  private getCommandBody(command: BaseCommand, headingLevel: string): string {
     const name = command.getFullCommand();
-    const desc = utils.upperCaseFirstCharacter(command.getDescription().trim());
+    const lines: string[] = [];
+    lines.push(utils.upperCaseFirstCharacter(command.getDescription().trim()));
+    lines.push('');
     const cmdDoc = command.getDocumentation().trim();
-
-    // write command title
-    this.writeTextWithNewLine(docFile, `\n###${indent} memlab ${name}\n`);
-
-    // write description
-    this.writeTextWithNewLine(docFile, `${desc}\n`);
-
-    // write detailed command documentation
     if (cmdDoc.length > 0) {
-      this.writeTextWithNewLine(docFile, `${cmdDoc}\n`);
+      lines.push(cmdDoc, '');
     }
 
-    // get example
     const examples = command.getExamples();
     const example: CommandOptionExample = examples[0] ?? '';
-    // write command synopsis
-    const cmd = docUtils.generateExampleCommand(name, example);
-    this.writeCodeBlock(docFile, cmd, 'bash');
+    lines.push(
+      this.getCodeBlock(docUtils.generateExampleCommand(name, example)),
+    );
+    lines.push('');
 
-    // write command examples if there is any
     const exampleBlock = examples
       .slice(1)
       .map(example => docUtils.generateExampleCommand(name, example))
       .join('\n');
     if (exampleBlock.length > 0) {
-      this.writeTextWithNewLine(docFile, '\n#### examples\n');
-      this.writeCodeBlock(docFile, exampleBlock, 'bash');
+      lines.push(
+        `${headingLevel} Examples`,
+        '',
+        this.getCodeBlock(exampleBlock),
+      );
+      lines.push('');
     }
 
-    // write options
-    this.writeCommandOptions(docFile, command);
-
-    const subCommands = command.getSubCommands() ?? [];
-    for (const subCommand of subCommands) {
-      if (!subCommand.isInternalCommand()) {
-        this.writeCommand(docFile, subCommand, indent + '#');
-      }
+    lines.push(`${headingLevel} Options`, '');
+    const options = this.getCommandOptions(command);
+    if (options.length > 0) {
+      lines.push(this.getOptionList(options), '');
     }
-  }
-
-  private writeTextWithNewLine(docFile: string, content: string): void {
-    this.touchFile(docFile);
-    fs.appendFileSync(docFile, `${content}\n`, {encoding: 'utf8'});
-  }
-
-  private touchFile(docFile: string): void {
-    if (!fs.existsSync(docFile)) {
-      fs.writeFileSync(docFile, '', {encoding: 'utf8'});
-    }
-  }
-
-  private writeCodeBlock(docFile: string, code: string, codeType = '') {
-    let normalizedCode = code;
-    while (normalizedCode.endsWith('\n')) {
-      normalizedCode = normalizedCode.slice(0, normalizedCode.length - 1);
-    }
-    this.touchFile(docFile);
-    fs.appendFileSync(
-      docFile,
-      '```' + codeType + '\n' + normalizedCode + '\n```\n',
-      {encoding: 'utf8'},
+    lines.push(
+      `The [universal options](./${INDEX_DOC_NAME}.md#${UNIVERSAL_OPTIONS_ANCHOR}) ` +
+        '(`--help`, `--verbose`, ...) work with this command too.',
     );
+    lines.push('');
+
+    for (const subCommand of command.getSubCommands() ?? []) {
+      if (subCommand.isInternalCommand()) {
+        continue;
+      }
+      lines.push(`${headingLevel} memlab ${subCommand.getFullCommand()}`, '');
+      lines.push(this.getCommandBody(subCommand, headingLevel + '#'));
+    }
+    return lines.join('\n');
   }
 
-  private writeCommandOptions(docFile: string, command: BaseCommand): void {
-    const options = [
-      ...command.getFullOptionsFromPrerequisiteChain(),
-      ...this.universalOptions,
-    ];
-    if (options.length === 0) {
-      return;
-    }
-    this.writeTextWithNewLine(docFile, '\n**Options**:');
-    const optionsText = [];
-    for (const option of options) {
-      let header = `**\`--${option.getOptionName()}\`**`;
-      if (option.getOptionShortcut()) {
-        header += `, **\`-${option.getOptionShortcut()}\`**`;
-      }
-      const desc = option.getDescription();
-      optionsText.push({header, desc});
-    }
-    for (const optionText of optionsText) {
-      const header = optionText.header;
-      const msg = ` * ${header}: ${optionText.desc}`;
-      this.writeTextWithNewLine(docFile, msg);
-    }
+  private getCommandOptions(command: BaseCommand): BaseOption[] {
+    const universal = new Set(
+      this.universalOptions.map(option => option.getOptionName()),
+    );
+    return command
+      .getFullOptionsFromPrerequisiteChain()
+      .filter(option => !universal.has(option.getOptionName()));
+  }
+
+  private getOptionList(options: BaseOption[]): string {
+    return options
+      .map(option => {
+        let header = `**\`--${option.getOptionName()}\`**`;
+        if (option.getOptionShortcut()) {
+          header += `, **\`-${option.getOptionShortcut()}\`**`;
+        }
+        return ` * ${header}: ${option.getDescription()}`;
+      })
+      .join('\n');
+  }
+
+  // the first line of the description, safe inside a markdown table cell
+  private getSummary(command: BaseCommand): string {
+    const desc = utils.upperCaseFirstCharacter(command.getDescription().trim());
+    return desc.split('\n')[0].replace(/\|/g, '\\|');
+  }
+
+  private getCodeBlock(code: string, codeType = 'bash'): string {
+    return '```' + codeType + '\n' + code.replace(/\n+$/, '') + '\n```';
+  }
+
+  private writeFile(dir: string, fileName: string, content: string): void {
+    fs.writeFileSync(path.join(dir, fileName), content, {encoding: 'utf8'});
   }
 }

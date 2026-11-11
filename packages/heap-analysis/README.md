@@ -140,4 +140,4 @@ The full reference is in the
 
 * [Official Website and Demo](https://meta.github.io/memlab)
 * [Documentation](https://meta.github.io/memlab/docs/intro)
-* [`memlab analyze` reference](https://meta.github.io/memlab/docs/cli/CLI-commands#memlab-analyze)
+* [`memlab analyze` reference](https://meta.github.io/memlab/docs/cli/analyze/)

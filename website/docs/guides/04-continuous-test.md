@@ -9,7 +9,7 @@ involves three steps:
  1. Prepare [test scenarios](../api/core/src/interfaces/IScenario.md) that
  cover the key interactions of the web app under test.
  2. Trigger test runs through the
-[memlab command line interface](../cli/CLI-commands.md#memlab-run) or
+[memlab command line interface](../cli/run.md) or
 through the [memlab API](../api/api/src/functions/run.md).
  3. Collect the memory leak results saved to disk.
 

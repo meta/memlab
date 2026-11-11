@@ -222,6 +222,15 @@ html {
   padding-top: 40px !important;
 }
 
+/* `memlab-<command>` anchors on the generated CLI index, kept for old links */
+article a[id^='memlab-'] {
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 0.5rem);
+}
+
+article a[id^='memlab-'] + a code {
+  white-space: nowrap;
+}
+
 article {
   margin-left: auto;
   margin-right: auto;

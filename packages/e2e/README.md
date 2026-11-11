@@ -77,7 +77,7 @@ These `memlab run` and `memlab snapshot` options are handled here:
 | `--protocol-timeout <ms>` | Allow more time for very large heap snapshots |
 
 The full list is in the
-[CLI reference](https://meta.github.io/memlab/docs/cli/CLI-commands#memlab-run).
+[CLI reference](https://meta.github.io/memlab/docs/cli/run/).
 
 ## Online Resources
 
