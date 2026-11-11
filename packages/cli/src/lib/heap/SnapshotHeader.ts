@@ -66,8 +66,8 @@ export function readSnapshotHeader(file: string): SnapshotHeader {
   return {
     file,
     fileSizeBytes,
-    nodeCount: toCount(meta.node_count),
-    edgeCount: toCount(meta.edge_count),
+    nodeCount: requireCount(file, meta, 'node_count'),
+    edgeCount: requireCount(file, meta, 'edge_count'),
     traceFunctionCount,
     extraNativeBytes: toCount(meta.extra_native_bytes),
     nodeFields,
@@ -113,9 +113,29 @@ function getNodeFields(meta: Record<string, unknown>): string[] {
   return Array.isArray(fields) ? fields.map(f => `${f}`) : [];
 }
 
+/** An optional count: 0 when the header does not have it. */
 function toCount(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * A count every snapshot header has. Reading a missing or malformed one as
+ * 0 would understate the memory needed to analyze the snapshot, so it is an
+ * error instead.
+ */
+function requireCount(
+  file: string,
+  meta: Record<string, unknown>,
+  field: string,
+): number {
+  const value = meta[field];
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(
+      `${file}: the snapshot header has no valid "${field}" (found ${JSON.stringify(value)})`,
+    );
+  }
+  return value;
 }
 
 // Heap growth per node and per edge while memlab parses a snapshot and builds

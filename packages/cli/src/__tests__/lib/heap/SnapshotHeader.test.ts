@@ -124,6 +124,34 @@ test('rejects files that are not heap snapshots', () => {
   expect(() => readSnapshotHeader(gzipped)).toThrow(/gzip-compressed/);
 });
 
+test('rejects a header without valid node and edge counts', () => {
+  const missingNodes = writeFile(
+    'no-node-count.heapsnapshot',
+    headerJson({meta: {node_fields: ['type']}, edge_count: 40000000}),
+  );
+  expect(() => readSnapshotHeader(missingNodes)).toThrow(
+    /no valid "node_count" \(found undefined\)/,
+  );
+  const badEdges = writeFile(
+    'bad-edge-count.heapsnapshot',
+    headerJson({meta: {node_fields: ['type']}, node_count: 5, edge_count: -1}),
+  );
+  expect(() => readSnapshotHeader(badEdges)).toThrow(
+    /no valid "edge_count" \(found -1\)/,
+  );
+  const stringCount = writeFile(
+    'string-count.heapsnapshot',
+    headerJson({meta: {}, node_count: '12', edge_count: 3}),
+  );
+  expect(() => readSnapshotHeader(stringCount)).toThrow(/"node_count"/);
+  // an empty snapshot legitimately has 0 edges
+  const empty = writeFile(
+    'zero-edges.heapsnapshot',
+    headerJson({meta: {}, node_count: 1, edge_count: 0}),
+  );
+  expect(readSnapshotHeader(empty)).toMatchObject({nodeCount: 1, edgeCount: 0});
+});
+
 test('projects the analysis heap from node and edge counts', () => {
   // 140 bytes per node + 12 bytes per edge
   expect(estimateAnalysisHeapMB({nodeCount: 0, edgeCount: 0})).toBe(0);

@@ -117,6 +117,15 @@ function printMany(reports: HeaderReport[], heapLimitMB: number): void {
   printHeapHint(suggestHeapLimitMB(largest, heapLimitMB));
 }
 
+/** A file that is not a readable snapshot is a usage error, not a crash. */
+function readHeaderOrHalt(file: string): SnapshotHeader {
+  try {
+    return readSnapshotHeader(file);
+  } catch (e) {
+    throw utils.haltOrThrow(utils.getError(e).message);
+  }
+}
+
 export default class SnapshotHeaderCommand extends BaseCommand {
   getCommandName(): string {
     return 'snapshot-header';
@@ -161,7 +170,7 @@ export default class SnapshotHeaderCommand extends BaseCommand {
     }
     const heapLimitMB = getHeapLimitMB();
     const reports = files.map(file =>
-      toReport(readSnapshotHeader(file), heapLimitMB),
+      toReport(readHeaderOrHalt(file), heapLimitMB),
     );
     if (isJsonOutput()) {
       writeJsonOutput(config.externalSnapshotDir ? reports : reports[0]);
