@@ -141,6 +141,34 @@ memlab find-leaks --work-dir /memlab/working/dir/generated/by/memlab/
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab class-histogram
+
+Print the number of objects and their total self size per class in a heap snapshot
+
+```bash
+memlab class-histogram --snapshot <HEAP_SNAPSHOT_FILE>
+```
+
+#### examples
+
+```bash
+memlab class-histogram --snapshot <HEAP_SNAPSHOT_FILE> --top 100
+memlab class-histogram --snapshot <HEAP_SNAPSHOT_FILE> --name-pattern Detached
+memlab class-histogram --snapshot <HEAP_SNAPSHOT_FILE> --output json
+```
+
+**Options**:
+ * **`--snapshot`**: set file path of the heap snapshot under analysis
+ * **`--engine`**: set the JavaScript engine (default to V8)
+ * **`--top`**: number of rows to report (default 30)
+ * **`--name-pattern`**: only report classes whose name matches this case-insensitive regular expression (or plain text)
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab diff-leaks
 
 Find new memory leaks by diffing control and test heap snapshots
