@@ -506,6 +506,30 @@ memlab analyze unmounted-fiber-node
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab heap-stats
+
+Split the memory in a heap snapshot into code, strings, JS arrays, system objects and native memory, and into loaded code vs memory the program allocated
+
+```bash
+memlab heap-stats --snapshot <HEAP_SNAPSHOT_FILE>
+```
+
+#### examples
+
+```bash
+memlab heap-stats --snapshot <HEAP_SNAPSHOT_FILE> --output json
+```
+
+**Options**:
+ * **`--snapshot`**: set file path of the heap snapshot under analysis
+ * **`--engine`**: set the JavaScript engine (default to V8)
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab snapshot-header
 
 Print node and edge counts and the memory needed to analyze a heap snapshot, read from its header without parsing the snapshot
