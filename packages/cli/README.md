@@ -68,6 +68,7 @@ leaked object alive.
 | `memlab anonymize --snapshot <file> --output <file>` | Remove user data from a heap snapshot so it can be shared |
 | `memlab snapshot-header --snapshot <file>` | Print node and edge counts and the memory needed to analyze a heap snapshot, without parsing it |
 | `memlab class-histogram --snapshot <file>` | Count objects and their self size per class (`--top`, `--name-pattern`) |
+| `memlab class-diff --baseline <file> --target <file>` | Compare objects and self size per class between two heap snapshots, and count objects allocated after the baseline |
 
 **Browser runs**
 
