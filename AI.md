@@ -565,6 +565,9 @@ memlab script-census --snapshot path/to/heap.heapsnapshot
 # Find objects by class, type, size or detached state, then trace one by its id
 memlab find-objects --snapshot path/to/heap.heapsnapshot --name-pattern '^Map$' --min-retained-size 1MB
 
+# How many DOM elements the page keeps attached, and which are repeated (lists to virtualize)
+memlab dom-audit --snapshot path/to/heap.heapsnapshot
+
 # View/explore a heap snapshot interactively
 memlab view-heap --snapshot path/to/heap.heapsnapshot
 memlab heap --snapshot path/to/heap.heapsnapshot

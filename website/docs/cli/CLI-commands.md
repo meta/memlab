@@ -255,6 +255,30 @@ memlab diff-leaks
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab dom-audit
+
+Count the DOM elements attached to the document in a browser heap snapshot, by tag and by repeated element
+
+```bash
+memlab dom-audit --snapshot <HEAP_SNAPSHOT_FILE>
+```
+
+#### examples
+
+```bash
+memlab dom-audit --snapshot <HEAP_SNAPSHOT_FILE> --top 50 --output json
+```
+
+**Options**:
+ * **`--snapshot`**: set file path of the heap snapshot under analysis
+ * **`--top`**: number of rows to report (default 30)
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab find-objects
 
 List the objects in a heap snapshot that match a class name, node type, retained size or detached state, largest retained size first
