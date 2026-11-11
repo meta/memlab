@@ -197,6 +197,32 @@ memlab class-histogram --snapshot <HEAP_SNAPSHOT_FILE> --output json
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab class-trend
+
+Track the number of objects per class across a series of heap snapshots, and list the classes that grew at every step
+
+```bash
+memlab class-trend --snapshot-dir <DIR_CONTAINING_SNAPSHOTS>
+```
+
+#### examples
+
+```bash
+memlab class-trend --snapshot-dir <DIR> --name-pattern Detached --output json
+```
+
+**Options**:
+ * **`--snapshot-dir`**: set directory path containing all heap snapshots under analysis
+ * **`--engine`**: set the JavaScript engine (default to V8)
+ * **`--top`**: number of rows to report (default 30)
+ * **`--name-pattern`**: only report classes whose name matches this case-insensitive regular expression (or plain text)
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab diff-leaks
 
 Find new memory leaks by diffing control and test heap snapshots

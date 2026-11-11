@@ -69,6 +69,7 @@ leaked object alive.
 | `memlab snapshot-header --snapshot <file>` | Print node and edge counts and the memory needed to analyze a heap snapshot, without parsing it |
 | `memlab class-histogram --snapshot <file>` | Count objects and their self size per class (`--top`, `--name-pattern`) |
 | `memlab class-diff --baseline <file> --target <file>` | Compare objects and self size per class between two heap snapshots, and count objects allocated after the baseline |
+| `memlab class-trend --snapshot-dir <dir>` | Track objects per class across a series of snapshots and list the classes that grew at every step |
 | `memlab heap-stats --snapshot <file>` | Split a heap snapshot into code, strings, JS arrays, system objects and native memory, and into loaded code vs memory the program allocated |
 | `memlab sliced-strings --snapshot <file>` | Find large strings kept alive only by short substrings of them |
 | `memlab weakref-census --snapshot <file>` | Count WeakRefs, live vs empty, by what holds them; flags collections that keep entries after their target is gone |
