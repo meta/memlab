@@ -530,6 +530,31 @@ memlab heap-stats --snapshot <HEAP_SNAPSHOT_FILE> --output json
  * **`--debug`**: enable manual debugging
  * **`--silent`**, **`-s`**: mute all terminal output
 
+### memlab script-census
+
+Report the source text of loaded scripts kept in a heap snapshot, and scripts kept in memory more than once
+
+```bash
+memlab script-census --snapshot <HEAP_SNAPSHOT_FILE>
+```
+
+#### examples
+
+```bash
+memlab script-census --snapshot <HEAP_SNAPSHOT_FILE> --top 50 --output json
+```
+
+**Options**:
+ * **`--snapshot`**: set file path of the heap snapshot under analysis
+ * **`--engine`**: set the JavaScript engine (default to V8)
+ * **`--top`**: number of rows to report (default 30)
+ * **`--output`**: output format of the report: 'text' (default) or 'json'
+ * **`--help`**, **`-h`**: print helper text
+ * **`--verbose`**, **`-v`**: show more details
+ * **`--sc`**: set to continuous test mode
+ * **`--debug`**: enable manual debugging
+ * **`--silent`**, **`-s`**: mute all terminal output
+
 ### memlab sliced-strings
 
 Find large strings kept alive by short substrings (V8 sliced strings) in a heap snapshot
