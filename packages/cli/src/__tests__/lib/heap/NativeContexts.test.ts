@@ -13,9 +13,12 @@ import type {NativeContextAttribution} from '../../../lib/heap/NativeContexts';
 
 import vm from 'vm';
 import {config, dumpNodeHeapSnapshot, utils} from '@memlab/core';
+import type {NativeContextInfo} from '../../../lib/heap/NativeContexts';
+
 import {
   attributeNativeContexts,
   isNativeContext,
+  selectContexts,
   SHARED,
   UNATTRIBUTED,
 } from '../../../lib/heap/NativeContexts';
@@ -84,4 +87,21 @@ test('accounts for every node exactly once', () => {
   ).toBe(selfTotal);
   const sizes = attribution.contexts.map(c => c.ownedSize);
   expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
+});
+
+test('lists every detached context, even below the --top cut', () => {
+  const context = (id: number, ownedSize: number, detached = false) =>
+    ({id, ownedSize, detached}) as NativeContextInfo;
+  // sorted by owned size, as attributeNativeContexts returns them
+  const contexts = [
+    context(1, 900),
+    context(2, 500),
+    context(3, 300, true),
+    context(4, 100),
+    context(5, 10, true),
+  ];
+  expect(selectContexts(contexts, 2).map(c => c.id)).toEqual([1, 2, 3, 5]);
+  expect(selectContexts(contexts, 4).map(c => c.id)).toEqual([1, 2, 3, 4, 5]);
+  expect(selectContexts(contexts, 10).map(c => c.id)).toEqual([1, 2, 3, 4, 5]);
+  expect(selectContexts(contexts.slice(0, 2), 1).map(c => c.id)).toEqual([1]);
 });

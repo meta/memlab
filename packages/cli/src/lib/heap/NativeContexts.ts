@@ -185,3 +185,14 @@ export function attributeNativeContexts(
   contexts.sort((a, b) => b.ownedSize - a.ownedSize || a.id - b.id);
   return result;
 }
+
+/**
+ * The contexts to list: the top `top` by owned size, plus every detached
+ * one, which is the row a leak investigation needs even when it is small.
+ */
+export function selectContexts(
+  contexts: NativeContextInfo[],
+  top: number,
+): NativeContextInfo[] {
+  return contexts.filter((c, i) => i < top || c.detached);
+}

@@ -25,7 +25,10 @@ import SnapshotFileOption from '../../options/heap/SnapshotFileOption';
 import OutputFormatOption from '../../options/heap/OutputFormatOption';
 import TopOption from '../../options/heap/TopOption';
 import {getClassKey} from '../../lib/heap/ClassHistogram';
-import {attributeNativeContexts} from '../../lib/heap/NativeContexts';
+import {
+  attributeNativeContexts,
+  selectContexts,
+} from '../../lib/heap/NativeContexts';
 import {
   clipText,
   formatBytes,
@@ -78,16 +81,14 @@ function printReport(
       `${a.contexts.length === 1 ? 'context (realm)' : 'contexts (realms)'}; ` +
       `${formatPercent(owned, total)} of ${formatBytes(total)} is owned by one realm`,
   );
-  const rows = a.contexts
-    .slice(0, top)
-    .map(c => [
-      `@${c.id}`,
-      clipText(c.label || '(no URL)', 70),
-      c.detached ? 'yes' : '',
-      formatBytes(c.ownedSize),
-      formatPercent(c.ownedSize, total),
-      formatCount(c.ownedCount),
-    ]);
+  const rows = selectContexts(a.contexts, top).map(c => [
+    `@${c.id}`,
+    clipText(c.label || '(no URL)', 70),
+    c.detached ? 'yes' : '',
+    formatBytes(c.ownedSize),
+    formatPercent(c.ownedSize, total),
+    formatCount(c.ownedCount),
+  ]);
   rows.push(
     [
       '',
@@ -186,7 +187,7 @@ export default class NativeContextsCommand extends BaseCommand {
       writeJsonOutput({
         file,
         contextCount: attribution.contexts.length,
-        contexts: attribution.contexts.slice(0, top).map(c => ({
+        contexts: selectContexts(attribution.contexts, top).map(c => ({
           id: c.id,
           label: c.label,
           detached: c.detached,
