@@ -1,0 +1,21 @@
+$ memlab analyze object --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --node-id @71391
+Heap node (object) @71391
+ name: SettingsDialog
+ # of references: 6
+ # of referrers: 3
+ shallow size: 60
+ retained size: 806616
+ dominator node: @71399
+
+REFERENCES:
+·  --container--> @65915 native Detached <div class="settings">: 7 edges, 45.3KB, refs: [container]
+·  --labels--> @71393 Array: 243 edges, 6.2KB, refs: [labels]
+·  --history--> @71395 Array: 3 edges, 800KB, refs: [history]
+·  --unsubscribe--> @71397 closure : 6 edges, 52 bytes, refs: [unsubscribe]
+·  --__proto__--> @50821 Object { close, constructor, open }: 6 edges, 799 bytes, refs: [__proto__, prototype]
+·  --map--> @71039 object shape system / Map: 15 edges, 224 bytes, refs: [map, transition]
+
+REFERRERS:
+·  @71399 system / Context / scope @65777: 5 edges, 806.6KB, refs: [listener] --dialog-->
+·  @71399 system / Context / scope @65777: 5 edges, 806.6KB, refs: [listener] --this-->
+·  @65917 WeakRef: 3 edges, 16 bytes, refs: [] --target-->

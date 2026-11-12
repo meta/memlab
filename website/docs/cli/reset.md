@@ -10,6 +10,12 @@ Reset and initialize all directories
 memlab reset 
 ```
 
+## Example output
+
+```text
+$ memlab reset --work-dir /tmp/memlab-example/reset
+```
+
 ## Options
 
  * **`--work-dir`**: set the working directory of the current run

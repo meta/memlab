@@ -1,0 +1,5 @@
+$ memlab analyze unbound-object --snapshot-dir /tmp/memlab-example/series/data/cur
+Top growing objects in sizes:
+ (Use `memlab trace --node-id=@ID` to get trace)
+
+· Window [JSGlobalObject] / http://localhost:3000 [object](@40065):  45.9KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB

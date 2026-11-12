@@ -17,6 +17,43 @@ memlab anonymize --snapshot <HEAP_SNAPSHOT_FILE> --output <OUTPUT_FILE> --anonym
 memlab anonymize --snapshot <HEAP_SNAPSHOT_FILE> --audit-only
 ```
 
+## Example output
+
+```text
+$ memlab anonymize --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --output /tmp/memlab-example/tmp/anonymized.heapsnapshot
+Anonymized snapshot written
+  from  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot (3.3 MB)
+  to    /tmp/memlab-example/tmp/anonymized.heapsnapshot (3.3 MB)
+What was removed
+  6,678 string values redacted   (the text your app stored — names, messages, tokens)
+  55 more redacted because their CONTENT looked sensitive:
+      dom-text           37
+      digit-run          18
+  3,595 entries split so a structural label could be kept readable
+  out of 18,987 strings in the capture; mode "stable"
+Still in the clear — review before sharing
+  These are property names and labels, NOT string values — they were kept because
+  they look like code identifiers. Any that is an identifier in YOUR application
+  is a residual: anonymize again from the API with a `shouldRedact` callback.
+
+  Grouped by SHAPE, where a=lowercase run, A=uppercase, d=digits — so "a$d"
+  covers require$$99, module$42, and anything else like them.
+
+    count  shape                 examples
+      501  a a                   heap number, private symbol, set scrollbars
+      340  a / Aa / AaAaAa (a)   system / Code / CallBoundFuncti..., system / Code / CallWrappedFunc..., system / Code / CallWithSpread ...
+      238  a aAa                 get visualViewport, get lastParen, get parentNode
+      236  a / AaAaAa / a        system / SharedFunctionInfo / c..., system / SharedFunctionInfo / c..., system / SharedFunctionInfo / v...
+      232  a / Aa / AaAaAaAaAaA  system / Code / InterpreterForw..., system / Code / InterpreterPush..., system / Code / CallApiCallback...
+      219  a / Aa / AaAaAaAa (a  system / Code / CallFunctionFor..., system / Code / ConstructForwar..., system / Code / InterpreterEnte...
+      212  a / Aa / AaAaAaAa (a  system / Code / CallWithArrayLi..., system / Code / ConstructWithAr..., system / Code / StartMaglevOpti...
+      207  a / Aa / AaAa (a)     system / Code / CallProxy (buil..., system / Code / CallVarargs (bu..., system / Code / ConstructFuncti...
+      207  a / Aa / AaAaAaAaAa   system / Code / StringGreaterTh..., system / Code / OrderedHashTabl..., system / Code / InterpreterPush...
+      194  a / AaAaAa / aAa      system / SharedFunctionInfo / c..., system / SharedFunctionInfo / v..., system / SharedFunctionInfo / g...
+      127  a:AaAaAa              gin::PerContextData, blink::LongTaskDetector, blink::DevToolsSession
+      123  a / AaAaAa / aAaAa    system / SharedFunctionInfo / t..., system / SharedFunctionInfo / a..., system / SharedFunctionInfo / r...
+```
+
 ## Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis

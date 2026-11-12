@@ -1,0 +1,2 @@
+$ memlab get-default-work-dir
+/tmp/memlab

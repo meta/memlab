@@ -10,6 +10,13 @@ Query the default working directory
 memlab get-default-work-dir 
 ```
 
+## Example output
+
+```text
+$ memlab get-default-work-dir
+/tmp/memlab
+```
+
 ## Options
 
 The [universal options](./CLI-commands.md#universal-options) (`--help`, `--verbose`, ...) work with this command too.

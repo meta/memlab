@@ -16,6 +16,17 @@ memlab weakref-census --snapshot <HEAP_SNAPSHOT_FILE>
 memlab weakref-census --snapshot <HEAP_SNAPSHOT_FILE> --output json
 ```
 
+## Example output
+
+```text
+$ memlab weakref-census --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+  1 WeakRefs: 1 live, 0 empty (target already collected)
+held by            WeakRefs  empty  share empty  example holder
+-----------------  --------  -----  -----------  --------------
+(object elements)         1      0         0.0%  @65919
+```
+
 ## Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis

@@ -1,0 +1,24 @@
+$ memlab class-diff --baseline /tmp/memlab-example/leak/data/cur/s1.heapsnapshot --target /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --top 15
+Baseline  /tmp/memlab-example/leak/data/cur/s1.heapsnapshot
+Target    /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+  objects    32,184 -> 36,422 (+4,238)
+  self size  1.0 MB -> 2.0 MB (+1.0 MB)
+  same JS heap: "new" counts objects allocated after the baseline that are still alive
+Top 15 of 691 changed classes by self-size growth
+class                                                                             type           count  delta  self size      delta    new
+--------------------------------------------------------------------------------  -------------  -----  -----  ---------  ---------  -----
+(object elements)                                                                 array              6     +5   782.8 KB  +782.8 KB      5
+system / FunctionTemplateInfo                                                     native         3,282   +913   205.0 KB   +57.1 KB      -
+blink::HeapHashTableBacking<blink::HashTable<blink::ShapeCacheKey, blink::Key...  native             2     +1    36.6 KB   +36.0 KB      -
+Detached <div>                                                                    native           240   +240    24.4 KB   +24.4 KB      -
+Detached Text                                                                     native           240   +240    18.8 KB   +18.8 KB      -
+(string)                                                                          string         6,919   +413    49.6 KB   +17.8 KB  2,792
+system / ArrayList                                                                native            60    +23    44.1 KB   +10.2 KB      -
+system / DescriptorArray                                                          object shape     755    +40    90.2 KB   +10.1 KB     41
+(object properties)                                                               array             59    +24    94.9 KB    +9.0 KB     32
+system / AccessorPair                                                             native         2,128   +646    24.9 KB    +7.6 KB      -
+system / Map                                                                      object shape   1,261   +114    50.4 KB    +4.8 KB    122
+(sliced string)                                                                   sliced string    240   +240     4.7 KB    +4.7 KB    240
+blink::HeapHashTableBacking<blink::HashTable<cppgc::internal::BasicMember<bli...  native             2     +2     4.1 KB    +4.1 KB      -
+blink::HeapHashTableBacking<blink::HashTable<cppgc::internal::BasicMember<con...  native             1      0     4.0 KB    +3.9 KB      -
+system / BytecodeArray                                                            code              17    +17     1.8 KB    +1.8 KB     17

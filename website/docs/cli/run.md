@@ -17,6 +17,41 @@ memlab run --scenario /tmp/test-scenario.js
 memlab run --scenario /tmp/test-scenario.js --work-dir /tmp/test-1/
 ```
 
+## Example output
+
+```text
+$ memlab run --scenario /tmp/memlab-example/scenarios/leak.js --work-dir /tmp/memlab-example/leak
+page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
+
+total time: 46.4s
+Memory usage across all steps:
+2.0
+1.7
+1.5    ██ ██
+1.2    ██ ██
+1.0    ██ ██
+0.7    ██ ██
+0.5 ██ ██ ██
+0.2 ██ ██ ██
+0.0 ██ ██ ██
+    1  2  3
+
+MemLab found 1 leak(s)
+Number of clusters loaded: 0
+
+--Similar leaks in this run: 386--
+--Retained size of leaked objects: 45.3KB--
+[Window / http://localhost:3000] (native) @33471 [7.6KB]
+  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
+  --openedDialogs (property)--->  [Set] (object) @47967 [76 bytes]
+  --table (internal)--->  [<array>] (array) @50805 [60 bytes]
+  --5 (internal)--->  [Detached <div class="settings"> (native) @65915 [45.3KB]
+  --5 (element)--->  [Detached <div> (native) @71885 [45KB]
+  --7 (element)--->  [Detached <button id="close-settings"> (native) @72365 [812 bytes]
+  --9 (element)--->  [Detached <div> (native) @72363 [184 bytes]
+  --4 (element)--->  [Detached Text] (native) @15810 [80 bytes]
+```
+
 ## Options
 
  * **`--work-dir`**: set the working directory of the current run

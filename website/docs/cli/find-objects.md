@@ -17,6 +17,20 @@ memlab find-objects --snapshot <HEAP_SNAPSHOT_FILE> --detached --node-type nativ
 memlab find-objects --snapshot <HEAP_SNAPSHOT_FILE> --node-type closure --top 50 --output json
 ```
 
+## Example output
+
+```text
+$ memlab find-objects --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --name-pattern '^SettingsDialog$'
+Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+  3 objects match; the 3 that retain the most:
+id      class           type     self size  retained size  detached
+------  --------------  -------  ---------  -------------  --------
+@71391  SettingsDialog  object        60 B       787.7 KB
+@48235  SettingsDialog  closure       32 B         1.7 KB
+@11507  SettingsDialog  string        28 B           28 B
+  why one is kept alive: memlab trace --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --node-id 71391
+```
+
 ## Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis

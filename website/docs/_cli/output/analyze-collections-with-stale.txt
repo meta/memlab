@@ -1,0 +1,6 @@
+$ memlab analyze collections-with-stale --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+
+Collections holding stale objects:
+
+·  (@50805) 60 bytes (1 out of 2 elements are stale):
+  @65915

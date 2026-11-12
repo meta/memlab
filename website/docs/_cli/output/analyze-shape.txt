@@ -1,0 +1,143 @@
+$ memlab analyze shape --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+Heap overall statistics:
+  Fiber node size: 0 byte
+  Regular fiber node size: 0 byte
+  Detached fiber node size: 0 byte
+  Alternate fiber node size: 0 byte
+  Error: 7.1KB
+Object shapes with top retained sizes:
+ (Use `memlab trace --node-id=@ID` to get trace)
+
+· Array: 811.6KB (N: 8, Examples: @71395 [800KB] | @71393 [6.2KB] | @7525 [1.6KB] | @7713 [1.6KB] | @7909 [1.6KB])
+  · [system / NativeContext / http://localhost:3000] --initial_array_prototype-->: 2
+  · [(Global handles)] --259-->: 1
+  · [(Global handles)] --73-->: 1
+  · [(Global handles)] --180-->: 1
+
+· system / Context / scope @65777: 806.6KB (N: 1, Examples: @71399 [806.6KB])
+  · [handleThemeChange] --context-->: 1
+  · [<closure>] --context-->: 1
+
+· SettingsDialog: 806.6KB (N: 1, Examples: @71391 [806.6KB])
+  · [system / Context / scope --dialog-->: 1
+  · [system / Context / scope --this-->: 1
+
+· Window [JSGlobalObject] / http://localhost:3000: 95.5KB (N: 2, Examples: @40065 [49.4KB] | @33803 [46.1KB])
+  · [system / NativeContext / http://localhost:3000] --global_object-->: 2
+  · [Window / http://localhost:3000] --global_object-->: 1
+  · [Window [JSGlobalProxy] / http://localhost:3000] --global_object-->: 1
+
+· string: 58.7KB (N: 7162, Examples: @65837 [9.7KB] | @47971 [6.9KB] | @17139 [2.7KB] | @64283 [1.7KB] | @14801 [120 bytes])
+  · [system / FunctionTemplateInfo] --<numeric-element>-->: 6413
+  · [system / ArrayList] --<numeric-element>-->: 2070
+  · [system / AccessorInfo] --name-->: 1987
+  · [system / Map] --elements_kind_name-->: 1437
+
+· Window (prototype) / http://localhost:3000: 53.7KB (N: 4, Examples: @32151 [26.7KB] | @46239 [26.7KB] | @32171 [172 bytes] | @40547 [172 bytes])
+
+· Object { ariaQuerySelector, ariaQuerySelectorAll, customQuerySelectors, pierceQuerySelector, pierceQuerySelectorAll, ... }: 29.9KB (N: 1, Examples: @57465 [29.9KB])
+  · [system / Context / scope --he-->: 1
+  · [(Global handles)] --116 / DevTools console-->: 1
+
+· Window (internal cache) / http://localhost:3000: 20.5KB (N: 4, Examples: @32945 [10.2KB] | @46141 [10.2KB] | @32597 [72 bytes] | @46139 [72 bytes])
+
+· Document: 14.5KB (N: 2, Examples: @65097 [8.6KB] | @52945 [5.8KB])
+
+· Element: 11.6KB (N: 2, Examples: @68575 [7.6KB] | @49255 [3.9KB])
+
+· HTMLElement: 8.3KB (N: 2, Examples: @69421 [4.8KB] | @50117 [3.5KB])
+
+· system / Context / scope @66489: 7KB (N: 1, Examples: @71101 [7KB])
+  · [system / Context / scope --previous-->: 10
+  · [<closure>] --context-->: 1
+  · [W] --context-->: 1
+  · [fe] --context-->: 1
+
+· Object [JSGlobalObject]: 6.5KB (N: 1, Examples: @34149 [6.5KB])
+  · [Object [JSGlobalProxy]] --global_object-->: 1
+
+· Object { constructor, toDateString, toISOString, toString, toTimeString, ... }: 6.5KB (N: 3, Examples: @7393 [2.1KB] | @7533 [2.1KB] | @7721 [2.1KB])
+  · [(Global handles)] --3-->: 1
+  · [(Global handles)] --267-->: 1
+  · [(Global handles)] --81-->: 1
+  · [(Global handles)] --188-->: 1
+
+· Error: 6KB (N: 37, Examples: @67487 [296 bytes] | @33699 [160 bytes] | @33739 [160 bytes] | @33771 [160 bytes] | @33959 [160 bytes])
+
+· TypedArray: 5.8KB (N: 36, Examples: @36747 [328 bytes] | @44193 [328 bytes] | @55697 [328 bytes] | @35119 [148 bytes] | @35353 [148 bytes])
+
+· Math: 5.5KB (N: 3, Examples: @34799 [1.8KB] | @40873 [1.8KB] | @53461 [1.8KB])
+  · [Window [JSGlobalObject] / http://localhost:3000] --Math-->: 2
+  · [Object [JSGlobalObject]] --Math-->: 1
+
+· Object { buffer, byteLength, constructor, get buffer, get byteLength, ... }: 5.2KB (N: 3, Examples: @34561 [1.7KB] | @40467 [1.7KB] | @52629 [1.7KB])
+  · [system / NativeContext / http://localhost:3000] --typed_array_prototype-->: 2
+
+· console: 4.8KB (N: 3, Examples: @41139 [1.8KB] | @53467 [1.8KB] | @34785 [1.2KB])
+  · [system / PropertyArray] --<numeric-element>-->: 3
+  · [Object] --console-->: 3
+  · [Window [JSGlobalObject] / http://localhost:3000] --console-->: 2
+  · [Object [JSGlobalObject]] --console-->: 1
+
+· SVGElement: 4.5KB (N: 1, Examples: @70271 [4.5KB])
+
+· String: 4.2KB (N: 3, Examples: @7527 [1.4KB] | @7715 [1.4KB] | @7911 [1.4KB])
+  · [system / NativeContext / http://localhost:3000] --initial_string_prototype-->: 2
+  · [(Global handles)] --261-->: 1
+  · [(Global handles)] --75-->: 1
+  · [(Global handles)] --182-->: 1
+
+· DataView: 3.8KB (N: 3, Examples: @33357 [1.2KB] | @36887 [1.2KB] | @44549 [1.2KB])
+
+· Intl.Locale: 3.6KB (N: 3, Examples: @36321 [1.2KB] | @45499 [1.2KB] | @56855 [1.2KB])
+
+· Object { constructor, getColumnNumber, getEnclosingColumnNumber, getEnclosingLineNumber, getEvalOrigin, ... }: 3.3KB (N: 3, Examples: @37765 [1.1KB] | @46007 [1.1KB] | @57319 [1.1KB])
+
+· Object { <symbol Symbol.iterator>, constructor, get constructor, reduce, set constructor, ... }: 3.1KB (N: 3, Examples: @32999 [1KB] | @34297 [1KB] | @40201 [1KB])
+  · [system / NativeContext / http://localhost:3000] --initial_iterator_prototype-->: 2
+
+· Intl: 3.1KB (N: 3, Examples: @34789 [1KB] | @41257 [1KB] | @53475 [1KB])
+  · [Window [JSGlobalObject] / http://localhost:3000] --Intl-->: 2
+  · [Object [JSGlobalObject]] --Intl-->: 1
+
+· Node: 2.8KB (N: 2, Examples: @66017 [1.8KB] | @49249 [1KB])
+
+· Object { constructor }: 2.1KB (N: 18, Examples: @34075 [148 bytes] | @34089 [148 bytes] | @64303 [148 bytes] | @64391 [148 bytes] | @47045 [148 bytes])
+
+· Atomics: 2.1KB (N: 3, Examples: @34781 [712 bytes] | @41281 [712 bytes] | @53477 [712 bytes])
+  · [Window [JSGlobalObject] / http://localhost:3000] --Atomics-->: 2
+  · [Object [JSGlobalObject]] --Atomics-->: 1
+
+· Reflect: 1.8KB (N: 3, Examples: @34795 [616 bytes] | @40929 [616 bytes] | @53463 [616 bytes])
+  · [Window [JSGlobalObject] / http://localhost:3000] --Reflect-->: 2
+  · [Object [JSGlobalObject]] --Reflect-->: 1
+
+· Object { csi, loadTimes }: 1.7KB (N: 2, Examples: @34065 [896 bytes] | @41101 [884 bytes])
+  · [Window [JSGlobalObject] / http://localhost:3000] --chrome-->: 2
+
+· HTMLButtonElement (prototype) / http://localhost:3000: 1.7KB (N: 2, Examples: @69573 [1KB] | @50277 [652 bytes])
+
+· v: 1.6KB (N: 1, Examples: @71115 [1.6KB])
+  · [system / Context / scope --P-->: 1
+  · [Object] --customQuerySelectors-->: 1
+
+· Set: 1.6KB (N: 6, Examples: @34305 [404 bytes] | @40209 [404 bytes] | @50807 [404 bytes] | @71123 [176 bytes] | @71127 [156 bytes])
+  · [system / NativeContext / http://localhost:3000] --initial_set_prototype-->: 2
+  · [Window [JSGlobalObject] / http://localhost:3000] --openedDialogs-->: 1
+  · [system / Context / scope --openedDialogs-->: 1
+  · [system / Context / scope --re-->: 1
+
+· ArrayBuffer: 1.6KB (N: 3, Examples: @37609 [536 bytes] | @44305 [536 bytes] | @55809 [536 bytes])
+
+· Object { constructor, result, start, stop }: 1.4KB (N: 3, Examples: @71243 [476 bytes] | @71259 [476 bytes] | @71275 [476 bytes])
+
+· WebAssembly: 1.4KB (N: 3, Examples: @33645 [472 bytes] | @34539 [472 bytes] | @40445 [472 bytes])
+  · [Window [JSGlobalObject] / http://localhost:3000] --WebAssembly-->: 2
+  · [system / NativeContext / http://localhost:3000] --wasm_webassembly_object-->: 2
+  · [Object [JSGlobalObject]] --WebAssembly-->: 1
+
+· Object { <symbol Symbol.toStringTag>, adoptText, constructor, get adoptText, resolvedOptions, ... }: 1.3KB (N: 3, Examples: @36165 [448 bytes] | @45383 [448 bytes] | @56739 [448 bytes])
+
+· AsyncDisposableStack: 1.3KB (N: 3, Examples: @36037 [444 bytes] | @44157 [444 bytes] | @55661 [444 bytes])
+
+· DisposableStack: 1.3KB (N: 3, Examples: @37271 [444 bytes] | @45789 [444 bytes] | @57145 [444 bytes])

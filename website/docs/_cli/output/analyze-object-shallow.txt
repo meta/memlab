@@ -1,0 +1,33 @@
+$ memlab analyze object-shallow --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+
+All objects
+·Count: 381 (4.46% are duplicated)
+·Size: 998.4KB (0.06% are duplicated)
+
+Top duplicated objects in count
+ ·[7, 452 bytes]: "{"class":"Object","object":{}}"
+ ·[6, 96 bytes]: "{"class":"Object (internal cache) / http://localhost:3000","object":{}}"
+ ·[4, 64 bytes]: "{"class":"HTMLButtonElement","object":{}}"
+ ·[2, 32 bytes]: "{"class":"HTMLDocument","object":{"location":"REFERENCE_65103","get location":"REFERENCE_52307","..."
+ ·[2, 32 bytes]: "{"class":"HTMLButtonElement (internal cache) / http://localhost:3000","object":{}}"
+ ·[2, 32 bytes]: "{"class":"HTMLHtmlElement","object":{}}"
+
+Top duplicated objects in size:
+
+ ·[452 bytes, 7]: "{"class":"Object","object":{}}"
+    node examples: @34041, @34101, @34107, @35759, @40755, @41277, @44975
+
+ ·[96 bytes, 6]: "{"class":"Object (internal cache) / http://localhost:3000","object":{}}"
+    node examples: @46145, @46149, @46153, @50679, @50733, @50745
+
+ ·[64 bytes, 4]: "{"class":"HTMLButtonElement","object":{}}"
+    node examples: @50843, @80083, @71353, @71355
+
+ ·[32 bytes, 2]: "{"class":"HTMLDocument","object":{"location":"REFERENCE_65103","get location":"REFERENCE_52307","..."
+    node examples: @57463, @71087
+
+ ·[32 bytes, 2]: "{"class":"HTMLButtonElement (internal cache) / http://localhost:3000","object":{}}"
+    node examples: @65623, @50841
+
+ ·[32 bytes, 2]: "{"class":"HTMLHtmlElement","object":{}}"
+    node examples: @71377, @71379

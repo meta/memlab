@@ -16,6 +16,18 @@ memlab sliced-strings --snapshot <HEAP_SNAPSHOT_FILE>
 memlab sliced-strings --snapshot <HEAP_SNAPSHOT_FILE> --top 50 --output json
 ```
 
+## Example output
+
+```text
+$ memlab sliced-strings --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+  240 sliced strings point into 1 parent strings
+  0 B in 0 parents is kept alive only by slices; copying the slices would free it
+parent    size  slices  only slices hold it  text
+------  ------  ------  -------------------  ------------------------------------------------------------
+@47971  6.8 KB     240  no                   "Notification preference #000;Notification preference #00...
+```
+
 ## Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis

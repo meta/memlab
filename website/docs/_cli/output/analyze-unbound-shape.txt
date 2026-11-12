@@ -1,0 +1,2 @@
+$ memlab analyze unbound-shape --snapshot-dir /tmp/memlab-example/series/data/cur
+· string: 6506 (35.4KB) > 7162 (58.7KB) > 7162 (58.7KB) > 7402 (63.5KB) > 7402 (63.5KB) > 7642 (68.3KB) > 7642 (68.3KB) > 7882 (73.1KB) > 7882 (73.1KB): @71, @71, @71, @71, @71, @71, @71, @71, @71

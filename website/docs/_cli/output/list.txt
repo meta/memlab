@@ -1,0 +1,6 @@
+$ memlab list
+All available apps and interactions:
+
+default-app-for-scenario:
+
+test-spa: link-3

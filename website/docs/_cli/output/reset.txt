@@ -1,0 +1,1 @@
+$ memlab reset --work-dir /tmp/memlab-example/reset

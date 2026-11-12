@@ -1,0 +1,5 @@
+$ memlab analyze unbound-collection --snapshot-dir /tmp/memlab-example/series/data/cur
+Top growing objects in sizes:
+ (Use `memlab trace --node-id=@ID` to get trace)
+
+· Set [object](@47967):  1 > 2 > 2 > 3 > 3 > 4 > 4 > 5 > 5

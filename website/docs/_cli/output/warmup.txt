@@ -1,0 +1,1 @@
+$ memlab warmup --scenario /tmp/memlab-example/scenarios/leak.js

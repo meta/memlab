@@ -19,6 +19,18 @@ memlab measure --scenario /tmp/test-scenario.js
 memlab measure --scenario /tmp/test-scenario.js --work-dir /tmp/test-1/
 ```
 
+## Example output
+
+```text
+$ memlab measure --scenario /tmp/memlab-example/scenarios/leak.js --run-num 2 --work-dir /tmp/memlab-example/measure
+page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
+
+total time: 46s
+page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
+
+total time: 45.9s
+```
+
 ## Options
 
  * **`--headful`**: start the browser in headful mode, by default it is headless

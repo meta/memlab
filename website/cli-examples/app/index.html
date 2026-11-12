@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>memlab example app</title>
+  </head>
+  <body>
+    <button id="open-settings">Open settings</button>
+    <div id="dialog-root"></div>
+    <script>
+      // `?fixed` loads the version of the app without the leaks
+      const isFixed = new URLSearchParams(location.search).has('fixed');
+
+      // an app-wide event bus that outlives every dialog
+      const eventBus = {
+        listeners: [],
+        on(event, listener) {
+          this.listeners.push({event, listener});
+          return () => {
+            this.listeners = this.listeners.filter(
+              entry => entry.listener !== listener,
+            );
+          };
+        },
+      };
+      window.eventBus = eventBus;
+
+      // every dialog ever opened; nothing removes the closed ones
+      const openedDialogs = new Set();
+      window.openedDialogs = openedDialogs;
+
+      // recently opened dialogs, held weakly
+      const recentDialogs = [];
+      window.recentDialogs = recentDialogs;
+
+      // row labels are cut out of one long string
+      const settingNames = Array.from(
+        {length: 240},
+        (_, i) => `Notification preference #${String(i).padStart(3, '0')};`,
+      ).join('');
+      const labelLength = settingNames.length / 240;
+
+      class SettingsDialog {
+        constructor() {
+          this.container = document.createElement('div');
+          this.container.className = 'settings';
+          this.labels = [];
+          for (let i = 0; i < 240; i++) {
+            const label = settingNames.slice(
+              i * labelLength,
+              (i + 1) * labelLength - 1,
+            );
+            this.labels.push(label);
+            const row = document.createElement('div');
+            row.textContent = label;
+            this.container.appendChild(row);
+          }
+          const close = document.createElement('button');
+          close.id = 'close-settings';
+          close.textContent = 'Close';
+          close.addEventListener('click', () => this.close());
+          this.container.appendChild(close);
+          this.history = new Array(200000).fill(0);
+          const dialog = this;
+          this.unsubscribe = eventBus.on(
+            'theme',
+            function handleThemeChange(theme) {
+              dialog.container.dataset.theme = theme;
+            },
+          );
+          openedDialogs.add(this.container);
+          recentDialogs.push(new WeakRef(this));
+        }
+
+        open() {
+          document.getElementById('dialog-root').appendChild(this.container);
+        }
+
+        close() {
+          this.container.remove();
+          if (isFixed) {
+            this.unsubscribe();
+            openedDialogs.delete(this.container);
+          }
+        }
+      }
+
+      document.getElementById('open-settings').addEventListener('click', () => {
+        new SettingsDialog().open();
+      });
+    </script>
+  </body>
+</html>

@@ -16,6 +16,12 @@ memlab warmup --scenario <TEST_SCENARIO_FILE>
 memlab warmup --scenario /tmp/test-scenario.js
 ```
 
+## Example output
+
+```text
+$ memlab warmup --scenario /tmp/memlab-example/scenarios/leak.js
+```
+
 ## Options
 
  * **`--headful`**: start the browser in headful mode, by default it is headless

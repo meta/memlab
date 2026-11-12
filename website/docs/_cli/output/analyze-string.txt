@@ -1,0 +1,53 @@
+$ memlab analyze string --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
+
+All strings
+·Count: 5332 (4.09% are duplicated)
+·Size: 38.8KB (1.31% are duplicated)
+
+JS code string
+·Count: 1 (0% are duplicated)
+·Size: 0 byte (NaN% are duplicated)
+
+Top duplicated strings in count
+ ·[5, 0 byte]: "NaN"
+ ·[4, 0 byte]: "0"
+ ·[3, 0 byte]: "1"
+ ·[3, 0 byte]: "2"
+ ·[3, 0 byte]: "3"
+ ·[3, 0 byte]: "4"
+ ·[3, 0 byte]: "5"
+ ·[3, 0 byte]: "6"
+ ·[3, 0 byte]: "7"
+ ·[3, 0 byte]: "8"
+
+Top duplicated strings in size:
+
+ ·[160 bytes, 2]: "Objects of type internal cannot be created using the constructor."
+    node examples: @34051, @34115
+
+ ·[108 bytes, 3]: "WebAssembly.Suspending"
+    node examples: @50671, @50753, @50759
+
+ ·[64 bytes, 3]: "HTMLButtonElement"
+    node examples: @13159, @50139, @69443
+
+ ·[48 bytes, 2]: "WebAssembly"
+    node examples: @8087, @15801
+
+ ·[48 bytes, 3]: "HTMLElement"
+    node examples: @12217, @49265, @68585
+
+ ·[48 bytes, 3]: "EventTarget"
+    node examples: @14023, @50881, @51245
+
+ ·[40 bytes, 3]: "Document"
+    node examples: @13025, @51037, @51463
+
+ ·[36 bytes, 2]: "WebAssembly.Exception"
+    node examples: @1899, @8065
+
+ ·[36 bytes, 2]: "get [Symbol.toStringTag]"
+    node examples: @12273, @71175
+
+ ·[32 bytes, 2]: "WebAssembly.Module"
+    node examples: @1901, @8015
