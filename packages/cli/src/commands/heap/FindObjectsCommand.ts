@@ -52,6 +52,7 @@ function printResult(file: string, result: FindObjectsResult): void {
       o.detached ? 'yes' : '',
     ]),
     ['left', 'left', 'left', 'right', 'right', 'left'],
+    ['id', 'name', 'muted', 'size', 'size', 'flag'],
   ).forEach(line => info.topLevel(line));
   info.lowLevel(
     `  why one is kept alive: memlab trace --snapshot ${file} ` +

@@ -55,6 +55,7 @@ function printHistogram(
       formatPercent(row.selfSize, totalSelfSize),
     ]),
     ['left', 'left', 'right', 'right', 'right'],
+    ['name', 'muted', undefined, 'size'],
   );
   lines.forEach(line => info.topLevel(line));
 }

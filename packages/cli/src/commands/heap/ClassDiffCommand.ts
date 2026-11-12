@@ -136,7 +136,14 @@ function printReport(report: DiffReport, top: number): void {
     }
     return cells;
   });
-  renderTable(headers, rows, align).forEach(line => info.topLevel(line));
+  renderTable(headers, rows, align, [
+    'name',
+    'muted',
+    undefined,
+    'delta',
+    'size',
+    'delta',
+  ]).forEach(line => info.topLevel(line));
 }
 
 export default class ClassDiffCommand extends BaseCommand {

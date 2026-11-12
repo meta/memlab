@@ -9,6 +9,7 @@
  */
 
 import {config, OutputFormat} from '@memlab/core';
+import chalk from 'chalk';
 import {
   clipText,
   formatBytes,
@@ -82,6 +83,46 @@ test('renders an aligned table', () => {
     '------------------',
     'x',
   ]);
+});
+
+test('colors table columns without breaking the alignment', () => {
+  const headers = ['id', 'class', 'size', 'delta', 'detached'];
+  const rows = [
+    ['@12', 'Foo', '1.0 KB', '+2', 'yes'],
+    ['@345', 'LongerName', '-', '-3', 'no'],
+  ];
+  const align: Array<'left' | 'right'> = ['left', 'left', 'right', 'right'];
+  const level = chalk.level;
+  chalk.level = 0;
+  const plain = renderTable(headers, rows, align);
+  chalk.level = 1;
+  try {
+    const colored = renderTable(headers, rows, align, [
+      'id',
+      'name',
+      'size',
+      'delta',
+      'flag',
+    ]);
+    const colorCode = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+    const strip = (line: string) => line.replace(colorCode, '');
+    expect(colored.map(strip)).toEqual(plain);
+    const [header, rule, first, second] = colored;
+    expect(header).toContain(chalk.bold('class'));
+    expect(rule).toBe(chalk.grey(strip(rule)));
+    expect(first).toContain(chalk.grey('@12'));
+    expect(first).toContain(chalk.green('Foo'));
+    expect(first).toContain(chalk.blue('1.0 KB'));
+    expect(first).toContain(chalk.red('+2'));
+    expect(first).toContain(chalk.yellow('yes'));
+    expect(second).toContain(chalk.grey('-'));
+    expect(second).toContain(chalk.green('-3'));
+    expect(second).toContain(chalk.grey('no'));
+    // padding stays outside the colors, so rows end without spaces
+    expect(colored.every(line => !/ $/.test(strip(line)))).toBe(true);
+  } finally {
+    chalk.level = level;
+  }
 });
 
 test('reports whether JSON output was requested', () => {

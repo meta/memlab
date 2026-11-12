@@ -56,6 +56,7 @@ function printReport(
       clipText(JSON.stringify(p.preview), 60),
     ]),
     ['left', 'right', 'right', 'left', 'left'],
+    ['id', 'size', undefined, 'flag'],
   ).forEach(line => info.topLevel(line));
 }
 

@@ -111,6 +111,7 @@ function printReport(
     ['context', 'realm', 'detached', 'owned', 'share', 'objects'],
     rows,
     ['left', 'left', 'left', 'right', 'right', 'right'],
+    ['id', 'name', 'flag', 'size'],
   ).forEach(line => info.topLevel(line));
 
   for (const [id, classes] of detachedClasses) {
@@ -125,6 +126,7 @@ function printReport(
         formatBytes(r.selfSize),
       ]),
       ['left', 'left', 'right', 'right'],
+      ['name', 'muted', undefined, 'size'],
     ).forEach(line => info.topLevel(line));
   }
   const [firstDetached] = detachedClasses.keys();

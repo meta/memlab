@@ -50,6 +50,7 @@ function printCensus(file: string, census: ScriptCensus, top: number): void {
         g.duplicateBytes > 0 ? formatBytes(g.duplicateBytes) : '-',
       ]),
     ['left', 'right', 'right', 'right', 'right'],
+    ['name', undefined, undefined, 'size', 'size'],
   ).forEach(line => info.topLevel(line));
   const duplicated = census.groups.filter(g => g.duplicateBytes > 0).length;
   if (duplicated > 0) {

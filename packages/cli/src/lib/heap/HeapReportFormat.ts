@@ -9,6 +9,7 @@
  */
 
 import {config, info, OutputFormat} from '@memlab/core';
+import chalk from 'chalk';
 
 const KB = 1024;
 const MB = KB * 1024;
@@ -58,31 +59,80 @@ export function clipText(text: string, max = 80): string {
 export type ColumnAlign = 'left' | 'right';
 
 /**
- * Render rows as a plain-text table with a header and a dashed rule. Columns
+ * How a column is colored in a terminal, matching the colors of retainer
+ * traces: `name` for classes and objects, `id` for `@id`s, `size` for byte
+ * sizes, `delta` for signed changes (growth in red, shrinking in green),
+ * `flag` for yes/no columns (`yes` in yellow), and `muted` for secondary
+ * details. Only the 16 basic colors are used, so every
+ * terminal that shows colors can show them.
+ */
+export type ColumnStyle = 'name' | 'id' | 'size' | 'delta' | 'flag' | 'muted';
+
+function styleCell(text: string, style: ColumnStyle | undefined): string {
+  if (text === '-') {
+    return chalk.grey(text);
+  }
+  switch (style) {
+    case 'name':
+      return chalk.green(text);
+    case 'id':
+    case 'muted':
+      return chalk.grey(text);
+    case 'size':
+      return chalk.blue(text);
+    case 'flag':
+      return text === 'yes' ? chalk.yellow(text) : chalk.grey(text);
+    case 'delta':
+      if (text.startsWith('+')) {
+        return chalk.red(text);
+      }
+      return text.startsWith('-') ? chalk.green(text) : text;
+    default:
+      return text;
+  }
+}
+
+// colors the text of a padded cell, leaving the padding uncolored
+function colorPadded(cell: string, color: (text: string) => string): string {
+  return cell.replace(/\S(.*\S)?/, color);
+}
+
+/**
+ * Render rows as a text table with a header and a dashed rule. Columns
  * listed as `right` are right-aligned, which is what numbers need to be
- * compared by eye.
+ * compared by eye. `styles` colors each column (see `ColumnStyle`); chalk
+ * leaves the text plain when the output is not a terminal that shows colors.
  */
 export function renderTable(
   headers: string[],
   rows: string[][],
   align: ColumnAlign[] = [],
+  styles: Array<ColumnStyle | undefined> = [],
 ): string[] {
   const widths = headers.map((header, col) =>
     Math.max(header.length, ...rows.map(row => (row[col] ?? '').length)),
   );
-  const renderRow = (row: string[]): string =>
+  const renderRow = (
+    row: string[],
+    color: (text: string, col: number) => string,
+  ): string =>
     row
       .map((cell, col) =>
-        align[col] === 'right'
-          ? cell.padStart(widths[col])
-          : cell.padEnd(widths[col]),
+        colorPadded(
+          align[col] === 'right'
+            ? cell.padStart(widths[col])
+            : cell.padEnd(widths[col]),
+          text => color(text, col),
+        ),
       )
       .join('  ')
       .trimEnd();
   return [
-    renderRow(headers),
-    widths.map(w => '-'.repeat(w)).join('  '),
-    ...rows.map(renderRow),
+    renderRow(headers, text => chalk.bold(text)),
+    chalk.grey(widths.map(w => '-'.repeat(w)).join('  ')),
+    ...rows.map(row =>
+      renderRow(row, (text, col) => styleCell(text, styles[col])),
+    ),
   ];
 }
 

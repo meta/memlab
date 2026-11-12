@@ -108,6 +108,7 @@ function printMany(reports: HeaderReport[], heapLimitMB: number): void {
     ['snapshot', 'size', 'nodes', 'edges', 'alloc stacks', 'heap needed'],
     rows,
     ['left', 'right', 'right', 'right', 'left', 'right'],
+    [undefined, 'size', undefined, undefined, 'flag', 'size'],
   );
   lines.forEach(line => info.topLevel(line));
   info.lowLevel(

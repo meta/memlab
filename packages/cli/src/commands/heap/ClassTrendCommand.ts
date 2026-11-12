@@ -80,6 +80,7 @@ function printTrend(files: string[], rows: ClassTrendRow[], top: number): void {
         formatSignedBytes(r.selfSizeDelta),
       ]),
     ['left', 'left', 'left', 'left', 'right', 'right'],
+    ['name', 'muted', undefined, undefined, 'delta', 'delta'],
   ).forEach(line => info.topLevel(line));
 }
 

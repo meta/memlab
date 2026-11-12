@@ -10,6 +10,12 @@
  * @oncall memory_lab
  */
 
+// https://no-color.org: chalk turns colors off for FORCE_COLOR=0, so map
+// NO_COLOR to it before any package loads chalk
+if (process.env.NO_COLOR && process.env.FORCE_COLOR == null) {
+  process.env.FORCE_COLOR = '0';
+}
+
 var path = require('path');
 var core = require('@memlab/core');
 var cli = require("@memlab/cli");

@@ -40,6 +40,7 @@ function printBuckets(title: string, buckets: DomBucket[], top: number): void {
         formatBytes(b.selfSize),
       ]),
     ['left', 'right', 'right'],
+    ['name', undefined, 'size'],
   ).forEach(line => info.topLevel(line));
 }
 

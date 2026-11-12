@@ -50,6 +50,7 @@ function printCensus(file: string, census: WeakRefCensus, top: number): void {
         h.exampleId > 0 ? `@${h.exampleId}` : '-',
       ]),
     ['left', 'right', 'right', 'right', 'left'],
+    ['name', undefined, undefined, undefined, 'id'],
   ).forEach(line => info.topLevel(line));
   for (const h of census.holders.filter(holder => holder.suspect)) {
     info.warning(

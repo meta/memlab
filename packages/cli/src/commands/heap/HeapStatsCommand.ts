@@ -47,11 +47,12 @@ function printStats(file: string, stats: HeapStats): void {
   if (stats.extraNativeBytes > 0) {
     statistics.push(row('  outside any node', stats.extraNativeBytes));
   }
-  renderTable(['statistics', 'size', 'share'], statistics, [
-    'left',
-    'right',
-    'right',
-  ]).forEach(line => info.topLevel(line));
+  renderTable(
+    ['statistics', 'size', 'share'],
+    statistics,
+    ['left', 'right', 'right'],
+    [undefined, 'size'],
+  ).forEach(line => info.topLevel(line));
 
   info.topLevel('');
   const nodesTotal = total - stats.extraNativeBytes;
@@ -68,6 +69,7 @@ function printStats(file: string, stats: HeapStats): void {
       share('allocated by the program', composition.other),
     ],
     ['left', 'right', 'right'],
+    [undefined, 'size'],
   ).forEach(line => info.topLevel(line));
   const loaded = composition.scriptSource + composition.compiledCode;
   if (nodesTotal > 0 && loaded / nodesTotal > 0.5) {
