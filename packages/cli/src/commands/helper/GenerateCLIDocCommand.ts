@@ -30,6 +30,7 @@ type SidebarItem = {
 export default class GenerateCLIDocCommand extends BaseCommand {
   private modules: Map<string, BaseCommand> = new Map();
   private universalOptions: BaseOption[] = universalOptions;
+  private examplesDir = '';
 
   getCommandName(): string {
     return 'gen-cli-doc';
@@ -50,13 +51,16 @@ export default class GenerateCLIDocCommand extends BaseCommand {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async run(options: CLIOptions): Promise<void> {
     const docsDir = fileManager.getDocDir();
-    const cliDocsDir = path.join(docsDir, 'cli');
-    this.generateDocs(cliDocsDir);
+    this.generateDocs(path.join(docsDir, 'cli'), path.join(docsDir, '_cli'));
   }
 
   // writes an index page, one page per top-level command, and the sidebar
-  // items listing those pages (required by website/sidebars.js)
-  generateDocs(cliDocsDir: string): void {
+  // items listing those pages (required by website/sidebars.js); a command
+  // page also shows `<examplesDir>/output/<id>.txt` as its example output and
+  // `<examplesDir>/<id>.md` as the guide to that output, where `<id>` is the
+  // full command with dashes (e.g. `analyze-detached-DOM`)
+  generateDocs(cliDocsDir: string, examplesDir: string): void {
+    this.examplesDir = examplesDir;
     fs.removeSync(cliDocsDir);
     fs.mkdirSync(cliDocsDir, {recursive: true});
 
@@ -201,6 +205,17 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       lines.push('');
     }
 
+    const exampleId = name.replace(/ /g, '-');
+    const output = this.readExample(path.join('output', `${exampleId}.txt`));
+    if (output != null) {
+      lines.push(`${headingLevel} Example output`, '');
+      lines.push(this.getCodeBlock(output, 'text'), '');
+    }
+    const guide = this.readExample(`${exampleId}.md`);
+    if (guide != null) {
+      lines.push(`${headingLevel} How to read the output`, '', guide, '');
+    }
+
     lines.push(`${headingLevel} Options`, '');
     const options = this.getCommandOptions(command);
     if (options.length > 0) {
@@ -251,6 +266,14 @@ export default class GenerateCLIDocCommand extends BaseCommand {
 
   private getCodeBlock(code: string, codeType = 'bash'): string {
     return '```' + codeType + '\n' + code.replace(/\n+$/, '') + '\n```';
+  }
+
+  private readExample(file: string): string | null {
+    const filePath = path.join(this.examplesDir, file);
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    return fs.readFileSync(filePath, 'utf8').trim();
   }
 
   private writeFile(dir: string, fileName: string, content: string): void {

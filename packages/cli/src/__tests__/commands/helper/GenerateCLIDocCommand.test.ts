@@ -86,9 +86,23 @@ beforeEach(() => {
   ]) {
     modules.set(command.getCommandName(), command);
   }
+  const examplesDir = path.join(docDir, '_cli');
+  fs.mkdirSync(path.join(examplesDir, 'output'), {recursive: true});
+  fs.writeFileSync(
+    path.join(examplesDir, 'output', 'parent.txt'),
+    '$ memlab parent --snapshot s.heapsnapshot\nfound 1 object\n',
+  );
+  fs.writeFileSync(
+    path.join(examplesDir, 'parent.md'),
+    'Each row is a class.\n',
+  );
+  fs.writeFileSync(
+    path.join(examplesDir, 'output', 'parent-sub.txt'),
+    '$ memlab parent sub\n',
+  );
   const generator = new GenerateCLIDocCommand();
   generator.setModulesMap(modules);
-  generator.generateDocs(path.join(docDir, 'cli'));
+  generator.generateDocs(path.join(docDir, 'cli'), examplesDir);
 });
 
 afterEach(() => {
@@ -136,4 +150,22 @@ test('a command page lists its own options and its subcommands', () => {
   expect(page).toContain('./CLI-commands.md#universal-options');
   expect(page).toContain('## memlab parent sub\n\nRun the sub analysis');
   expect(page).toContain('### Options');
+});
+
+test('a command page shows its example output and how to read it', () => {
+  const page = read('parent.md');
+  expect(page).toContain(
+    '## Example output\n\n```text\n' +
+      '$ memlab parent --snapshot s.heapsnapshot\nfound 1 object\n```',
+  );
+  expect(page).toContain('## How to read the output\n\nEach row is a class.');
+  // subcommands look up `<parent>-<sub>` one heading level deeper
+  expect(page).toContain(
+    '### Example output\n\n```text\n$ memlab parent sub\n```',
+  );
+  // sections appear only when their file exists
+  expect(read('misc.md')).not.toContain('Example output');
+  expect(page.indexOf('## How to read the output')).toBeLessThan(
+    page.indexOf('## Options'),
+  );
 });
