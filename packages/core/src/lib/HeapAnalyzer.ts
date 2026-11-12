@@ -158,6 +158,10 @@ class MemoryAnalyst {
     info.midLevel(
       `MemLab found ${result.treatmentOnlyClusters.length} new leak(s) in the treatment group`,
     );
+    // the leaks are reported with the steps of the first treatment run
+    config.snapshotSequenceFile = fileManager.getSnapshotSequenceMetaFile({
+      workDir: options.treatmentWorkDirs[0],
+    });
     await this.serializeClusterUpdate(result.treatmentOnlyClusters);
 
     // serialize JSON file with detailed leak trace information
