@@ -23,6 +23,10 @@ $ memlab version
  @memlab/api@2.0.7
 ```
 
+## How to read the output
+
+`memlab version` prints the version of each memlab package that the CLI loads. When reporting a problem, include this output.
+
 ## Options
 
 The [universal options](./CLI-commands.md#universal-options) (`--help`, `--verbose`, ...) work with this command too.

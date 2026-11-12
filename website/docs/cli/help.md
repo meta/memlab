@@ -85,6 +85,10 @@ $ memlab help find-leaks
                             --silent, -s mute all terminal output
 ```
 
+## How to read the output
+
+`memlab help <command>` prints the full description of a command and all its options, the same text as on that command's page. `memlab help` without a command lists all commands.
+
 ## Options
 
 The [universal options](./CLI-commands.md#universal-options) (`--help`, `--verbose`, ...) work with this command too.

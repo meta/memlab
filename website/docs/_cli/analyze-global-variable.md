@@ -1,0 +1,3 @@
+`memlab analyze global-variable` lists the properties of the global objects (`window` in a browser), sorted by the memory they retain. memlab leaves out the standard `window` properties it knows about, but engine and browser internals still fill the top of the list.
+
+Each line is `--property--> @id type name: N edges, retained size, refs: [...]`. Look for names that belong to your app: here `eventBus` retains 672 bytes, and following it with [`memlab analyze object`](#memlab-analyze-object) or [`memlab trace`](./trace.md) leads to the dialog that its listener keeps alive. `2137 more references...` counts the global properties that were not printed.

@@ -1,0 +1,1 @@
+`memlab warmup` opens the scenario's page in a few browser tabs, with the browser cache off, so that the web server is warmed up before measuring. It prints nothing when it succeeds. It is useful for a page whose first loads are slow, for example on a development server that compiles code on demand.

@@ -16,6 +16,10 @@ memlab reset
 $ memlab reset --work-dir /tmp/memlab-example/reset
 ```
 
+## How to read the output
+
+`memlab reset` deletes the snapshots and results in the work directory and creates it again empty. It prints nothing when it succeeds.
+
 ## Options
 
  * **`--work-dir`**: set the working directory of the current run

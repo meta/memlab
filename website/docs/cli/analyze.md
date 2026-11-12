@@ -81,6 +81,10 @@ $ memlab analyze
    Options: --snapshot --output
 ```
 
+## How to read the output
+
+Without a plugin name, `memlab analyze` lists the available analysis plugins and their options. Each plugin has its own section on this page, with an example of its output.
+
 ## Options
 
  * **`--analysis-plugin`**: specify the external heap analysis plugin file (must be a vanilla JS file ended with `Analysis.js` suffix)
@@ -107,6 +111,12 @@ Top growing objects in sizes:
 · Set [object](@47967):  1 > 2 > 2 > 3 > 3 > 4 > 4 > 5 > 5
 ```
 
+### How to read the output
+
+`memlab analyze unbound-collection` compares a series of snapshots of the same page and lists the collections (`Map`, `Set`, and arrays) whose number of entries keeps growing.
+
+Each line is the collection and its id, then its number of entries in each snapshot in order. Here the scenario opens and closes the settings dialog 4 times, taking a snapshot after each step. The `openedDialogs` `Set` gains one entry each time a dialog opens, and loses none when it closes. A collection that grows with every repetition of an action, and never shrinks, is a likely leak.
+
 ### Options
 
  * **`--snapshot-dir`**: set directory path containing all heap snapshots under analysis
@@ -131,6 +141,14 @@ Collections holding stale objects:
 ·  (@50805) 60 bytes (1 out of 2 elements are stale):
   @65915
 ```
+
+### How to read the output
+
+`memlab analyze collections-with-stale` finds collections (arrays, `Map`s, `Set`s, and objects) that hold stale objects. Stale objects are detached DOM elements and unmounted React Fiber nodes, which the app no longer uses.
+
+Each entry is the collection's id and retained size, how many of its elements are stale, and the ids of the stale elements. For a `Map` or `Set`, the collection is its internal table.
+
+In this example, the collection is the internal table of the global `openedDialogs` `Set`, and the stale element is the `<div class="settings">` of the closed dialog. The app adds each dialog to the `Set` but never deletes it when the dialog closes.
 
 ### Options
 
@@ -199,6 +217,14 @@ $ memlab analyze detached-DOM --snapshot /tmp/memlab-example/leak/data/cur/s3.he
 · @71973 native Detached <div>: 9 edges, 184 bytes, refs: []
 · @71975 native Detached <div>: 9 edges, 184 bytes, refs: []
 ```
+
+### How to read the output
+
+`memlab analyze detached-DOM` lists the DOM elements that were removed from the document but are still in memory, sorted by retained size. Elements retained by another element in the list are left out, so each subtree appears once.
+
+Each line is `@id type name: N edges, retained size, refs: [...]`. `edges` is the number of references the object holds, and `refs` lists the names of the references that point to it (empty when they are all array indexes or DOM children).
+
+In this example, the closed dialog's rows (`Detached <div>`) are still in memory, along with the browser's data for them (`blink::NodeRareData`, `blink::EventTargetData`). To find out what keeps them alive, pass an `@id` to [`memlab trace`](./trace.md).
 
 ### Options
 
@@ -272,6 +298,12 @@ $ memlab analyze global-variable --snapshot /tmp/memlab-example/leak/data/cur/s3
 2137 more references...
 ```
 
+### How to read the output
+
+`memlab analyze global-variable` lists the properties of the global objects (`window` in a browser), sorted by the memory they retain. memlab leaves out the standard `window` properties it knows about, but engine and browser internals still fill the top of the list.
+
+Each line is `--property--> @id type name: N edges, retained size, refs: [...]`. Look for names that belong to your app: here `eventBus` retains 672 bytes, and following it with [`memlab analyze object`](#memlab-analyze-object) or [`memlab trace`](./trace.md) leads to the dialog that its listener keeps alive. `2137 more references...` counts the global properties that were not printed.
+
 ### Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis
@@ -312,6 +344,16 @@ REFERRERS:
 ·  @71399 system / Context / scope @65777: 5 edges, 806.6KB, refs: [listener] --this-->
 ·  @65917 WeakRef: 3 edges, 16 bytes, refs: [] --target-->
 ```
+
+### How to read the output
+
+`memlab analyze object` prints one object, its references, and its referrers.
+
+- `shallow size` and `retained size` are in bytes. The retained size is the memory freed if nothing referenced the object. `dominator node` is the closest object that every path from a GC root to this object goes through.
+- `REFERENCES` are the objects this one points to, with the property name on the arrow.
+- `REFERRERS` are the objects that point to this one, with the property name on the arrow after them.
+
+In this example, the `SettingsDialog` retains 806.6KB, almost all of it in its 800KB `history` array. Its referrers show what keeps it alive: a closure scope that holds it as `dialog` and `this` (the scope of the event bus listener) and a `WeakRef`, which does not keep it alive.
 
 ### Options
 
@@ -354,6 +396,12 @@ $ memlab analyze object-fanout --snapshot /tmp/memlab-example/leak/data/cur/s3.h
 · @71393 Array: 243 edges, 6.2KB, refs: [labels]
 · @34149 Object [JSGlobalObject]: 71 edges, 6.5KB, refs: [prototype, global_object, security_token]
 ```
+
+### How to read the output
+
+`memlab analyze object-fanout` lists the objects with the most outgoing references. A collection with a huge number of entries is often a cache or registry that never removes anything.
+
+Each line is `@id type name: N edges, retained size, refs: [...]`, where `refs` lists the names of the references that point to the object. The top entries in a browser are usually engine and DOM metadata (`DescriptorArray`, `Window`, `Document`). Here the `Array` referenced as `labels`, with 243 edges, is the dialog's list of row labels.
 
 ### Options
 
@@ -407,6 +455,16 @@ Top duplicated objects in size:
  ·[32 bytes, 2]: "{"class":"HTMLHtmlElement","object":{}}"
     node examples: @71377, @71379
 ```
+
+### How to read the output
+
+`memlab analyze object-shallow` finds objects with the same class and the same top-level keys and values, without comparing nested objects. Duplicated objects are candidates for sharing one instance.
+
+- `All objects` gives the number and size of the objects compared, and how much of it is duplicated.
+- `Top duplicated objects in count` shows `[number of copies, total size]` and the object, serialized. References to other objects appear as `REFERENCE_<id>`.
+- `Top duplicated objects in size` shows `[total size, number of copies]` and some `node examples` to look at with [`memlab analyze object`](#memlab-analyze-object).
+
+This small app has almost no duplication (0.06% of the size). The duplicated objects are empty objects and DOM wrappers.
 
 ### Options
 
@@ -570,6 +628,16 @@ Object shapes with top retained sizes:
 · DisposableStack: 1.3KB (N: 3, Examples: @37271 [444 bytes] | @45789 [444 bytes] | @57145 [444 bytes])
 ```
 
+### How to read the output
+
+`memlab analyze shape` groups the objects by shape (their class and property names) and lists the shapes that retain the most memory in total.
+
+- `Heap overall statistics` gives the memory held by React Fiber nodes and by `Error` objects.
+- Each shape line gives its total retained size, the number of objects (`N`), and examples with their own retained size.
+- The lines under a shape show its common referrers, as `[referrer] --reference-->: number of objects`.
+
+In this example, the `SettingsDialog` shape and the closure scope (`system / Context`) that holds it both retain 806.6KB. That is the same memory, counted once per shape. The scope is referenced by `handleThemeChange`, the event bus listener that keeps the dialog alive.
+
 ### Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis
@@ -623,6 +691,12 @@ $ memlab analyze object-size --snapshot /tmp/memlab-example/leak/data/cur/s3.hea
 · @70999 object shape system / DescriptorArray: 283 edges, 1.7KB, refs: [descriptors]
 ```
 
+### How to read the output
+
+`memlab analyze object-size` lists the objects with the largest retained size. Objects retained by a larger object in the list are left out, so each line is a separate chunk of memory.
+
+Each line is `@id type name: N edges, retained size, refs: [...]`, where `refs` lists the names of the references that point to the object. Here the top entry is an 800KB `Array` referenced as `history`: the history array of a settings dialog that was closed but is still in memory.
+
 ### Options
 
  * **`--snapshot`**: set file path of the heap snapshot under analysis
@@ -647,6 +721,12 @@ Top growing objects in sizes:
 
 · Window [JSGlobalObject] / http://localhost:3000 [object](@40065):  45.9KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB > 49.4KB
 ```
+
+### How to read the output
+
+`memlab analyze unbound-object` compares a series of snapshots of the same page and lists the objects whose retained size keeps growing.
+
+Each line is the object and its id, then its retained size in each snapshot in order. In this example, the global object grows once, between the first and the second snapshot, and then stays flat. That is one-time setup, not a leak. A leak keeps growing with every repetition of the same action.
 
 ### Options
 
@@ -682,6 +762,12 @@ memlab analyze unbound-shape
 $ memlab analyze unbound-shape --snapshot-dir /tmp/memlab-example/series/data/cur
 · string: 6506 (35.4KB) > 7162 (58.7KB) > 7162 (58.7KB) > 7402 (63.5KB) > 7402 (63.5KB) > 7642 (68.3KB) > 7642 (68.3KB) > 7882 (73.1KB) > 7882 (73.1KB): @71, @71, @71, @71, @71, @71, @71, @71, @71
 ```
+
+### How to read the output
+
+`memlab analyze unbound-shape` compares a series of snapshots of the same page and lists the shapes (class and property names) whose total retained size keeps growing.
+
+Each line is the shape, its number of objects and total retained size in each snapshot in order, and one example object id per snapshot. In this example, after the first time the dialog opens, strings grow by 240 every time it opens again: the dialog's row labels, which are still in memory after it closes.
 
 ### Options
 
@@ -754,6 +840,16 @@ Top duplicated strings in size:
  ·[32 bytes, 2]: "WebAssembly.Module"
     node examples: @1901, @8015
 ```
+
+### How to read the output
+
+`memlab analyze string` finds strings that are stored more than once. Duplicated strings can be shared, for example by reusing one constant, to save memory.
+
+- `All strings` gives the number and size of the strings, and how much of it is duplicated.
+- `Top duplicated strings in count` shows `[number of copies, total size]` and the string.
+- `Top duplicated strings in size` shows `[total size, number of copies]` and some `node examples` to look at with [`memlab trace`](./trace.md).
+
+This small app has little duplication (1.31% of the string memory), mostly the names of built-in classes that each realm stores.
 
 ### Options
 
