@@ -11,6 +11,7 @@ import type {Nullable, IHeapEdge, IHeapNode} from '@memlab/core';
 
 import chalk from 'chalk';
 import {utils} from '@memlab/core';
+import os from 'os';
 
 const lessUsefulEdgeTypeForDebugging = new Set([
   'internal',
@@ -239,4 +240,24 @@ export function debounce(timeInMs: number): DebounceFunction {
       id = null;
     }, timeInMs);
   };
+}
+
+/**
+ * The terminal type to give blessed, or `undefined` to let it read `TERM`.
+ * Without `TERM`, blessed describes a Windows console as `windows-ansi`, which
+ * has 8 colors and no scroll regions: grey becomes black, so the borders of
+ * unfocused panes, the selected row, and grey text disappear on a black
+ * background. Consoles on Windows 10 (build 10586) and later understand xterm
+ * escape sequences, so they are described as `xterm-256color` instead.
+ */
+export function getTerminalType(
+  platform: string = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  release: string = os.release(),
+): string | undefined {
+  if (platform !== 'win32' || env.TERM) {
+    return undefined;
+  }
+  const [major, , build] = release.split('.').map(Number);
+  return major >= 10 && build >= 10586 ? 'xterm-256color' : undefined;
 }

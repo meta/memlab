@@ -10,7 +10,12 @@
 import type {Widgets} from 'blessed';
 import type {ListCallbacks, ListItemSelectInfo} from './ListComponent';
 import type {IHeapSnapshot, Nullable, Optional} from '@memlab/core';
-import {ComponentDataItem, getHeapObjectAt, debounce} from './HeapViewUtils';
+import {
+  ComponentDataItem,
+  getHeapObjectAt,
+  getTerminalType,
+  debounce,
+} from './HeapViewUtils';
 
 import blessed from 'blessed';
 import ListComponent from './ListComponent';
@@ -118,6 +123,7 @@ export default class CliScreen {
     return blessed.screen({
       smartCSR: true,
       title: title,
+      terminal: getTerminalType(),
     });
   }
 
