@@ -158,6 +158,9 @@ class MemoryAnalyst {
     info.midLevel(
       `MemLab found ${result.treatmentOnlyClusters.length} new leak(s) in the treatment group`,
     );
+    if (firstTreatmentSnapshotDiff == null) {
+      throw utils.haltOrThrow('treatment snapshot diff result not found');
+    }
     // the leaks are reported with the steps of the first treatment run
     config.snapshotSequenceFile = fileManager.getSnapshotSequenceMetaFile({
       workDir: options.treatmentWorkDirs[0],
@@ -166,9 +169,6 @@ class MemoryAnalyst {
 
     // serialize JSON file with detailed leak trace information
     const treatmentOnlyPaths = result.treatmentOnlyClusters.map(c => c.path);
-    if (firstTreatmentSnapshotDiff == null) {
-      throw utils.haltOrThrow('treatemnt snapshot diff result not found');
-    }
     return traceDetailsLogger.logTraces(
       firstTreatmentSnapshotDiff.leakedHeapNodeIdSet,
       firstTreatmentSnapshotDiff.snapshot,
