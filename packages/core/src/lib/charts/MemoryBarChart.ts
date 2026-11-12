@@ -39,7 +39,7 @@ class MemoryBarChart {
       return;
     }
     // normalize plot data
-    const minY = 1;
+    const minY = 0;
     const maxY = plotData.reduce((m, v) => Math.max(m, v[1]), 0) * 1.15;
     const yFractions = 1;
     const yLabelWidth =
