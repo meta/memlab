@@ -204,8 +204,13 @@ function createContext(env) {
         env,
         encoding: 'utf8',
       });
-      const json = JSON.parse(out.slice(out.indexOf('{')));
-      const id = json.objects?.[0]?.id;
+      const start = out.indexOf('{');
+      if (start < 0) {
+        throw new Error(
+          `find-objects printed no JSON for ${className} in the ${name} run:\n${out}`,
+        );
+      }
+      const id = JSON.parse(out.slice(start)).objects?.[0]?.id;
       if (id == null) {
         throw new Error(`no ${className} object in the ${name} run`);
       }
