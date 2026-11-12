@@ -1,24 +1,24 @@
 $ memlab class-diff --baseline /tmp/memlab-example/leak/data/cur/s1.heapsnapshot --target /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --top 15
 Baseline  /tmp/memlab-example/leak/data/cur/s1.heapsnapshot
 Target    /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  objects    32,184 -> 36,422 (+4,238)
-  self size  1.0 MB -> 2.0 MB (+1.0 MB)
-  same JS heap: "new" counts objects allocated after the baseline that are still alive
+[90m  objects    32,184 -> 36,422 (+4,238)[0m
+[90m  self size  1.0 MB -> 2.0 MB (+1.0 MB)[0m
+[90m  same JS heap: "new" counts objects allocated after the baseline that are still alive[0m
 Top 15 of 691 changed classes by self-size growth
-class                                                                             type           count  delta  self size      delta    new
---------------------------------------------------------------------------------  -------------  -----  -----  ---------  ---------  -----
-(object elements)                                                                 array              6     +5   782.8 KB  +782.8 KB      5
-system / FunctionTemplateInfo                                                     native         3,282   +913   205.0 KB   +57.1 KB      -
-blink::HeapHashTableBacking<blink::HashTable<blink::ShapeCacheKey, blink::Key...  native             2     +1    36.6 KB   +36.0 KB      -
-Detached <div>                                                                    native           240   +240    24.4 KB   +24.4 KB      -
-Detached Text                                                                     native           240   +240    18.8 KB   +18.8 KB      -
-(string)                                                                          string         6,919   +413    49.6 KB   +17.8 KB  2,792
-system / ArrayList                                                                native            60    +23    44.1 KB   +10.2 KB      -
-system / DescriptorArray                                                          object shape     755    +40    90.2 KB   +10.1 KB     41
-(object properties)                                                               array             59    +24    94.9 KB    +9.0 KB     32
-system / AccessorPair                                                             native         2,128   +646    24.9 KB    +7.6 KB      -
-system / Map                                                                      object shape   1,261   +114    50.4 KB    +4.8 KB    122
-(sliced string)                                                                   sliced string    240   +240     4.7 KB    +4.7 KB    240
-blink::HeapHashTableBacking<blink::HashTable<cppgc::internal::BasicMember<bli...  native             2     +2     4.1 KB    +4.1 KB      -
-blink::HeapHashTableBacking<blink::HashTable<cppgc::internal::BasicMember<con...  native             1      0     4.0 KB    +3.9 KB      -
-system / BytecodeArray                                                            code              17    +17     1.8 KB    +1.8 KB     17
+[1mclass[0m                                                                             [1mtype[0m           [1mcount[0m  [1mdelta[0m  [1mself size[0m      [1mdelta[0m    [1mnew[0m
+[90m--------------------------------------------------------------------------------  -------------  -----  -----  ---------  ---------  -----[0m
+[32m(object elements)[0m                                                                 [90marray[0m              6     [31m+5[0m   [34m782.8 KB[0m  [31m+782.8 KB[0m      5
+[32msystem / FunctionTemplateInfo[0m                                                     [90mnative[0m         3,282   [31m+913[0m   [34m205.0 KB[0m   [31m+57.1 KB[0m      [90m-[0m
+[32mblink::HeapHashTableBacking<blink::HashTable<blink::ShapeCacheKey, blink::Key...[0m  [90mnative[0m             2     [31m+1[0m    [34m36.6 KB[0m   [31m+36.0 KB[0m      [90m-[0m
+[32mDetached <div>[0m                                                                    [90mnative[0m           240   [31m+240[0m    [34m24.4 KB[0m   [31m+24.4 KB[0m      [90m-[0m
+[32mDetached Text[0m                                                                     [90mnative[0m           240   [31m+240[0m    [34m18.8 KB[0m   [31m+18.8 KB[0m      [90m-[0m
+[32m(string)[0m                                                                          [90mstring[0m         6,919   [31m+413[0m    [34m49.6 KB[0m   [31m+17.8 KB[0m  2,792
+[32msystem / ArrayList[0m                                                                [90mnative[0m            60    [31m+23[0m    [34m44.1 KB[0m   [31m+10.2 KB[0m      [90m-[0m
+[32msystem / DescriptorArray[0m                                                          [90mobject shape[0m     755    [31m+40[0m    [34m90.2 KB[0m   [31m+10.1 KB[0m     41
+[32m(object properties)[0m                                                               [90marray[0m             59    [31m+24[0m    [34m94.9 KB[0m    [31m+9.0 KB[0m     32
+[32msystem / AccessorPair[0m                                                             [90mnative[0m         2,128   [31m+646[0m    [34m24.9 KB[0m    [31m+7.6 KB[0m      [90m-[0m
+[32msystem / Map[0m                                                                      [90mobject shape[0m   1,261   [31m+114[0m    [34m50.4 KB[0m    [31m+4.8 KB[0m    122
+[32m(sliced string)[0m                                                                   [90msliced string[0m    240   [31m+240[0m     [34m4.7 KB[0m    [31m+4.7 KB[0m    240
+[32mblink::HeapHashTableBacking<blink::HashTable<cppgc::internal::BasicMember<bli...[0m  [90mnative[0m             2     [31m+2[0m     [34m4.1 KB[0m    [31m+4.1 KB[0m      [90m-[0m
+[32mblink::HeapHashTableBacking<blink::HashTable<cppgc::internal::BasicMember<con...[0m  [90mnative[0m             1      0     [34m4.0 KB[0m    [31m+3.9 KB[0m      [90m-[0m
+[32msystem / BytecodeArray[0m                                                            [90mcode[0m              17    [31m+17[0m     [34m1.8 KB[0m    [31m+1.8 KB[0m     17

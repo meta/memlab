@@ -1,21 +1,21 @@
 $ memlab analyze object-fanout --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-· @32601 object shape system / DescriptorArray: 1620 edges, 9.9KB, refs: [descriptors]
-· @46589 object shape system / DescriptorArray: 1620 edges, 9.9KB, refs: [descriptors]
-· @40065 Window [JSGlobalObject] / http://localhost:3000: 673 edges, 49.4KB, refs: [prototype, global_object]
-· @33803 Window [JSGlobalObject] / http://localhost:3000: 670 edges, 46.1KB, refs: [prototype, global_object]
-· @65097 Document: 576 edges, 8.6KB, refs: [prototype, __proto__]
-· @52945 Document: 576 edges, 5.8KB, refs: [prototype, __proto__]
-· @32151 Window (prototype) / http://localhost:3000: 535 edges, 26.7KB, refs: [__proto__, prototype]
-· @46239 Window (prototype) / http://localhost:3000: 535 edges, 26.7KB, refs: [prototype, __proto__]
-· @32945 Window (internal cache) / http://localhost:3000: 534 edges, 10.2KB, refs: []
-· @46141 Window (internal cache) / http://localhost:3000: 534 edges, 10.2KB, refs: []
-· @71055 object shape system / DescriptorArray: 441 edges, 3KB, refs: [descriptors]
-· @50117 HTMLElement: 412 edges, 3.5KB, refs: [prototype, __proto__]
-· @69421 HTMLElement: 412 edges, 4.8KB, refs: [__proto__, prototype]
-· @49255 Element: 342 edges, 3.9KB, refs: [prototype, __proto__]
-· @68575 Element: 342 edges, 7.6KB, refs: [__proto__, prototype]
-· @70271 SVGElement: 341 edges, 4.5KB, refs: [prototype]
-· @70999 object shape system / DescriptorArray: 283 edges, 1.7KB, refs: [descriptors]
-· @71005 object shape system / DescriptorArray: 271 edges, 2.1KB, refs: [descriptors]
-· @71393 Array: 243 edges, 6.2KB, refs: [labels]
-· @34149 Object [JSGlobalObject]: 71 edges, 6.5KB, refs: [prototype, global_object, security_token]
+[90m· @32601[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 1620 edges[90m,[0m 9.9KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @46589[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 1620 edges[90m,[0m 9.9KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @40065[0m [1;34mWindow [JSGlobalObject] / http://localhost:3000[0m[90m:[0m 673 edges[90m,[0m 49.4KB[90m,[0m refs: [90m[[0mprototype[90m, [0mglobal_object[90m][0m
+[90m· @33803[0m [1;34mWindow [JSGlobalObject] / http://localhost:3000[0m[90m:[0m 670 edges[90m,[0m 46.1KB[90m,[0m refs: [90m[[0mprototype[90m, [0mglobal_object[90m][0m
+[90m· @65097[0m [1;34mDocument[0m[90m:[0m 576 edges[90m,[0m 8.6KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @52945[0m [1;34mDocument[0m[90m:[0m 576 edges[90m,[0m 5.8KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @32151[0m [1;34mWindow (prototype) / http://localhost:3000[0m[90m:[0m 535 edges[90m,[0m 26.7KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @46239[0m [1;34mWindow (prototype) / http://localhost:3000[0m[90m:[0m 535 edges[90m,[0m 26.7KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @32945[0m [1;34mWindow (internal cache) / http://localhost:3000[0m[90m:[0m 534 edges[90m,[0m 10.2KB[90m,[0m refs: [90m[][0m
+[90m· @46141[0m [1;34mWindow (internal cache) / http://localhost:3000[0m[90m:[0m 534 edges[90m,[0m 10.2KB[90m,[0m refs: [90m[][0m
+[90m· @71055[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 441 edges[90m,[0m 3KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @50117[0m [1;34mHTMLElement[0m[90m:[0m 412 edges[90m,[0m 3.5KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @69421[0m [1;34mHTMLElement[0m[90m:[0m 412 edges[90m,[0m 4.8KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @49255[0m [1;34mElement[0m[90m:[0m 342 edges[90m,[0m 3.9KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @68575[0m [1;34mElement[0m[90m:[0m 342 edges[90m,[0m 7.6KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @70271[0m [1;34mSVGElement[0m[90m:[0m 341 edges[90m,[0m 4.5KB[90m,[0m refs: [90m[[0mprototype[90m][0m
+[90m· @70999[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 283 edges[90m,[0m 1.7KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @71005[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 271 edges[90m,[0m 2.1KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @71393[0m [1;34mArray[0m[90m:[0m 243 edges[90m,[0m 6.2KB[90m,[0m refs: [90m[[0mlabels[90m][0m
+[90m· @34149[0m [1;34mObject [JSGlobalObject][0m[90m:[0m 71 edges[90m,[0m 6.5KB[90m,[0m refs: [90m[[0mprototype[90m, [0mglobal_object[90m, [0msecurity_token[90m][0m

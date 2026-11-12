@@ -1,66 +1,66 @@
 $ memlab analyze
 
-  Heap analysis plugin name missing
+[31m  Heap analysis plugin name missing[0m
 
   memlab analyze <PLUGIN_NAME> [PLUGIN_OPTIONS]
   Run heap analysis on heap snapshots.
-  Options: --analysis-plugin --heap-parser-dict-fast-store-size
-           --work-dir
+[1;90m  Options:[0m[90m --analysis-plugin --heap-parser-dict-fast-store-size[0m
+[90m           --work-dir[0m
 
    memlab analyze unbound-collection
    Check unbound collection growth (e.g., Map with growing number of entries)
-   Options: --snapshot-dir
+[1;90m   Options:[0m[90m --snapshot-dir[0m
 
    memlab analyze collections-with-stale
    Analyze collections holding stale objects
-   Options: --snapshot --output
+[1;90m   Options:[0m[90m --snapshot --output[0m
 
    memlab analyze detached-DOM
    Get detached DOM elements
-   Options: --snapshot --output
+[1;90m   Options:[0m[90m --snapshot --output[0m
 
    memlab analyze global-variable
    Get global variables in heap
-   Options: --snapshot --output
+[1;90m   Options:[0m[90m --snapshot --output[0m
 
    memlab analyze object
    Get properties inside an object
-   Options: --snapshot --node-id --output
+[1;90m   Options:[0m[90m --snapshot --node-id --output[0m
 
    memlab analyze object-fanout
    Get objects with the most out-going references in heap
-   Options: --snapshot --output
+[1;90m   Options:[0m[90m --snapshot --output[0m
 
    memlab analyze object-shallow
    Get objects by key and value, without recursing into sub-objects
-   Options: --snapshot
+[1;90m   Options:[0m[90m --snapshot[0m
 
    memlab analyze shape
    List the shapes that retained most memory
-   Options: --snapshot
+[1;90m   Options:[0m[90m --snapshot[0m
 
    memlab analyze object-size
    Get the largest objects in heap
-   Options: --snapshot --output
+[1;90m   Options:[0m[90m --snapshot --output[0m
 
    memlab analyze unbound-object
    Check unbound object growth (a single object with growing retained size)
-   Options: --snapshot-dir
+[1;90m   Options:[0m[90m --snapshot-dir[0m
 
    memlab analyze react-hooks
    Show a memory breakdown of the most memory-consuming React components and their React hooks. This works best with
    unminified heap snapshots taken from React apps running in Dev mode. But also supports minified heap snapshots taken
    from React apps in production mode.
-   Options: --snapshot
+[1;90m   Options:[0m[90m --snapshot[0m
 
    memlab analyze unbound-shape
    Get shapes with unbound growth (a class of objects with growing aggregated retained size)
-   Options: --snapshot-dir
+[1;90m   Options:[0m[90m --snapshot-dir[0m
 
    memlab analyze string
    Find duplicated string instances in heap
-   Options: --snapshot
+[1;90m   Options:[0m[90m --snapshot[0m
 
    memlab analyze unmounted-fiber-node
    Get unmounted React Fiber nodes
-   Options: --snapshot --output
+[1;90m   Options:[0m[90m --snapshot --output[0m

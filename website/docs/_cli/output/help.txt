@@ -3,68 +3,68 @@ $ memlab help find-leaks
   memlab find-leaks
   Find memory leaks in heap snapshots
 
-    There are three ways to specify inputs for the `memlab find-leaks` command:
-     1. `--baseline`, `--target`, `--final` specifies each heap snapshot input individually;
-     2. `--snapshot-dir` specifies the directory that contains all three heap snapshot files (MemLab will assign
-    baseline, target, and final based on alphabetic order of the file);
-     3. `--work-dir` specifies the output working directory of the `memlab run` or the `memlab snapshot` command;
+[90m    There are three ways to specify inputs for the `memlab find-leaks` command:[0m
+[90m     1. `--baseline`, `--target`, `--final` specifies each heap snapshot input individually;[0m
+[90m     2. `--snapshot-dir` specifies the directory that contains all three heap snapshot files (MemLab will assign[0m
+[90m    baseline, target, and final based on alphabetic order of the file);[0m
+[90m     3. `--work-dir` specifies the output working directory of the `memlab run` or the `memlab snapshot` command;[0m
 
-    Please only use one of the three ways to specify the input.
+[90m    Please only use one of the three ways to specify the input.[0m
 
-    You can also manually take heap snapshots in Chrome Devtools, save them to disk.
-    Then process them using this command with the CLI flags (either option 1
-    or option 2 mentioned above).
+[90m    You can also manually take heap snapshots in Chrome Devtools, save them to disk.[0m
+[90m    Then process them using this command with the CLI flags (either option 1[0m
+[90m    or option 2 mentioned above).[0m
 
-  COMMAND LINE OPTIONS
+  [1mCOMMAND LINE OPTIONS[0m
 
-                              --baseline set file path of the baseline heap snapshot
+                              [32m--baseline[0m set file path of the baseline heap snapshot
 
-                                --target set file path of the target heap snapshot
+                                [32m--target[0m set file path of the target heap snapshot
 
-                                 --final set file path of the final heap snapshot
+                                 [32m--final[0m set file path of the final heap snapshot
 
-                          --snapshot-dir set directory path containing all heap snapshots under analysis
+                          [32m--snapshot-dir[0m set directory path containing all heap snapshots under analysis
 
-                                --engine set the JavaScript engine (default to V8)
+                                [32m--engine[0m set the JavaScript engine (default to V8)
 
-                           --leak-filter specify a definition JS file for leak filter
+                           [32m--leak-filter[0m specify a definition JS file for leak filter
 
-               --trace-object-size-above objects with retained size (bytes) bigger than the threshold will be considered
+               [32m--trace-object-size-above[0m objects with retained size (bytes) bigger than the threshold will be considered
                                          as leaks
 
-        --ignore-leak-cluster-size-below ignore memory leaks with aggregated retained size smaller than the threshold
+        [32m--ignore-leak-cluster-size-below[0m ignore memory leaks with aggregated retained size smaller than the threshold
                                          (in bytes)
 
-                     --trace-all-objects dump retainer trace for all allocated objects (ignore the leak filter),
+                     [32m--trace-all-objects[0m dump retainer trace for all allocated objects (ignore the leak filter),
                                          available option modes: --trace-all-objects=selected-js-objects,
                                          --trace-all-objects=default
 
-    --save-trace-as-unclassified-cluster dump each retainer trace as an unclassified trace cluster
+    [32m--save-trace-as-unclassified-cluster[0m dump each retainer trace as an unclassified trace cluster
 
-                         --ml-clustering use machine learning algorithms for clustering leak traces (by default, traces
+                         [32m--ml-clustering[0m use machine learning algorithms for clustering leak traces (by default, traces
                                          are clustered by heuristics)
 
-                   --ml-linkage-max-dist set linkage max distance value for clustering. The value should be between [0,
+                   [32m--ml-linkage-max-dist[0m set linkage max distance value for clustering. The value should be between [0,
                                          1] inclusive.
 
-                  --ml-clustering-max-df set percentage based max document frequency for limiting the terms that appear
+                  [32m--ml-clustering-max-df[0m set percentage based max document frequency for limiting the terms that appear
                                          too often
 
-                     --clean-up-snapshot clean up heap snapshots after running
+                     [32m--clean-up-snapshot[0m clean up heap snapshots after running
 
-                              --work-dir set the working directory of the current run
+                              [32m--work-dir[0m set the working directory of the current run
 
-      --heap-parser-dict-fast-store-size the size threshold for switching from fast store to slower store in the heap
+      [32m--heap-parser-dict-fast-store-size[0m the size threshold for switching from fast store to slower store in the heap
                                          snapshot parser. The default value is 5,000,000. If you get the `FATAL ERROR:
                                          invalid table size Allocation failed - JavaScript heap out of memory` error,
                                          try to decrease the threshold here
 
-                              --help, -h print helper text
+                              [32m--help, -h[0m print helper text
 
-                           --verbose, -v show more details
+                           [32m--verbose, -v[0m show more details
 
-                                    --sc set to continuous test mode
+                                    [32m--sc[0m set to continuous test mode
 
-                                 --debug enable manual debugging
+                                 [32m--debug[0m enable manual debugging
 
-                            --silent, -s mute all terminal output
+                            [32m--silent, -s[0m mute all terminal output

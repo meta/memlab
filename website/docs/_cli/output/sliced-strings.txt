@@ -1,7 +1,7 @@
 $ memlab sliced-strings --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
 Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  240 sliced strings point into 1 parent strings
-  0 B in 0 parents is kept alive only by slices; copying the slices would free it
-parent    size  slices  only slices hold it  text
-------  ------  ------  -------------------  ------------------------------------------------------------
-@47971  6.8 KB     240  no                   "Notification preference #000;Notification preference #00...
+[90m  240 sliced strings point into 1 parent strings[0m
+[90m  0 B in 0 parents is kept alive only by slices; copying the slices would free it[0m
+[1mparent[0m    [1msize[0m  [1mslices[0m  [1monly slices hold it[0m  [1mtext[0m
+[90m------  ------  ------  -------------------  ------------------------------------------------------------[0m
+[90m@47971[0m  [34m6.8 KB[0m     240  [90mno[0m                   "Notification preference #000;Notification preference #00...

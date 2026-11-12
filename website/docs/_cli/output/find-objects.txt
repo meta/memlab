@@ -1,9 +1,9 @@
 $ memlab find-objects --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --name-pattern '^SettingsDialog$'
 Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  3 objects match; the 3 that retain the most:
-id      class           type     self size  retained size  detached
-------  --------------  -------  ---------  -------------  --------
-@71391  SettingsDialog  object        60 B       787.7 KB
-@48235  SettingsDialog  closure       32 B         1.7 KB
-@11507  SettingsDialog  string        28 B           28 B
-  why one is kept alive: memlab trace --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --node-id 71391
+[90m  3 objects match; the 3 that retain the most:[0m
+[1mid[0m      [1mclass[0m           [1mtype[0m     [1mself size[0m  [1mretained size[0m  [1mdetached[0m
+[90m------  --------------  -------  ---------  -------------  --------[0m
+[90m@71391[0m  [32mSettingsDialog[0m  [90mobject[0m        [34m60 B[0m       [34m787.7 KB[0m
+[90m@48235[0m  [32mSettingsDialog[0m  [90mclosure[0m       [34m32 B[0m         [34m1.7 KB[0m
+[90m@11507[0m  [32mSettingsDialog[0m  [90mstring[0m        [34m28 B[0m           [34m28 B[0m
+[90m  why one is kept alive: memlab trace --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --node-id 71391[0m

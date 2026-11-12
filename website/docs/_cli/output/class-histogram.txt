@@ -1,20 +1,20 @@
 $ memlab class-histogram --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --top 15
 Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  top 15 of 5,293 classes by self size; 36,422 objects, 2.0 MB
-class                                                                             type          count  self size  share
---------------------------------------------------------------------------------  ------------  -----  ---------  -----
-(object elements)                                                                 array             6   782.8 KB  37.3%
-system / FunctionTemplateInfo                                                     native        3,282   205.0 KB   9.8%
-(object properties)                                                               array            59    94.9 KB   4.5%
-(array)                                                                           array            40    93.4 KB   4.5%
-system / DescriptorArray                                                          object shape    755    90.2 KB   4.3%
-system / Map                                                                      object shape  1,261    50.4 KB   2.4%
-system / PropertyCell                                                             native        2,556    49.9 KB   2.4%
-(string)                                                                          string        6,919    49.6 KB   2.4%
-system / ArrayList                                                                native           60    44.1 KB   2.1%
-blink::ImmutableCSSPropertyValueSet                                               native          433    43.6 KB   2.1%
-blink::StyleRule                                                                  native          411    40.9 KB   2.0%
-blink::HeapHashTableBacking<blink::HashTable<blink::ShapeCacheKey, blink::Key...  native            2    36.6 KB   1.7%
-system / AccessorPair                                                             native        2,128    24.9 KB   1.2%
-Detached <div>                                                                    native          240    24.4 KB   1.2%
-Detached Text                                                                     native          240    18.8 KB   0.9%
+[90m  top 15 of 5,293 classes by self size; 36,422 objects, 2.0 MB[0m
+[1mclass[0m                                                                             [1mtype[0m          [1mcount[0m  [1mself size[0m  [1mshare[0m
+[90m--------------------------------------------------------------------------------  ------------  -----  ---------  -----[0m
+[32m(object elements)[0m                                                                 [90marray[0m             6   [34m782.8 KB[0m  37.3%
+[32msystem / FunctionTemplateInfo[0m                                                     [90mnative[0m        3,282   [34m205.0 KB[0m   9.8%
+[32m(object properties)[0m                                                               [90marray[0m            59    [34m94.9 KB[0m   4.5%
+[32m(array)[0m                                                                           [90marray[0m            40    [34m93.4 KB[0m   4.5%
+[32msystem / DescriptorArray[0m                                                          [90mobject shape[0m    755    [34m90.2 KB[0m   4.3%
+[32msystem / Map[0m                                                                      [90mobject shape[0m  1,261    [34m50.4 KB[0m   2.4%
+[32msystem / PropertyCell[0m                                                             [90mnative[0m        2,556    [34m49.9 KB[0m   2.4%
+[32m(string)[0m                                                                          [90mstring[0m        6,919    [34m49.6 KB[0m   2.4%
+[32msystem / ArrayList[0m                                                                [90mnative[0m           60    [34m44.1 KB[0m   2.1%
+[32mblink::ImmutableCSSPropertyValueSet[0m                                               [90mnative[0m          433    [34m43.6 KB[0m   2.1%
+[32mblink::StyleRule[0m                                                                  [90mnative[0m          411    [34m40.9 KB[0m   2.0%
+[32mblink::HeapHashTableBacking<blink::HashTable<blink::ShapeCacheKey, blink::Key...[0m  [90mnative[0m            2    [34m36.6 KB[0m   1.7%
+[32msystem / AccessorPair[0m                                                             [90mnative[0m        2,128    [34m24.9 KB[0m   1.2%
+[32mDetached <div>[0m                                                                    [90mnative[0m          240    [34m24.4 KB[0m   1.2%
+[32mDetached Text[0m                                                                     [90mnative[0m          240    [34m18.8 KB[0m   0.9%

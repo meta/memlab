@@ -1,30 +1,30 @@
 $ memlab run --scenario /tmp/memlab-example/scenarios/leak.js --work-dir /tmp/memlab-example/leak
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
+page-load[[32m765.2KB[0m]([32mbaseline[0m)[[32ms1[0m] [90m>[0m action-on-page[[32m1.7MB[0m]([32mtarget[0m)[[32ms2[0m] [90m>[0m revert[[32m1.7MB[0m]([32mfinal[0m)[[32ms3[0m]
 
 total time: 46.4s
 Memory usage across all steps:
 2.0
 1.7
-1.5    ██ ██
-1.2    ██ ██
-1.0    ██ ██
-0.7    ██ ██
-0.5 ██ ██ ██
-0.2 ██ ██ ██
-0.0 ██ ██ ██
+1.5    [32m██[0m [32m██[0m
+1.2    [32m██[0m [32m██[0m
+1.0    [32m██[0m [32m██[0m
+0.7    [32m██[0m [32m██[0m
+0.5 [32m██[0m [32m██[0m [32m██[0m
+0.2 [32m██[0m [32m██[0m [32m██[0m
+0.0 [32m██[0m [32m██[0m [32m██[0m
     1  2  3
 
-MemLab found 1 leak(s)
-Number of clusters loaded: 0
+[33mMemLab found 1 leak(s)[0m
+[90mNumber of clusters loaded: 0[0m
 
 --Similar leaks in this run: 386--
 --Retained size of leaked objects: 45.3KB--
-[Window / http://localhost:3000] (native) @33471 [7.6KB]
-  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
-  --openedDialogs (property)--->  [Set] (object) @47967 [76 bytes]
-  --table (internal)--->  [<array>] (array) @50805 [60 bytes]
-  --5 (internal)--->  [Detached <div class="settings"> (native) @65915 [45.3KB]
-  --5 (element)--->  [Detached <div> (native) @71885 [45KB]
-  --7 (element)--->  [Detached <button id="close-settings"> (native) @72365 [812 bytes]
-  --9 (element)--->  [Detached <div> (native) @72363 [184 bytes]
-  --4 (element)--->  [Detached Text] (native) @15810 [80 bytes]
+[32m[Window / http://localhost:3000][0m [90m(native)[0m [90m@33471[0m [90m[[0m[1;34m7.6KB[0m[90m][0m
+  [90m--[0m[37mglobal_object[0m [90m(shortcut)---[0m>  [32m[Window [JSGlobalObject] / http://localhost:3000][0m [90m(object)[0m [90m@33803[0m [90m[[0m[1;34m46.1KB[0m[90m][0m
+  [90m--[0m[37mopenedDialogs[0m [90m(property)---[0m>  [32m[Set][0m [90m(object)[0m [90m@47967[0m [90m[[0m[1;34m76 bytes[0m[90m][0m
+  [90m--[0m[37mtable[0m [90m(internal)---[0m>  [32m[<array>][0m [90m(array)[0m [90m@50805[0m [90m[[0m[1;34m60 bytes[0m[90m][0m
+  [90m--[0m[37m5[0m [90m(internal)---[0m>  [32m[Detached <div class="settings">[0m [90m(native)[0m [90m@65915[0m [90m[[0m[1;34m45.3KB[0m[90m][0m
+  [90m--[0m[37m5[0m [90m(element)---[0m>  [32m[Detached <div>[0m [90m(native)[0m [90m@71885[0m [90m[[0m[1;34m45KB[0m[90m][0m
+  [90m--[0m[37m7[0m [90m(element)---[0m>  [32m[Detached <button id="close-settings">[0m [90m(native)[0m [90m@72365[0m [90m[[0m[1;34m812 bytes[0m[90m][0m
+  [90m--[0m[37m9[0m [90m(element)---[0m>  [32m[Detached <div>[0m [90m(native)[0m [90m@72363[0m [90m[[0m[1;34m184 bytes[0m[90m][0m
+  [90m--[0m[37m4[0m [90m(element)---[0m>  [32m[Detached Text][0m [90m(native)[0m [90m@15810[0m [90m[[0m[1;34m80 bytes[0m[90m][0m

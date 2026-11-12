@@ -1,34 +1,34 @@
 $ memlab analyze object-size --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-· @71395 Array: 3 edges, 800KB, refs: [history]
-· @32151 Window (prototype) / http://localhost:3000: 535 edges, 26.7KB, refs: [__proto__, prototype]
-· @46239 Window (prototype) / http://localhost:3000: 535 edges, 26.7KB, refs: [prototype, __proto__]
-· @32601 object shape system / DescriptorArray: 1620 edges, 9.9KB, refs: [descriptors]
-· @46589 object shape system / DescriptorArray: 1620 edges, 9.9KB, refs: [descriptors]
-· @65837 string string: 2 edges, 9.7KB, refs: [source]
-· @65097 Document: 576 edges, 8.6KB, refs: [prototype, __proto__]
-· @68575 Element: 342 edges, 7.6KB, refs: [__proto__, prototype]
-· @71101 system / Context / scope @66489: 47 edges, 7KB, refs: [createFunction, fe, pQuerySelector, $, pQuerySelectorAll, de, U, V, q, xpathQuerySelectorAll]
-· @47971 string string: 4 edges, 6.9KB, refs: [parent, settingNames]
-· @71393 Array: 243 edges, 6.2KB, refs: [labels]
-· @69421 HTMLElement: 412 edges, 4.8KB, refs: [__proto__, prototype]
-· @70271 SVGElement: 341 edges, 4.5KB, refs: [prototype]
-· @71055 object shape system / DescriptorArray: 441 edges, 3KB, refs: [descriptors]
-· @17139 string string: 4 edges, 2.7KB, refs: [source]
-· @67513 closure t: 12 edges, 2.4KB, refs: [constructor, t, c, Deferred]
-· @7393 Object { constructor, toDateString, toISOString, toString, toTimeString, ... }: 51 edges, 2.1KB, refs: [prototype]
-· @7533 Object { constructor, toDateString, toISOString, toString, toTimeString, ... }: 51 edges, 2.1KB, refs: [prototype]
-· @7721 Object { constructor, toDateString, toISOString, toString, toTimeString, ... }: 51 edges, 2.1KB, refs: [prototype]
-· @71005 object shape system / DescriptorArray: 271 edges, 2.1KB, refs: [descriptors]
-· @67717 object shape system / Map: 15 edges, 2.1KB, refs: [map]
-· @34799 Math: 49 edges, 1.8KB, refs: [value, Math]
-· @40873 Math: 49 edges, 1.8KB, refs: [value, Math]
-· @53461 Math: 49 edges, 1.8KB, refs: [value, Math]
-· @7497 closure RegExp: 70 edges, 1.8KB, refs: [constructor, value, RegExp, regexp_function]
-· @7685 closure RegExp: 70 edges, 1.8KB, refs: [constructor, value, RegExp, regexp_function]
-· @41139 console: 31 edges, 1.8KB, refs: [value, console]
-· @53467 console: 31 edges, 1.8KB, refs: [value, console]
-· @66017 Node: 68 edges, 1.8KB, refs: [__proto__, prototype]
-· @7881 closure RegExp: 70 edges, 1.7KB, refs: [constructor, value, RegExp, regexp_function]
-· @64283 string string: 2 edges, 1.7KB, refs: [source]
-· @48235 closure SettingsDialog: 10 edges, 1.7KB, refs: [constructor]
-· @70999 object shape system / DescriptorArray: 283 edges, 1.7KB, refs: [descriptors]
+[90m· @71395[0m [1;34mArray[0m[90m:[0m 3 edges[90m,[0m 800KB[90m,[0m refs: [90m[[0mhistory[90m][0m
+[90m· @32151[0m [1;34mWindow (prototype) / http://localhost:3000[0m[90m:[0m 535 edges[90m,[0m 26.7KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @46239[0m [1;34mWindow (prototype) / http://localhost:3000[0m[90m:[0m 535 edges[90m,[0m 26.7KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @32601[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 1620 edges[90m,[0m 9.9KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @46589[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 1620 edges[90m,[0m 9.9KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @65837[0m string [1;34mstring[0m[90m:[0m 2 edges[90m,[0m 9.7KB[90m,[0m refs: [90m[[0msource[90m][0m
+[90m· @65097[0m [1;34mDocument[0m[90m:[0m 576 edges[90m,[0m 8.6KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+[90m· @68575[0m [1;34mElement[0m[90m:[0m 342 edges[90m,[0m 7.6KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @71101[0m [1;34msystem / Context / scope @66489[0m[90m:[0m 47 edges[90m,[0m 7KB[90m,[0m refs: [90m[[0mcreateFunction[90m, [0mfe[90m, [0mpQuerySelector[90m, [0m$[90m, [0mpQuerySelectorAll[90m, [0mde[90m, [0mU[90m, [0mV[90m, [0mq[90m, [0mxpathQuerySelectorAll[90m][0m
+[90m· @47971[0m string [1;34mstring[0m[90m:[0m 4 edges[90m,[0m 6.9KB[90m,[0m refs: [90m[[0mparent[90m, [0msettingNames[90m][0m
+[90m· @71393[0m [1;34mArray[0m[90m:[0m 243 edges[90m,[0m 6.2KB[90m,[0m refs: [90m[[0mlabels[90m][0m
+[90m· @69421[0m [1;34mHTMLElement[0m[90m:[0m 412 edges[90m,[0m 4.8KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @70271[0m [1;34mSVGElement[0m[90m:[0m 341 edges[90m,[0m 4.5KB[90m,[0m refs: [90m[[0mprototype[90m][0m
+[90m· @71055[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 441 edges[90m,[0m 3KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @17139[0m string [1;34mstring[0m[90m:[0m 4 edges[90m,[0m 2.7KB[90m,[0m refs: [90m[[0msource[90m][0m
+[90m· @67513[0m closure [1;34mt[0m[90m:[0m 12 edges[90m,[0m 2.4KB[90m,[0m refs: [90m[[0mconstructor[90m, [0mt[90m, [0mc[90m, [0mDeferred[90m][0m
+[90m· @7393[0m Object [1m{ [0m[32mconstructor[0m[90m, [0m[32mtoDateString[0m[90m, [0m[32mtoISOString[0m[90m, [0m[32mtoString[0m[90m, [0m[32mtoTimeString[0m[90m, [0m...[1m }[0m[90m:[0m 51 edges[90m,[0m 2.1KB[90m,[0m refs: [90m[[0mprototype[90m][0m
+[90m· @7533[0m Object [1m{ [0m[32mconstructor[0m[90m, [0m[32mtoDateString[0m[90m, [0m[32mtoISOString[0m[90m, [0m[32mtoString[0m[90m, [0m[32mtoTimeString[0m[90m, [0m...[1m }[0m[90m:[0m 51 edges[90m,[0m 2.1KB[90m,[0m refs: [90m[[0mprototype[90m][0m
+[90m· @7721[0m Object [1m{ [0m[32mconstructor[0m[90m, [0m[32mtoDateString[0m[90m, [0m[32mtoISOString[0m[90m, [0m[32mtoString[0m[90m, [0m[32mtoTimeString[0m[90m, [0m...[1m }[0m[90m:[0m 51 edges[90m,[0m 2.1KB[90m,[0m refs: [90m[[0mprototype[90m][0m
+[90m· @71005[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 271 edges[90m,[0m 2.1KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m
+[90m· @67717[0m object shape [1;34msystem / Map[0m[90m:[0m 15 edges[90m,[0m 2.1KB[90m,[0m refs: [90m[[0mmap[90m][0m
+[90m· @34799[0m [1;34mMath[0m[90m:[0m 49 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mvalue[90m, [0mMath[90m][0m
+[90m· @40871[0m [1;34mMath[0m[90m:[0m 49 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mvalue[90m, [0mMath[90m][0m
+[90m· @53461[0m [1;34mMath[0m[90m:[0m 49 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mvalue[90m, [0mMath[90m][0m
+[90m· @7497[0m closure [1;34mRegExp[0m[90m:[0m 70 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mconstructor[90m, [0mvalue[90m, [0mRegExp[90m, [0mregexp_function[90m][0m
+[90m· @7685[0m closure [1;34mRegExp[0m[90m:[0m 70 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mconstructor[90m, [0mvalue[90m, [0mRegExp[90m, [0mregexp_function[90m][0m
+[90m· @41141[0m [1;34mconsole[0m[90m:[0m 31 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mvalue[90m, [0mconsole[90m][0m
+[90m· @53467[0m [1;34mconsole[0m[90m:[0m 31 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0mvalue[90m, [0mconsole[90m][0m
+[90m· @66017[0m [1;34mNode[0m[90m:[0m 68 edges[90m,[0m 1.8KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @7881[0m closure [1;34mRegExp[0m[90m:[0m 70 edges[90m,[0m 1.7KB[90m,[0m refs: [90m[[0mconstructor[90m, [0mvalue[90m, [0mRegExp[90m, [0mregexp_function[90m][0m
+[90m· @64283[0m string [1;34mstring[0m[90m:[0m 2 edges[90m,[0m 1.7KB[90m,[0m refs: [90m[[0msource[90m][0m
+[90m· @48235[0m closure [1;34mSettingsDialog[0m[90m:[0m 10 edges[90m,[0m 1.7KB[90m,[0m refs: [90m[[0mconstructor[90m][0m
+[90m· @70999[0m object shape [1;34msystem / DescriptorArray[0m[90m:[0m 283 edges[90m,[0m 1.7KB[90m,[0m refs: [90m[[0mdescriptors[90m][0m

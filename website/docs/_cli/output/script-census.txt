@@ -1,10 +1,10 @@
 $ memlab script-census --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
 Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  5 scripts keep 14.0 KB of source text, 0.7% of the heap
-script                                                                  scripts  copies  source  extra copies
-----------------------------------------------------------------------  -------  ------  ------  ------------
-"(() => { const module = {}; \"use strict\";var g=Object.defineProp...        1       1  9.5 KB             -
-http://localhost:3000/                                                       1       1  2.7 KB             -
-"(function addPageBinding(type, name, prefix) { // Depending on the...        1       1  1.7 KB             -
-"() {}"                                                                       1       1     0 B             -
-"(empty source)"                                                              1       1     0 B             -
+[90m  5 scripts keep 14.0 KB of source text, 0.7% of the heap[0m
+[1mscript[0m                                                                  [1mscripts[0m  [1mcopies[0m  [1msource[0m  [1mextra copies[0m
+[90m----------------------------------------------------------------------  -------  ------  ------  ------------[0m
+[32m"(() => { const module = {}; \"use strict\";var g=Object.defineProp...[0m        1       1  [34m9.5 KB[0m             [90m-[0m
+[32mhttp://localhost:3000/[0m                                                       1       1  [34m2.7 KB[0m             [90m-[0m
+[32m"(function addPageBinding(type, name, prefix) { // Depending on the...[0m        1       1  [34m1.7 KB[0m             [90m-[0m
+[32m"() {}"[0m                                                                       1       1     [34m0 B[0m             [90m-[0m
+[32m"(empty source)"[0m                                                              1       1     [34m0 B[0m             [90m-[0m

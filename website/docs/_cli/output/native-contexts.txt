@@ -1,10 +1,10 @@
 $ memlab native-contexts --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
 Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  3 native contexts (realms); 80.1% of 2.0 MB is owned by one realm
-context  realm                         detached     owned  share  objects
--------  ----------------------------  --------  --------  -----  -------
-@7597    http://localhost:3000                    1.2 MB  58.3%    8,827
-@7795    http://localhost:3000                  379.4 KB  18.1%    8,636
-@7411    (no URL)                                 79.7 KB   3.8%    1,883
-         (shared by several realms)              142.2 KB   6.8%    8,834
-         (no realm: engine internals)            275.0 KB  13.1%    8,245
+[90m  3 native contexts (realms); 80.1% of 2.0 MB is owned by one realm[0m
+[1mcontext[0m  [1mrealm[0m                         [1mdetached[0m     [1mowned[0m  [1mshare[0m  [1mobjects[0m
+[90m-------  ----------------------------  --------  --------  -----  -------[0m
+[90m@7597[0m    [32mhttp://localhost:3000[0m                    [34m1.2 MB[0m  58.3%    8,827
+[90m@7795[0m    [32mhttp://localhost:3000[0m                  [34m379.4 KB[0m  18.1%    8,636
+[90m@7411[0m    [32m(no URL)[0m                                 [34m79.7 KB[0m   3.8%    1,883
+         [32m(shared by several realms)[0m              [34m142.2 KB[0m   6.8%    8,834
+         [32m(no realm: engine internals)[0m            [34m275.0 KB[0m  13.1%    8,245

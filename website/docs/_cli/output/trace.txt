@@ -1,9 +1,9 @@
 $ memlab trace --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --node-id @71391
-[Window / http://localhost:3000] (native) @33471 [7.6KB]
-  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
-  --eventBus (property)--->  [Object] (object) @47965 [672 bytes]
-  --listeners (property)--->  [Array] (object) @50799 [232 bytes]
-  --0 (element)--->  [Object] (object) @65911 [140 bytes]
-  --listener (property)--->  [handleThemeChange] (closure) @72371 [32 bytes]
-  --context (internal)--->  [system / Context / scope (object) @71399 [806.6KB]
-  --this (variable)--->  [SettingsDialog] (object) @71391 [806.6KB]
+[32m[Window / http://localhost:3000][0m [90m(native)[0m [90m@33471[0m [90m[[0m[1;34m7.6KB[0m[90m][0m
+  [90m--[0m[37mglobal_object[0m [90m(shortcut)---[0m>  [32m[Window [JSGlobalObject] / http://localhost:3000][0m [90m(object)[0m [90m@33803[0m [90m[[0m[1;34m46.1KB[0m[90m][0m
+  [90m--[0m[37meventBus[0m [90m(property)---[0m>  [32m[Object][0m [90m(object)[0m [90m@47965[0m [90m[[0m[1;34m672 bytes[0m[90m][0m
+  [90m--[0m[37mlisteners[0m [90m(property)---[0m>  [32m[Array][0m [90m(object)[0m [90m@50799[0m [90m[[0m[1;34m232 bytes[0m[90m][0m
+  [90m--[0m[37m0[0m [90m(element)---[0m>  [32m[Object][0m [90m(object)[0m [90m@65911[0m [90m[[0m[1;34m140 bytes[0m[90m][0m
+  [90m--[0m[37mlistener[0m [90m(property)---[0m>  [32m[handleThemeChange][0m [90m(closure)[0m [90m@72371[0m [90m[[0m[1;34m32 bytes[0m[90m][0m
+  [90m--[0m[37mcontext[0m [90m(internal)---[0m>  [32m[system / Context / scope[0m [90m(object)[0m [90m@71399[0m [90m[[0m[1;34m806.6KB[0m[90m][0m
+  [90m--[0m[37mthis[0m [90m(variable)---[0m>  [32m[SettingsDialog][0m [90m(object)[0m [90m@71391[0m [90m[[0m[1;34m806.6KB[0m[90m][0m

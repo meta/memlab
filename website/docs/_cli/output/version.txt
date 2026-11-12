@@ -1,8 +1,8 @@
 $ memlab version
 
- memlab@2.0.7
- @memlab/heap-analysis@2.0.7
- @memlab/e2e@2.0.7
- @memlab/core@2.0.7
- @memlab/cli@2.0.7
- @memlab/api@2.0.7
+ memlab[90m@2.0.7[0m
+ @memlab/heap-analysis[90m@2.0.7[0m
+ @memlab/e2e[90m@2.0.7[0m
+ @memlab/core[90m@2.0.7[0m
+ @memlab/cli[90m@2.0.7[0m
+ @memlab/api[90m@2.0.7[0m

@@ -1,20 +1,20 @@
 $ memlab dom-audit --snapshot /tmp/memlab-example/leak/data/cur/s2.heapsnapshot
 Snapshot  /tmp/memlab-example/leak/data/cur/s2.heapsnapshot
-  250 attached elements (25.5 KB), plus 348 per-element style and data objects (27.9 KB)
-  0 detached elements are not counted; see memlab analyze detached-DOM
-tag     count  self size
-------  -----  ---------
-div       242    24.6 KB
-button      2      352 B
-script      1      144 B
-body        1       96 B
-meta        1       96 B
-title       1       96 B
-head        1       88 B
-html        1       88 B
+[90m  250 attached elements (25.5 KB), plus 348 per-element style and data objects (27.9 KB)[0m
+[90m  0 detached elements are not counted; see memlab analyze detached-DOM[0m
+[1mtag[0m     [1mcount[0m  [1mself size[0m
+[90m------  -----  ---------[0m
+[32mdiv[0m       242    [34m24.6 KB[0m
+[32mbutton[0m      2      [34m352 B[0m
+[32mscript[0m      1      [34m144 B[0m
+[32mbody[0m        1       [34m96 B[0m
+[32mmeta[0m        1       [34m96 B[0m
+[32mtitle[0m       1       [34m96 B[0m
+[32mhead[0m        1       [34m88 B[0m
+[32mhtml[0m        1       [34m88 B[0m
 
 Elements repeated 20 or more times (candidates for list virtualization)
-element  count  self size
--------  -----  ---------
-div        241    24.5 KB
-  each row is one element type; a list item built from several elements shows up as several rows with the same count
+[1melement[0m  [1mcount[0m  [1mself size[0m
+[90m-------  -----  ---------[0m
+[32mdiv[0m        241    [34m24.5 KB[0m
+[90m  each row is one element type; a list item built from several elements shows up as several rows with the same count[0m

@@ -1,7 +1,7 @@
 $ memlab measure --scenario /tmp/memlab-example/scenarios/leak.js --run-num 2 --work-dir /tmp/memlab-example/measure
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
+page-load[[32m765.2KB[0m]([32mbaseline[0m)[[32ms1[0m] [90m>[0m action-on-page[[32m1.7MB[0m]([32mtarget[0m)[[32ms2[0m] [90m>[0m revert[[32m1.7MB[0m]([32mfinal[0m)[[32ms3[0m]
 
 total time: 46s
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
+page-load[[32m765.2KB[0m]([32mbaseline[0m)[[32ms1[0m] [90m>[0m action-on-page[[32m1.7MB[0m]([32mtarget[0m)[[32ms2[0m] [90m>[0m revert[[32m1.7MB[0m]([32mfinal[0m)[[32ms3[0m]
 
-total time: 45.9s
+total time: 46s

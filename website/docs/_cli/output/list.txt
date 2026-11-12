@@ -1,6 +1,6 @@
 $ memlab list
-All available apps and interactions:
+All available [33mapps[0m and [32minteractions[0m:
 
-default-app-for-scenario:
+[33mdefault-app-for-scenario[0m:
 
-test-spa: link-3
+[33mtest-spa[0m: [32mlink-3[0m

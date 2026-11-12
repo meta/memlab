@@ -1,9 +1,9 @@
 $ memlab snapshot-header --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
 Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  file size             3.3 MB
-  nodes                 36,425
-  edges                 168,842 (4.6 per node)
-  allocation stacks     not recorded
-  detachedness          recorded
+[90m  file size             3.3 MB[0m
+[90m  nodes                 36,425[0m
+[90m  edges                 168,842 (4.6 per node)[0m
+[90m  allocation stacks     not recorded[0m
+[90m  detachedness          recorded[0m
 Memory needed to analyze it
-  about 7 MB of JS heap; this Node.js process has 4,144 MB
+[90m  about 7 MB of JS heap; this Node.js process has 4,144 MB[0m

@@ -6,138 +6,138 @@ Heap overall statistics:
   Alternate fiber node size: 0 byte
   Error: 7.1KB
 Object shapes with top retained sizes:
- (Use `memlab trace --node-id=@ID` to get trace)
+[90m (Use `memlab trace --node-id=@ID` to get trace)[0m
 
-· Array: 811.6KB (N: 8, Examples: @71395 [800KB] | @71393 [6.2KB] | @7525 [1.6KB] | @7713 [1.6KB] | @7909 [1.6KB])
-  · [system / NativeContext / http://localhost:3000] --initial_array_prototype-->: 2
-  · [(Global handles)] --259-->: 1
-  · [(Global handles)] --73-->: 1
-  · [(Global handles)] --180-->: 1
+[90m· [0m[1;34mArray[0m[90m: [0m811.6KB[90m (N: 8, Examples: @71395 [800KB] | @71393 [6.2KB] | @7525 [1.6KB] | @7713 [1.6KB] | @7909 [1.6KB])[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37minitial_array_prototype[0m[90m-->: 2[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m259[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m73[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m180[0m[90m-->: 1[0m
 
-· system / Context / scope @65777: 806.6KB (N: 1, Examples: @71399 [806.6KB])
-  · [handleThemeChange] --context-->: 1
-  · [<closure>] --context-->: 1
+[90m· [0m[1;34msystem / Context / scope @65777[0m[90m: [0m806.6KB[90m (N: 1, Examples: @71399 [806.6KB])[0m
+[90m  · [0m[32m[handleThemeChange][0m[90m --[0m[37mcontext[0m[90m-->: 1[0m
+[90m  · [0m[32m[<closure>][0m[90m --[0m[37mcontext[0m[90m-->: 1[0m
 
-· SettingsDialog: 806.6KB (N: 1, Examples: @71391 [806.6KB])
-  · [system / Context / scope --dialog-->: 1
-  · [system / Context / scope --this-->: 1
+[90m· [0m[1;34mSettingsDialog[0m[90m: [0m806.6KB[90m (N: 1, Examples: @71391 [806.6KB])[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mdialog[0m[90m-->: 1[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mthis[0m[90m-->: 1[0m
 
-· Window [JSGlobalObject] / http://localhost:3000: 95.5KB (N: 2, Examples: @40065 [49.4KB] | @33803 [46.1KB])
-  · [system / NativeContext / http://localhost:3000] --global_object-->: 2
-  · [Window / http://localhost:3000] --global_object-->: 1
-  · [Window [JSGlobalProxy] / http://localhost:3000] --global_object-->: 1
+[90m· [0m[1;34mWindow [JSGlobalObject] / http://localhost:3000[0m[90m: [0m95.5KB[90m (N: 2, Examples: @40065 [49.4KB] | @33803 [46.1KB])[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37mglobal_object[0m[90m-->: 2[0m
+[90m  · [0m[32m[Window / http://localhost:3000][0m[90m --[0m[37mglobal_object[0m[90m-->: 1[0m
+[90m  · [0m[32m[Window [JSGlobalProxy] / http://localhost:3000][0m[90m --[0m[37mglobal_object[0m[90m-->: 1[0m
 
-· string: 58.7KB (N: 7162, Examples: @65837 [9.7KB] | @47971 [6.9KB] | @17139 [2.7KB] | @64283 [1.7KB] | @14801 [120 bytes])
-  · [system / FunctionTemplateInfo] --<numeric-element>-->: 6413
-  · [system / ArrayList] --<numeric-element>-->: 2070
-  · [system / AccessorInfo] --name-->: 1987
-  · [system / Map] --elements_kind_name-->: 1437
+[90m· [0m[1;34mstring[0m[90m: [0m58.7KB[90m (N: 7162, Examples: @65837 [9.7KB] | @47971 [6.9KB] | @17139 [2.7KB] | @64283 [1.7KB] | @15837 [120 bytes])[0m
+[90m  · [0m[32m[system / FunctionTemplateInfo][0m[90m --[0m[37m<numeric-element>[0m[90m-->: 6413[0m
+[90m  · [0m[32m[system / ArrayList][0m[90m --[0m[37m<numeric-element>[0m[90m-->: 2070[0m
+[90m  · [0m[32m[system / AccessorInfo][0m[90m --[0m[37mname[0m[90m-->: 1987[0m
+[90m  · [0m[32m[system / Map][0m[90m --[0m[37melements_kind_name[0m[90m-->: 1437[0m
 
-· Window (prototype) / http://localhost:3000: 53.7KB (N: 4, Examples: @32151 [26.7KB] | @46239 [26.7KB] | @32171 [172 bytes] | @40547 [172 bytes])
+[90m· [0m[1;34mWindow (prototype) / http://localhost:3000[0m[90m: [0m53.7KB[90m (N: 4, Examples: @32151 [26.7KB] | @46239 [26.7KB] | @32171 [172 bytes] | @40547 [172 bytes])[0m
 
-· Object { ariaQuerySelector, ariaQuerySelectorAll, customQuerySelectors, pierceQuerySelector, pierceQuerySelectorAll, ... }: 29.9KB (N: 1, Examples: @57465 [29.9KB])
-  · [system / Context / scope --he-->: 1
-  · [(Global handles)] --116 / DevTools console-->: 1
+[90m· [0mObject [1m{ [0m[32mariaQuerySelector[0m[90m, [0m[32mariaQuerySelectorAll[0m[90m, [0m[32mcustomQuerySelectors[0m[90m, [0m[32mpierceQuerySelector[0m[90m, [0m[32mpierceQuerySelectorAll[0m[90m, [0m...[1m }[0m[90m: [0m29.9KB[90m (N: 1, Examples: @57465 [29.9KB])[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mhe[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m116 / DevTools console[0m[90m-->: 1[0m
 
-· Window (internal cache) / http://localhost:3000: 20.5KB (N: 4, Examples: @32945 [10.2KB] | @46141 [10.2KB] | @32597 [72 bytes] | @46139 [72 bytes])
+[90m· [0m[1;34mWindow (internal cache) / http://localhost:3000[0m[90m: [0m20.5KB[90m (N: 4, Examples: @32945 [10.2KB] | @46141 [10.2KB] | @32597 [72 bytes] | @46139 [72 bytes])[0m
 
-· Document: 14.5KB (N: 2, Examples: @65097 [8.6KB] | @52945 [5.8KB])
+[90m· [0m[1;34mDocument[0m[90m: [0m14.5KB[90m (N: 2, Examples: @65097 [8.6KB] | @52945 [5.8KB])[0m
 
-· Element: 11.6KB (N: 2, Examples: @68575 [7.6KB] | @49255 [3.9KB])
+[90m· [0m[1;34mElement[0m[90m: [0m11.6KB[90m (N: 2, Examples: @68575 [7.6KB] | @49255 [3.9KB])[0m
 
-· HTMLElement: 8.3KB (N: 2, Examples: @69421 [4.8KB] | @50117 [3.5KB])
+[90m· [0m[1;34mHTMLElement[0m[90m: [0m8.3KB[90m (N: 2, Examples: @69421 [4.8KB] | @50117 [3.5KB])[0m
 
-· system / Context / scope @66489: 7KB (N: 1, Examples: @71101 [7KB])
-  · [system / Context / scope --previous-->: 10
-  · [<closure>] --context-->: 1
-  · [W] --context-->: 1
-  · [fe] --context-->: 1
+[90m· [0m[1;34msystem / Context / scope @66489[0m[90m: [0m7KB[90m (N: 1, Examples: @71101 [7KB])[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mprevious[0m[90m-->: 10[0m
+[90m  · [0m[32m[<closure>][0m[90m --[0m[37mcontext[0m[90m-->: 1[0m
+[90m  · [0m[32m[W][0m[90m --[0m[37mcontext[0m[90m-->: 1[0m
+[90m  · [0m[32m[fe][0m[90m --[0m[37mcontext[0m[90m-->: 1[0m
 
-· Object [JSGlobalObject]: 6.5KB (N: 1, Examples: @34149 [6.5KB])
-  · [Object [JSGlobalProxy]] --global_object-->: 1
+[90m· [0m[1;34mObject [JSGlobalObject][0m[90m: [0m6.5KB[90m (N: 1, Examples: @34149 [6.5KB])[0m
+[90m  · [0m[32m[Object [JSGlobalProxy]][0m[90m --[0m[37mglobal_object[0m[90m-->: 1[0m
 
-· Object { constructor, toDateString, toISOString, toString, toTimeString, ... }: 6.5KB (N: 3, Examples: @7393 [2.1KB] | @7533 [2.1KB] | @7721 [2.1KB])
-  · [(Global handles)] --3-->: 1
-  · [(Global handles)] --267-->: 1
-  · [(Global handles)] --81-->: 1
-  · [(Global handles)] --188-->: 1
+[90m· [0mObject [1m{ [0m[32mconstructor[0m[90m, [0m[32mtoDateString[0m[90m, [0m[32mtoISOString[0m[90m, [0m[32mtoString[0m[90m, [0m[32mtoTimeString[0m[90m, [0m...[1m }[0m[90m: [0m6.5KB[90m (N: 3, Examples: @7393 [2.1KB] | @7533 [2.1KB] | @7721 [2.1KB])[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m3[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m267[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m81[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m188[0m[90m-->: 1[0m
 
-· Error: 6KB (N: 37, Examples: @67487 [296 bytes] | @33699 [160 bytes] | @33739 [160 bytes] | @33771 [160 bytes] | @33959 [160 bytes])
+[90m· [0m[1;34mError[0m[90m: [0m6KB[90m (N: 37, Examples: @67487 [296 bytes] | @33699 [160 bytes] | @33739 [160 bytes] | @33771 [160 bytes] | @33959 [160 bytes])[0m
 
-· TypedArray: 5.8KB (N: 36, Examples: @36747 [328 bytes] | @44193 [328 bytes] | @55697 [328 bytes] | @35119 [148 bytes] | @35353 [148 bytes])
+[90m· [0m[1;34mTypedArray[0m[90m: [0m5.8KB[90m (N: 36, Examples: @36747 [328 bytes] | @44193 [328 bytes] | @55697 [328 bytes] | @35119 [148 bytes] | @35353 [148 bytes])[0m
 
-· Math: 5.5KB (N: 3, Examples: @34799 [1.8KB] | @40873 [1.8KB] | @53461 [1.8KB])
-  · [Window [JSGlobalObject] / http://localhost:3000] --Math-->: 2
-  · [Object [JSGlobalObject]] --Math-->: 1
+[90m· [0m[1;34mMath[0m[90m: [0m5.5KB[90m (N: 3, Examples: @34799 [1.8KB] | @40871 [1.8KB] | @53461 [1.8KB])[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mMath[0m[90m-->: 2[0m
+[90m  · [0m[32m[Object [JSGlobalObject]][0m[90m --[0m[37mMath[0m[90m-->: 1[0m
 
-· Object { buffer, byteLength, constructor, get buffer, get byteLength, ... }: 5.2KB (N: 3, Examples: @34561 [1.7KB] | @40467 [1.7KB] | @52629 [1.7KB])
-  · [system / NativeContext / http://localhost:3000] --typed_array_prototype-->: 2
+[90m· [0mObject [1m{ [0m[32mbuffer[0m[90m, [0m[32mbyteLength[0m[90m, [0m[32mconstructor[0m[90m, [0m[32mget buffer[0m[90m, [0m[32mget byteLength[0m[90m, [0m...[1m }[0m[90m: [0m5.2KB[90m (N: 3, Examples: @34561 [1.7KB] | @40467 [1.7KB] | @52629 [1.7KB])[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37mtyped_array_prototype[0m[90m-->: 2[0m
 
-· console: 4.8KB (N: 3, Examples: @41139 [1.8KB] | @53467 [1.8KB] | @34785 [1.2KB])
-  · [system / PropertyArray] --<numeric-element>-->: 3
-  · [Object] --console-->: 3
-  · [Window [JSGlobalObject] / http://localhost:3000] --console-->: 2
-  · [Object [JSGlobalObject]] --console-->: 1
+[90m· [0m[1;34mconsole[0m[90m: [0m4.8KB[90m (N: 3, Examples: @41141 [1.8KB] | @53467 [1.8KB] | @34785 [1.2KB])[0m
+[90m  · [0m[32m[system / PropertyArray][0m[90m --[0m[37m<numeric-element>[0m[90m-->: 3[0m
+[90m  · [0m[32m[Object][0m[90m --[0m[37mconsole[0m[90m-->: 3[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mconsole[0m[90m-->: 2[0m
+[90m  · [0m[32m[Object [JSGlobalObject]][0m[90m --[0m[37mconsole[0m[90m-->: 1[0m
 
-· SVGElement: 4.5KB (N: 1, Examples: @70271 [4.5KB])
+[90m· [0m[1;34mSVGElement[0m[90m: [0m4.5KB[90m (N: 1, Examples: @70271 [4.5KB])[0m
 
-· String: 4.2KB (N: 3, Examples: @7527 [1.4KB] | @7715 [1.4KB] | @7911 [1.4KB])
-  · [system / NativeContext / http://localhost:3000] --initial_string_prototype-->: 2
-  · [(Global handles)] --261-->: 1
-  · [(Global handles)] --75-->: 1
-  · [(Global handles)] --182-->: 1
+[90m· [0m[1;34mString[0m[90m: [0m4.2KB[90m (N: 3, Examples: @7527 [1.4KB] | @7715 [1.4KB] | @7911 [1.4KB])[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37minitial_string_prototype[0m[90m-->: 2[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m261[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m75[0m[90m-->: 1[0m
+[90m  · [0m[32m[(Global handles)][0m[90m --[0m[37m182[0m[90m-->: 1[0m
 
-· DataView: 3.8KB (N: 3, Examples: @33357 [1.2KB] | @36887 [1.2KB] | @44549 [1.2KB])
+[90m· [0m[1;34mDataView[0m[90m: [0m3.8KB[90m (N: 3, Examples: @33357 [1.2KB] | @36887 [1.2KB] | @44549 [1.2KB])[0m
 
-· Intl.Locale: 3.6KB (N: 3, Examples: @36321 [1.2KB] | @45499 [1.2KB] | @56855 [1.2KB])
+[90m· [0m[1;34mIntl.Locale[0m[90m: [0m3.6KB[90m (N: 3, Examples: @36321 [1.2KB] | @45499 [1.2KB] | @56855 [1.2KB])[0m
 
-· Object { constructor, getColumnNumber, getEnclosingColumnNumber, getEnclosingLineNumber, getEvalOrigin, ... }: 3.3KB (N: 3, Examples: @37765 [1.1KB] | @46007 [1.1KB] | @57319 [1.1KB])
+[90m· [0mObject [1m{ [0m[32mconstructor[0m[90m, [0m[32mgetColumnNumber[0m[90m, [0m[32mgetEnclosingColumnNumber[0m[90m, [0m[32mgetEnclosingLineNumber[0m[90m, [0m[32mgetEvalOrigin[0m[90m, [0m...[1m }[0m[90m: [0m3.3KB[90m (N: 3, Examples: @37765 [1.1KB] | @46007 [1.1KB] | @57319 [1.1KB])[0m
 
-· Object { <symbol Symbol.iterator>, constructor, get constructor, reduce, set constructor, ... }: 3.1KB (N: 3, Examples: @32999 [1KB] | @34297 [1KB] | @40201 [1KB])
-  · [system / NativeContext / http://localhost:3000] --initial_iterator_prototype-->: 2
+[90m· [0mObject [1m{ [0m[32m<symbol Symbol.iterator>[0m[90m, [0m[32mconstructor[0m[90m, [0m[32mget constructor[0m[90m, [0m[32mreduce[0m[90m, [0m[32mset constructor[0m[90m, [0m...[1m }[0m[90m: [0m3.1KB[90m (N: 3, Examples: @32999 [1KB] | @34297 [1KB] | @40201 [1KB])[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37minitial_iterator_prototype[0m[90m-->: 2[0m
 
-· Intl: 3.1KB (N: 3, Examples: @34789 [1KB] | @41257 [1KB] | @53475 [1KB])
-  · [Window [JSGlobalObject] / http://localhost:3000] --Intl-->: 2
-  · [Object [JSGlobalObject]] --Intl-->: 1
+[90m· [0m[1;34mIntl[0m[90m: [0m3.1KB[90m (N: 3, Examples: @34789 [1KB] | @41259 [1KB] | @53475 [1KB])[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mIntl[0m[90m-->: 2[0m
+[90m  · [0m[32m[Object [JSGlobalObject]][0m[90m --[0m[37mIntl[0m[90m-->: 1[0m
 
-· Node: 2.8KB (N: 2, Examples: @66017 [1.8KB] | @49249 [1KB])
+[90m· [0m[1;34mNode[0m[90m: [0m2.8KB[90m (N: 2, Examples: @66017 [1.8KB] | @49249 [1KB])[0m
 
-· Object { constructor }: 2.1KB (N: 18, Examples: @34075 [148 bytes] | @34089 [148 bytes] | @64303 [148 bytes] | @64391 [148 bytes] | @47045 [148 bytes])
+[90m· [0mObject [1m{ [0m[32mconstructor[0m[1m }[0m[90m: [0m2.1KB[90m (N: 18, Examples: @34075 [148 bytes] | @34089 [148 bytes] | @64303 [148 bytes] | @64391 [148 bytes] | @47045 [148 bytes])[0m
 
-· Atomics: 2.1KB (N: 3, Examples: @34781 [712 bytes] | @41281 [712 bytes] | @53477 [712 bytes])
-  · [Window [JSGlobalObject] / http://localhost:3000] --Atomics-->: 2
-  · [Object [JSGlobalObject]] --Atomics-->: 1
+[90m· [0m[1;34mAtomics[0m[90m: [0m2.1KB[90m (N: 3, Examples: @34781 [712 bytes] | @41281 [712 bytes] | @53477 [712 bytes])[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mAtomics[0m[90m-->: 2[0m
+[90m  · [0m[32m[Object [JSGlobalObject]][0m[90m --[0m[37mAtomics[0m[90m-->: 1[0m
 
-· Reflect: 1.8KB (N: 3, Examples: @34795 [616 bytes] | @40929 [616 bytes] | @53463 [616 bytes])
-  · [Window [JSGlobalObject] / http://localhost:3000] --Reflect-->: 2
-  · [Object [JSGlobalObject]] --Reflect-->: 1
+[90m· [0m[1;34mReflect[0m[90m: [0m1.8KB[90m (N: 3, Examples: @34795 [616 bytes] | @40929 [616 bytes] | @53463 [616 bytes])[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mReflect[0m[90m-->: 2[0m
+[90m  · [0m[32m[Object [JSGlobalObject]][0m[90m --[0m[37mReflect[0m[90m-->: 1[0m
 
-· Object { csi, loadTimes }: 1.7KB (N: 2, Examples: @34065 [896 bytes] | @41101 [884 bytes])
-  · [Window [JSGlobalObject] / http://localhost:3000] --chrome-->: 2
+[90m· [0mObject [1m{ [0m[32mcsi[0m[90m, [0m[32mloadTimes[0m[1m }[0m[90m: [0m1.7KB[90m (N: 2, Examples: @34065 [896 bytes] | @41101 [884 bytes])[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mchrome[0m[90m-->: 2[0m
 
-· HTMLButtonElement (prototype) / http://localhost:3000: 1.7KB (N: 2, Examples: @69573 [1KB] | @50277 [652 bytes])
+[90m· [0m[1;34mHTMLButtonElement (prototype) / http://localhost:3000[0m[90m: [0m1.7KB[90m (N: 2, Examples: @69573 [1KB] | @50277 [652 bytes])[0m
 
-· v: 1.6KB (N: 1, Examples: @71115 [1.6KB])
-  · [system / Context / scope --P-->: 1
-  · [Object] --customQuerySelectors-->: 1
+[90m· [0m[1;34mv[0m[90m: [0m1.6KB[90m (N: 1, Examples: @71115 [1.6KB])[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mP[0m[90m-->: 1[0m
+[90m  · [0m[32m[Object][0m[90m --[0m[37mcustomQuerySelectors[0m[90m-->: 1[0m
 
-· Set: 1.6KB (N: 6, Examples: @34305 [404 bytes] | @40209 [404 bytes] | @50807 [404 bytes] | @71123 [176 bytes] | @71127 [156 bytes])
-  · [system / NativeContext / http://localhost:3000] --initial_set_prototype-->: 2
-  · [Window [JSGlobalObject] / http://localhost:3000] --openedDialogs-->: 1
-  · [system / Context / scope --openedDialogs-->: 1
-  · [system / Context / scope --re-->: 1
+[90m· [0m[1;34mSet[0m[90m: [0m1.6KB[90m (N: 6, Examples: @34305 [404 bytes] | @40209 [404 bytes] | @50807 [404 bytes] | @71123 [176 bytes] | @71127 [156 bytes])[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37minitial_set_prototype[0m[90m-->: 2[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mopenedDialogs[0m[90m-->: 1[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mopenedDialogs[0m[90m-->: 1[0m
+[90m  · [0m[32m[system / Context / scope[0m[90m --[0m[37mre[0m[90m-->: 1[0m
 
-· ArrayBuffer: 1.6KB (N: 3, Examples: @37609 [536 bytes] | @44305 [536 bytes] | @55809 [536 bytes])
+[90m· [0m[1;34mArrayBuffer[0m[90m: [0m1.6KB[90m (N: 3, Examples: @37609 [536 bytes] | @44305 [536 bytes] | @55809 [536 bytes])[0m
 
-· Object { constructor, result, start, stop }: 1.4KB (N: 3, Examples: @71243 [476 bytes] | @71259 [476 bytes] | @71275 [476 bytes])
+[90m· [0mObject [1m{ [0m[32mconstructor[0m[90m, [0m[32mresult[0m[90m, [0m[32mstart[0m[90m, [0m[32mstop[0m[1m }[0m[90m: [0m1.4KB[90m (N: 3, Examples: @71243 [476 bytes] | @71259 [476 bytes] | @71275 [476 bytes])[0m
 
-· WebAssembly: 1.4KB (N: 3, Examples: @33645 [472 bytes] | @34539 [472 bytes] | @40445 [472 bytes])
-  · [Window [JSGlobalObject] / http://localhost:3000] --WebAssembly-->: 2
-  · [system / NativeContext / http://localhost:3000] --wasm_webassembly_object-->: 2
-  · [Object [JSGlobalObject]] --WebAssembly-->: 1
+[90m· [0m[1;34mWebAssembly[0m[90m: [0m1.4KB[90m (N: 3, Examples: @33645 [472 bytes] | @34539 [472 bytes] | @40445 [472 bytes])[0m
+[90m  · [0m[32m[Window [JSGlobalObject] / http://localhost:3000][0m[90m --[0m[37mWebAssembly[0m[90m-->: 2[0m
+[90m  · [0m[32m[system / NativeContext / http://localhost:3000][0m[90m --[0m[37mwasm_webassembly_object[0m[90m-->: 2[0m
+[90m  · [0m[32m[Object [JSGlobalObject]][0m[90m --[0m[37mWebAssembly[0m[90m-->: 1[0m
 
-· Object { <symbol Symbol.toStringTag>, adoptText, constructor, get adoptText, resolvedOptions, ... }: 1.3KB (N: 3, Examples: @36165 [448 bytes] | @45383 [448 bytes] | @56739 [448 bytes])
+[90m· [0mObject [1m{ [0m[32m<symbol Symbol.toStringTag>[0m[90m, [0m[32madoptText[0m[90m, [0m[32mconstructor[0m[90m, [0m[32mget adoptText[0m[90m, [0m[32mresolvedOptions[0m[90m, [0m...[1m }[0m[90m: [0m1.3KB[90m (N: 3, Examples: @36165 [448 bytes] | @45383 [448 bytes] | @56739 [448 bytes])[0m
 
-· AsyncDisposableStack: 1.3KB (N: 3, Examples: @36037 [444 bytes] | @44157 [444 bytes] | @55661 [444 bytes])
+[90m· [0m[1;34mAsyncDisposableStack[0m[90m: [0m1.3KB[90m (N: 3, Examples: @36037 [444 bytes] | @44157 [444 bytes] | @55661 [444 bytes])[0m
 
-· DisposableStack: 1.3KB (N: 3, Examples: @37271 [444 bytes] | @45789 [444 bytes] | @57145 [444 bytes])
+[90m· [0m[1;34mDisposableStack[0m[90m: [0m1.3KB[90m (N: 3, Examples: @37271 [444 bytes] | @45789 [444 bytes] | @57145 [444 bytes])[0m
