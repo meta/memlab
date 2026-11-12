@@ -245,12 +245,12 @@ async function runInTerminal(example, command, env) {
       tmux(['send-keys', '-t', target, 'Enter']);
       await sleep(example.tui.afterInputMs);
     }
-    screen = tmux(['capture-pane', '-p', '-t', target]);
+    screen = keepColors(tmux(['capture-pane', '-p', '-e', '-t', target]));
     tmux(['send-keys', '-t', target, ...example.tui.quitKeys]);
   }
   await done;
   if (screen == null) {
-    screen = renderColors(
+    screen = keepColors(
       tmux([
         'capture-pane',
         '-p',
@@ -263,39 +263,113 @@ async function runInTerminal(example, command, env) {
         '-t',
         target,
       ]),
+      {chart: true},
     );
   }
   tmux(['kill-window', '-t', target]);
   return screen;
 }
 
-// drops the terminal colors, keeping what they draw: the memory chart's bars
-// are reverse-video spaces, and its grid is underscores in black
-function renderColors(text) {
+const COLOR_CODE = /\x1b\[([0-9;]*)m/;
+const ANY_COLOR_CODE = /\x1b\[[0-9;]*m/g;
+
+function stripColors(text) {
+  return text.replace(ANY_COLOR_CODE, '');
+}
+
+// Rewrites the colors tmux captured into a small, stable form: only the
+// foreground color, bold, and dim are kept, each run of text gets its own code
+// followed by a reset, and every line ends uncolored. With `chart`, the memory
+// chart is drawn the way a terminal shows it: its bars are reverse-video
+// spaces (drawn as blocks) and its grid is underscores in black (dropped).
+function keepColors(text, {chart = false} = {}) {
+  let color = null;
+  let bold = false;
+  let dim = false;
   let reverse = false;
-  let black = false;
-  return text
-    .split(/(\x1b\[[0-9;]*m)/)
-    .map((part, i) => {
-      if (i % 2 === 1) {
-        for (const code of part.slice(2, -1).split(';')) {
-          if (code === '' || code === '0') {
-            reverse = false;
-            black = false;
-          } else if (code === '7') {
-            reverse = true;
-          } else if (code === '27') {
-            reverse = false;
-          } else if (/^(3[0-9]|9[0-7])$/.test(code)) {
-            black = code === '30';
-          }
-        }
-        return '';
+  let lineRuns = [];
+  const lines = [];
+  const codes = () =>
+    [bold && '1', dim && '2', color].filter(Boolean).join(';');
+  const addText = (part) => {
+    const pieces = part.split('\n');
+    pieces.forEach((piece, i) => {
+      if (i > 0) {
+        lines.push(lineRuns);
+        lineRuns = [];
       }
-      const text = reverse ? part.replace(/ /g, '\u2588') : part;
-      return black ? text.replace(/_/g, ' ') : text;
+      let runText = piece;
+      if (chart && reverse) {
+        runText = runText.replace(/ /g, '\u2588');
+      }
+      if (chart && color === '30') {
+        runText = runText.replace(/_/g, ' ');
+      }
+      if (runText !== '') {
+        lineRuns.push({
+          text: runText,
+          codes: /^\s*$/.test(runText) ? '' : codes(),
+        });
+      }
+    });
+  };
+  text.split(COLOR_CODE).forEach((part, i) => {
+    if (i % 2 === 0) {
+      addText(part);
+      return;
+    }
+    for (const code of part.split(';')) {
+      if (code === '' || code === '0') {
+        color = null;
+        bold = false;
+        dim = false;
+        reverse = false;
+      } else if (code === '1') {
+        bold = true;
+      } else if (code === '2') {
+        dim = true;
+      } else if (code === '22') {
+        bold = false;
+        dim = false;
+      } else if (code === '7') {
+        reverse = true;
+      } else if (code === '27') {
+        reverse = false;
+      } else if (code === '39') {
+        color = null;
+      } else if (/^(3[0-7]|9[0-7])$/.test(code)) {
+        color = code;
+      }
+    }
+  });
+  lines.push(lineRuns);
+  return lines
+    .map((runs) => {
+      // merge neighbors with the same codes, then drop trailing spaces
+      const merged = [];
+      for (const run of runs) {
+        const last = merged[merged.length - 1];
+        if (last != null && last.codes === run.codes) {
+          last.text += run.text;
+        } else {
+          merged.push({...run});
+        }
+      }
+      while (merged.length > 0) {
+        const last = merged[merged.length - 1];
+        last.text = last.text.replace(/\s+$/, '');
+        if (last.text !== '') {
+          break;
+        }
+        merged.pop();
+      }
+      return merged
+        .map((run) =>
+          run.codes === '' ? run.text : `\x1b[${run.codes}m${run.text}\x1b[0m`,
+        )
+        .join('');
     })
-    .join('');
+    .join('\n');
 }
 
 function normalize(text, url) {
@@ -311,7 +385,7 @@ function normalize(text, url) {
     .join('~');
   result = result
     .split('\n')
-    .filter((line) => !/^Pane is dead \(/.test(line))
+    .filter((line) => !/^Pane is dead \(/.test(stripColors(line)))
     .map((line) => line.replace(/\s+$/, ''))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n');
@@ -326,7 +400,7 @@ function findForbidden(text) {
     new RegExp(`\\b${os.userInfo().username}\\b`),
     new RegExp(memlabDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   ];
-  return text
+  return stripColors(text)
     .split('\n')
     .filter((line) => patterns.some((pattern) => pattern.test(line)));
 }
