@@ -4,6 +4,9 @@ sidebar_label: snapshot
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import snapshot_output from '!!raw-loader!../_cli/output/snapshot.txt';
+
 Interact with web app and take heap snapshots
 
 ```bash
@@ -19,12 +22,7 @@ memlab snapshot --scenario /tmp/test-scenario.js --work-dir /tmp/test-1/
 
 ## Example output
 
-```text
-$ memlab snapshot --scenario /tmp/memlab-example/scenarios/leak.js --work-dir /tmp/memlab-example/snapshot
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
-
-total time: 46.4s
-```
+<TerminalOutput output={snapshot_output} />
 
 ## How to read the output
 

@@ -4,6 +4,9 @@ sidebar_label: heap
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import heap_output from '!!raw-loader!../_cli/output/heap.txt';
+
 Interactive command to explore a single heap snapshot
 
 ```bash
@@ -12,22 +15,7 @@ memlab heap --snapshot <HEAP_SNAPSHOT_FILE>
 
 ## Example output
 
-```text
-$ memlab heap --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-Heap Snapshot Loaded: /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-[memlab]$ trace --node-id @71391
-[Window / http://localhost:3000] (native) @33471 [7.6KB]
-  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
-  --eventBus (property)--->  [Object] (object) @47965 [672 bytes]
-  --listeners (property)--->  [Array] (object) @50799 [232 bytes]
-  --0 (element)--->  [Object] (object) @65911 [140 bytes]
-  --listener (property)--->  [handleThemeChange] (closure) @72371 [32 bytes]
-  --context (internal)--->  [system / Context / scope (object) @71399 [806.6KB]
-  --this (variable)--->  [SettingsDialog] (object) @71391 [806.6KB]
-
-Heap Snapshot Loaded: /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-[memlab]$
-```
+<TerminalOutput output={heap_output} />
 
 ## How to read the output
 

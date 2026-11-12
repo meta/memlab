@@ -154,17 +154,26 @@ test('a command page lists its own options and its subcommands', () => {
 
 test('a command page shows its example output and how to read it', () => {
   const page = read('parent.md');
+  // the page imports the output file as text and renders it with its colors
   expect(page).toContain(
-    '## Example output\n\n```text\n' +
-      '$ memlab parent --snapshot s.heapsnapshot\nfound 1 object\n```',
+    "---\n\nimport TerminalOutput from '@site/src/components/TerminalOutput';\n" +
+      "import parent_output from '!!raw-loader!../_cli/output/parent.txt';\n",
+  );
+  expect(page).toContain(
+    '## Example output\n\n<TerminalOutput output={parent_output} />\n',
   );
   expect(page).toContain('## How to read the output\n\nEach row is a class.');
   // subcommands look up `<parent>-<sub>` one heading level deeper
   expect(page).toContain(
-    '### Example output\n\n```text\n$ memlab parent sub\n```',
+    "import parent_sub_output from '!!raw-loader!../_cli/output/parent-sub.txt';",
   );
+  expect(page).toContain(
+    '### Example output\n\n<TerminalOutput output={parent_sub_output} />',
+  );
+  expect(page.split('import TerminalOutput').length).toBe(2);
   // sections appear only when their file exists
   expect(read('misc.md')).not.toContain('Example output');
+  expect(read('misc.md')).not.toContain('import TerminalOutput');
   expect(page.indexOf('## How to read the output')).toBeLessThan(
     page.indexOf('## Options'),
   );

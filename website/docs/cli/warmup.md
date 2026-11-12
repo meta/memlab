@@ -4,6 +4,9 @@ sidebar_label: warmup
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import warmup_output from '!!raw-loader!../_cli/output/warmup.txt';
+
 Warm up the target app
 
 ```bash
@@ -18,9 +21,7 @@ memlab warmup --scenario /tmp/test-scenario.js
 
 ## Example output
 
-```text
-$ memlab warmup --scenario /tmp/memlab-example/scenarios/leak.js
-```
+<TerminalOutput output={warmup_output} />
 
 ## How to read the output
 

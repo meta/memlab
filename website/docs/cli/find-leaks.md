@@ -4,6 +4,9 @@ sidebar_label: find-leaks
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import find_leaks_output from '!!raw-loader!../_cli/output/find-leaks.txt';
+
 Find memory leaks in heap snapshots
 
 There are three ways to specify inputs for the `memlab find-leaks` command:
@@ -36,35 +39,7 @@ memlab find-leaks --work-dir /memlab/working/dir/generated/by/memlab/
 
 ## Example output
 
-```text
-$ memlab find-leaks --work-dir /tmp/memlab-example/leak
-Memory usage across all steps:
-2.0
-1.7
-1.5    ██ ██
-1.2    ██ ██
-1.0    ██ ██
-0.7    ██ ██
-0.5 ██ ██ ██
-0.2 ██ ██ ██
-0.0 ██ ██ ██
-    1  2  3
-
-MemLab found 1 leak(s)
-Number of clusters loaded: 0
-
---Similar leaks in this run: 386--
---Retained size of leaked objects: 45.3KB--
-[Window / http://localhost:3000] (native) @33471 [7.6KB]
-  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
-  --openedDialogs (property)--->  [Set] (object) @47967 [76 bytes]
-  --table (internal)--->  [<array>] (array) @50805 [60 bytes]
-  --5 (internal)--->  [Detached <div class="settings"> (native) @65915 [45.3KB]
-  --5 (element)--->  [Detached <div> (native) @71885 [45KB]
-  --7 (element)--->  [Detached <button id="close-settings"> (native) @72365 [812 bytes]
-  --9 (element)--->  [Detached <div> (native) @72363 [184 bytes]
-  --4 (element)--->  [Detached Text] (native) @15810 [80 bytes]
-```
+<TerminalOutput output={find_leaks_output} />
 
 ## How to read the output
 

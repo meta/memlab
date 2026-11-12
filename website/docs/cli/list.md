@@ -4,6 +4,9 @@ sidebar_label: list
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import list_output from '!!raw-loader!../_cli/output/list.txt';
+
 List all test scenarios
 
 ```bash
@@ -12,14 +15,7 @@ memlab list
 
 ## Example output
 
-```text
-$ memlab list
-All available apps and interactions:
-
-default-app-for-scenario:
-
-test-spa: link-3
-```
+<TerminalOutput output={list_output} />
 
 ## How to read the output
 

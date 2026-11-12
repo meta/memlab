@@ -4,6 +4,9 @@ sidebar_label: measure
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import measure_output from '!!raw-loader!../_cli/output/measure.txt';
+
 Run test scenario in measure mode
 
 In some web apps, the heap size can show considerable variability across various runs. This fluctuation can often make it hard to understand the impact of memory leaks. The introduction of the measure mode aims to address this challenge by executing the same scenario repetitively, therefore getting multiple data points of JavaScript heap sizes. This can help understand if the heap size movements during specific runs come from memory-related issues or just noise.
@@ -21,15 +24,7 @@ memlab measure --scenario /tmp/test-scenario.js --work-dir /tmp/test-1/
 
 ## Example output
 
-```text
-$ memlab measure --scenario /tmp/memlab-example/scenarios/leak.js --run-num 2 --work-dir /tmp/memlab-example/measure
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
-
-total time: 46s
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
-
-total time: 45.9s
-```
+<TerminalOutput output={measure_output} />
 
 ## How to read the output
 

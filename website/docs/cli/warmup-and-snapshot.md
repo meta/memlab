@@ -4,6 +4,9 @@ sidebar_label: warmup-and-snapshot
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import warmup_and_snapshot_output from '!!raw-loader!../_cli/output/warmup-and-snapshot.txt';
+
 Warm up server and take heap snapshots
 
 This is equivalent to running `memlab warmup` and `memlab snapshot`.
@@ -23,12 +26,7 @@ memlab warmup-and-snapshot --scenario /tmp/test-scenario.js --work-dir /tmp/test
 
 ## Example output
 
-```text
-$ memlab warmup-and-snapshot --scenario /tmp/memlab-example/scenarios/leak.js --work-dir /tmp/memlab-example/warmup-and-snapshot
-page-load[765.2KB](baseline)[s1] > action-on-page[1.7MB](target)[s2] > revert[1.7MB](final)[s3]
-
-total time: 46.4s
-```
+<TerminalOutput output={warmup_and_snapshot_output} />
 
 ## How to read the output
 

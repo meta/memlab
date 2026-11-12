@@ -4,6 +4,9 @@ sidebar_label: find-objects
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import find_objects_output from '!!raw-loader!../_cli/output/find-objects.txt';
+
 List the objects in a heap snapshot that match a class name, node type, retained size or detached state, largest retained size first
 
 ```bash
@@ -19,17 +22,7 @@ memlab find-objects --snapshot <HEAP_SNAPSHOT_FILE> --node-type closure --top 50
 
 ## Example output
 
-```text
-$ memlab find-objects --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --name-pattern '^SettingsDialog$'
-Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  3 objects match; the 3 that retain the most:
-id      class           type     self size  retained size  detached
-------  --------------  -------  ---------  -------------  --------
-@71391  SettingsDialog  object        60 B       787.7 KB
-@48235  SettingsDialog  closure       32 B         1.7 KB
-@11507  SettingsDialog  string        28 B           28 B
-  why one is kept alive: memlab trace --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot --node-id 71391
-```
+<TerminalOutput output={find_objects_output} />
 
 ## How to read the output
 

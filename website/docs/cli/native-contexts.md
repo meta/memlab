@@ -4,6 +4,9 @@ sidebar_label: native-contexts
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import native_contexts_output from '!!raw-loader!../_cli/output/native-contexts.txt';
+
 Split a heap snapshot by JavaScript realm (page, iframes, extension worlds, detached windows, Node.js vm contexts) and report the memory each one owns
 
 ```bash
@@ -18,18 +21,7 @@ memlab native-contexts --snapshot <HEAP_SNAPSHOT_FILE> --output json
 
 ## Example output
 
-```text
-$ memlab native-contexts --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  3 native contexts (realms); 80.1% of 2.0 MB is owned by one realm
-context  realm                         detached     owned  share  objects
--------  ----------------------------  --------  --------  -----  -------
-@7597    http://localhost:3000                    1.2 MB  58.3%    8,827
-@7795    http://localhost:3000                  379.4 KB  18.1%    8,636
-@7411    (no URL)                                 79.7 KB   3.8%    1,883
-         (shared by several realms)              142.2 KB   6.8%    8,834
-         (no realm: engine internals)            275.0 KB  13.1%    8,245
-```
+<TerminalOutput output={native_contexts_output} />
 
 ## How to read the output
 

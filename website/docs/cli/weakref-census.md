@@ -4,6 +4,9 @@ sidebar_label: weakref-census
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import weakref_census_output from '!!raw-loader!../_cli/output/weakref-census.txt';
+
 Count the WeakRefs in a heap snapshot, live vs empty, grouped by what holds them
 
 ```bash
@@ -18,14 +21,7 @@ memlab weakref-census --snapshot <HEAP_SNAPSHOT_FILE> --output json
 
 ## Example output
 
-```text
-$ memlab weakref-census --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-Snapshot  /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-  1 WeakRefs: 1 live, 0 empty (target already collected)
-held by            WeakRefs  empty  share empty  example holder
------------------  --------  -----  -----------  --------------
-(object elements)         1      0         0.0%  @65919
-```
+<TerminalOutput output={weakref_census_output} />
 
 ## How to read the output
 

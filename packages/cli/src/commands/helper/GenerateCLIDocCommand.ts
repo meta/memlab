@@ -20,6 +20,9 @@ import universalOptions from '../../options/lib/UniversalOptions';
 const INDEX_DOC_NAME = 'CLI-commands';
 const SIDEBAR_FILE_NAME = 'sidebar.json';
 const UNIVERSAL_OPTIONS_ANCHOR = 'universal-options';
+// renders the example output with its terminal colors
+const TERMINAL_OUTPUT = 'TerminalOutput';
+const TERMINAL_OUTPUT_MODULE = '@site/src/components/TerminalOutput';
 
 type SidebarItem = {
   type: 'doc';
@@ -31,6 +34,9 @@ export default class GenerateCLIDocCommand extends BaseCommand {
   private modules: Map<string, BaseCommand> = new Map();
   private universalOptions: BaseOption[] = universalOptions;
   private examplesDir = '';
+  // the example output files the current page imports
+  private outputImports: string[] = [];
+  private outputImportDir = '';
 
   getCommandName(): string {
     return 'gen-cli-doc';
@@ -61,6 +67,10 @@ export default class GenerateCLIDocCommand extends BaseCommand {
   // full command with dashes (e.g. `analyze-detached-DOM`)
   generateDocs(cliDocsDir: string, examplesDir: string): void {
     this.examplesDir = examplesDir;
+    this.outputImportDir = path
+      .relative(cliDocsDir, path.join(examplesDir, 'output'))
+      .split(path.sep)
+      .join('/');
     fs.removeSync(cliDocsDir);
     fs.mkdirSync(cliDocsDir, {recursive: true});
 
@@ -164,6 +174,16 @@ export default class GenerateCLIDocCommand extends BaseCommand {
 
   private getCommandPage(command: BaseCommand): string {
     const name = command.getCommandName();
+    this.outputImports = [];
+    const body = this.getCommandBody(command, '##');
+    const imports =
+      this.outputImports.length === 0
+        ? []
+        : [
+            `import ${TERMINAL_OUTPUT} from '${TERMINAL_OUTPUT_MODULE}';`,
+            ...this.outputImports,
+            '',
+          ];
     return [
       '---',
       `title: memlab ${name}`,
@@ -171,7 +191,8 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       'custom_edit_url: null',
       '---',
       '',
-      this.getCommandBody(command, '##'),
+      ...imports,
+      body,
     ].join('\n');
   }
 
@@ -206,10 +227,16 @@ export default class GenerateCLIDocCommand extends BaseCommand {
     }
 
     const exampleId = name.replace(/ /g, '-');
-    const output = this.readExample(path.join('output', `${exampleId}.txt`));
-    if (output != null) {
+    const outputFile = `${exampleId}.txt`;
+    if (fs.existsSync(path.join(this.examplesDir, 'output', outputFile))) {
+      // the page imports the output file as text, so recapturing the examples
+      // changes only the output files
+      const variable = `${exampleId.replace(/\W/g, '_')}_output`;
+      this.outputImports.push(
+        `import ${variable} from '!!raw-loader!${this.outputImportDir}/${outputFile}';`,
+      );
       lines.push(`${headingLevel} Example output`, '');
-      lines.push(this.getCodeBlock(output, 'text'), '');
+      lines.push(`<${TERMINAL_OUTPUT} output={${variable}} />`, '');
     }
     const guide = this.readExample(`${exampleId}.md`);
     if (guide != null) {

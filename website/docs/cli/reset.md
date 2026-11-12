@@ -4,6 +4,9 @@ sidebar_label: reset
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import reset_output from '!!raw-loader!../_cli/output/reset.txt';
+
 Reset and initialize all directories
 
 ```bash
@@ -12,9 +15,7 @@ memlab reset
 
 ## Example output
 
-```text
-$ memlab reset --work-dir /tmp/memlab-example/reset
-```
+<TerminalOutput output={reset_output} />
 
 ## How to read the output
 

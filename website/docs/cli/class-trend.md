@@ -4,6 +4,9 @@ sidebar_label: class-trend
 custom_edit_url: null
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import class_trend_output from '!!raw-loader!../_cli/output/class-trend.txt';
+
 Track the number of objects per class across a series of heap snapshots, and list the classes that grew at every step
 
 ```bash
@@ -18,28 +21,7 @@ memlab class-trend --snapshot-dir <DIR> --name-pattern Detached --output json
 
 ## Example output
 
-```text
-$ memlab class-trend --snapshot-dir /tmp/memlab-example/series/data/cur --top 15
-9 snapshots, in order: s1.heapsnapshot, s2.heapsnapshot, s3.heapsnapshot, s4.heapsnapshot, s5.heapsnapshot, s6.heapsnapshot, s7.heapsnapshot, s8.heapsnapshot, s9.heapsnapshot
-  0 classes grew at every step; 249 appeared after the first snapshot; 693 classes changed overall
-class                                                         type           trend     counts                     delta  self size delta
-------------------------------------------------------------  -------------  --------  -------------------------  -----  ---------------
-Detached <div>                                                native         appeared  0 > 0 > ... > 720 > 960     +960         +97.5 KB
-Detached Text                                                 native         appeared  0 > 0 > ... > 723 > 963     +963         +75.2 KB
-(sliced string)                                               sliced string  appeared  0 > 240 > ... > 960 > 960   +960         +18.8 KB
-blink::HeapHashTableBacking<blink::HashTable<cppgc::inter...  native         appeared  0 > 2 > ... > 2 > 2           +2         +16.1 KB
-system / BytecodeArray                                        code           appeared  0 > 15 > ... > 17 > 17       +17          +1.8 KB
-PerformanceEventTiming                                        native         appeared  0 > 2 > ... > 5 > 5           +5          +1.3 KB
-blink::SoftNavigationContext                                  native         appeared  0 > 1 > ... > 4 > 4           +4           +928 B
-Detached blink::UniqueElementData                             native         appeared  0 > 0 > ... > 6 > 8           +8           +896 B
-Detached <button id="close-settings">                         native         appeared  0 > 0 > ... > 3 > 4           +4           +704 B
-blink::SelectorQuery                                          native         appeared  0 > 1 > ... > 2 > 2           +2           +528 B
-Detached <div class="settings">                               native         appeared  0 > 0 > ... > 3 > 4           +4           +416 B
-InteractionContentfulPaint                                    native         appeared  0 > 1 > ... > 4 > 4           +4           +416 B
-blink::ScrollAnimator                                         native         appeared  0 > 0 > ... > 3 > 3           +3           +408 B
-(constant pool)                                               code           appeared  0 > 12 > ... > 14 > 14       +14           +372 B
-system / FeedbackVector                                       code           appeared  0 > 1 > ... > 1 > 1           +1           +360 B
-```
+<TerminalOutput output={class_trend_output} />
 
 ## How to read the output
 
