@@ -147,6 +147,38 @@ function retain(
 }
 
 /**
+ * Load a rung that may have been compressed since it was resolved.
+ *
+ * Ladder tools resolve every rung up front (`resolveRungs`) and load them one
+ * by one over minutes. A sweep compressing an analyzed round meanwhile
+ * (`memlab_prune_run`) replaces `<rung>` with `<rung>.gz`, and the later load
+ * of the plain path failed with ENOENT. The rung is then re-resolved, which
+ * decompresses the archive, and loaded from there.
+ */
+async function loadFollowingCompression(
+  localPath: string,
+): Promise<IHeapSnapshot> {
+  const viaArchive = () =>
+    getFullHeapFromFile(resolveSnapshotPath(localPath).localPath);
+  if (!fs.existsSync(localPath) && fs.existsSync(`${localPath}.gz`)) {
+    return viaArchive();
+  }
+  try {
+    return await getFullHeapFromFile(localPath);
+  } catch (err) {
+    // Compressed between the check and the open.
+    const e = err as NodeJS.ErrnoException | null;
+    if (
+      (e?.code === 'ENOENT' || /ENOENT/.test(String(e?.message))) &&
+      fs.existsSync(`${localPath}.gz`)
+    ) {
+      return viaArchive();
+    }
+    throw err;
+  }
+}
+
+/**
  * Run `fn` against the snapshot at `localPath`, loading it only if it is not
  * already resident, and leaving the session exactly as it was found.
  *
@@ -198,7 +230,7 @@ export async function withSnapshotAt<T>(
         `loading ${name} (the parse and dominator pass block without further output)`,
       );
       snapshot = await timedLoad(localPath, 'temporary', () =>
-        getFullHeapFromFile(localPath),
+        loadFollowingCompression(localPath),
       );
       currentProgress().note?.(
         `loaded ${name} in ${Math.round((Date.now() - started) / 1000)}s`,
