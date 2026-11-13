@@ -814,7 +814,7 @@ export function registerLadderProbe(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "A probe set saved with `memlab_probes`, measured alongside `code` / `metrics`. With neither given and a `run_dir`, the set whose `match` appears in the round's URL filter is used. Probes with an `expect` get an OK / VIOLATED line.",
+          'A probe set saved with `memlab_probes`, measured alongside `code` / `metrics`. With neither given and a `run_dir`, the set whose `match` appears in the round\'s URL filter is used. Probes with an `expect` get an OK / VIOLATED line. `"none"` (or `""`) uses no set.',
         ),
       visibility_probe: z
         .string()
@@ -1020,7 +1020,7 @@ export function registerLadderProbe(server: McpServer): void {
           metricList.push({name, code: mCode});
         }
         const picked =
-          probes != null && probes !== ''
+          probes != null
             ? resolveProbeSet(probes, run_dir)
             : metricList.length === 0
               ? resolveProbeSet(undefined, run_dir)

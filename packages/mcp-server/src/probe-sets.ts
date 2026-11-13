@@ -92,7 +92,8 @@ function roundUrls(runDir: string): string[] {
 }
 
 /**
- * The set to use: `name` when given (an unknown name throws), else the one set
+ * The set to use: `name` when given (an unknown name throws; `"none"` or `""`
+ * means no set), else the one set
  * with probes whose `match` appears in the round's URLs. None when nothing
  * matches or when two sets do, since guessing between them would measure the
  * wrong app.
@@ -101,8 +102,11 @@ export function resolveProbeSet(
   name: string | undefined,
   runDir: string | undefined,
 ): {name: string; set: ProbeSet; auto: boolean} | null {
+  if (name != null && (name === '' || name.toLowerCase() === 'none')) {
+    return null;
+  }
   const sets = readProbeSets();
-  if (name != null && name !== '') {
+  if (name != null) {
     const set = sets[name];
     if (set == null) {
       const known = Object.keys(sets);

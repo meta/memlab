@@ -78,6 +78,9 @@ function unknownParamNames(
  */
 function closestKey(key: string, known: string[]): string | null {
   const lower = key.toLowerCase();
+  for (const meant of PARAM_SYNONYMS[lower] ?? []) {
+    if (known.includes(meant)) return meant;
+  }
   let best: string | null = null;
   let bestScore = Infinity;
   for (const candidate of known) {
@@ -93,7 +96,48 @@ function closestKey(key: string, known: string[]): string | null {
       }
     }
   }
+  if (best != null || lower.length < 5) return best;
+  // A transposed or dropped letter (`snaphsot`, `run_dr`).
+  for (const candidate of known) {
+    const d = editDistance(lower, candidate.toLowerCase());
+    if (d <= 2 && d < bestScore) {
+      bestScore = d;
+      best = candidate;
+    }
+  }
   return best;
+}
+
+/**
+ * Names that mean a parameter but share no letters with it, for the
+ * "did you mean" hint only: their values differ, so they are never rewritten.
+ */
+const PARAM_SYNONYMS: Record<string, string[]> = {
+  depth: ['profile'],
+  level: ['profile'],
+  mode: ['profile', 'action'],
+  probe_set: ['probes'],
+  probeset: ['probes'],
+  max: ['limit', 'top'],
+  count: ['limit', 'top'],
+  n: ['limit', 'top'],
+};
+
+function editDistance(a: string, b: string): number {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({length: b.length + 1}, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = cur;
+  }
+  return prev[b.length];
 }
 
 /**

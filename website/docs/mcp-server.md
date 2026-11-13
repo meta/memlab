@@ -373,7 +373,9 @@ live in named sets in `~/.memlab/probes.json`. Give a set a `match`, a
 substring of the round's URL filter, and `memlab_ladder_probe`,
 `memlab_ab_compare` and `memlab_analysis_battery` run it without being asked,
 printing OK or VIOLATED for every probe that has an `expect`. Any of them also
-takes `probes: "<set>"`.
+takes `probes: "<set>"`, or `probes: "none"` for no set. On `memlab_ladder_probe`
+and `memlab_ab_compare`, passing your own `metrics` also turns the automatic
+pick off.
 
 ```js
 memlab_probes({mode: 'save', set: 'myapp', match: 'myapp.example.com',

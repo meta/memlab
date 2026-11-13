@@ -235,7 +235,7 @@ export function registerAbCompare(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "A probe set saved with `memlab_probes`, compared alongside `metrics` (with each probe's `cap`). Without `metrics`, the set whose `match` appears in the round's URL filter is used.",
+          'A probe set saved with `memlab_probes`, compared alongside `metrics` (with each probe\'s `cap`). Without `probes`, the set whose `match` appears in the round\'s URL filter is used, but only when no `metrics` are passed: `metrics` turn that automatic pick off. `"none"` (or `""`) uses no set.',
         ),
       census: z
         .array(z.string())
@@ -292,7 +292,7 @@ export function registerAbCompare(server: McpServer): void {
           (metrics ?? {}) as Record<string, MetricSpec>,
         );
         const picked =
-          probeSet != null && probeSet !== ''
+          probeSet != null
             ? resolveProbeSet(probeSet, run_dir)
             : specs.length === 0
               ? resolveProbeSet(undefined, run_dir)
