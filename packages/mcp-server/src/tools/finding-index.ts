@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
 import {fixStatusLinesFor} from '../fix-status.js';
+import {getRegisteredTool} from '../tool-registry.js';
 import {
   formatNumber,
   markdownTable,
@@ -1264,6 +1265,72 @@ async function fixStatusLines(findings: readonly Finding[]): Promise<string[]> {
 
 const MAX_FIX_LOOKUPS = 8;
 
+/**
+ * `batch`: each item validated and run through the registered tool exactly as
+ * a single call would be, then reported as one line. A round's bookkeeping
+ * was a dozen calls, each echoing a full verdict and fix-status block.
+ */
+async function runFindingBatch(
+  batch: ReadonlyArray<Record<string, unknown>>,
+  defaults: {workstream?: string; run_dir?: string},
+  extra: unknown,
+): Promise<ReturnType<typeof toolResult>> {
+  const entry = getRegisteredTool('memlab_finding_index');
+  if (entry == null) {
+    return errorResult(new Error('memlab_finding_index is not registered'));
+  }
+  const shape = z.object(entry.shape as z.ZodRawShape);
+  const lines: string[] = [];
+  let failed = 0;
+  for (const [i, item] of batch.entries()) {
+    if ('batch' in item) {
+      failed++;
+      lines.push(`${i + 1}. ✗ a batch item cannot hold a batch`);
+      continue;
+    }
+    const parsed = shape.safeParse({
+      ...(defaults.workstream != null ? {workstream: defaults.workstream} : {}),
+      ...(defaults.run_dir != null ? {run_dir: defaults.run_dir} : {}),
+      ...item,
+    });
+    if (!parsed.success) {
+      failed++;
+      lines.push(
+        `${i + 1}. ✗ invalid: ${parsed.error.issues.map(x => `${x.path.join('.')}: ${x.message}`).join('; ')}`,
+      );
+      continue;
+    }
+    const out = (await entry.handler(parsed.data, extra)) as {
+      content?: Array<{type: string; text?: string}>;
+      isError?: boolean;
+    };
+    const text = (out.content ?? [])
+      .map(c => (c.type === 'text' ? (c.text ?? '') : ''))
+      .join('\n');
+    if (out.isError === true) failed++;
+    const head =
+      text
+        .split('\n')
+        .map(l => l.trim())
+        .find(l => l !== '' && !l.startsWith('>')) ?? '(no output)';
+    const fix = text
+      .split('\n')
+      .filter(l => l.startsWith('- Fix status of '))
+      .map(l => l.slice(2));
+    lines.push(
+      `${i + 1}. ${out.isError === true ? '✗ ' : ''}${head.replace(/^#+\s*/, '').slice(0, 220)}` +
+        (fix.length > 0 ? ` — ${fix.join('; ')}` : ''),
+    );
+  }
+  return toolResult(
+    [
+      `## finding_index batch: ${batch.length} action(s)${failed > 0 ? `, ${failed} failed` : ''}`,
+      '',
+      ...lines,
+    ].join('\n'),
+  );
+}
+
 export function registerFindingIndex(server: McpServer): void {
   server.tool(
     'memlab_finding_index',
@@ -1284,9 +1351,10 @@ export function registerFindingIndex(server: McpServer): void {
           'delete',
           'reconfirm',
           'stale',
+          'batch',
         ])
         .describe(
-          '"check" (fingerprint + look up, no write), "record" (add/update), "amend" (edit an EXISTING entry in place, without counting a sighting), "delete" (remove an entry), "import" (bulk-seed history), "export" (write the whole index to a file so it can be checked in), "list", "cover" (log combos driven in a round). `amend` and `delete` address an entry by `fingerprint` — which is how a bad entry is repaired, since a wrong signature cannot be re-derived from a path. "reconfirm" adds a sighting (`round`, optional `rate` and `note`) to an EXISTING entry by `fingerprint`: the way to attach a re-sighting whose path or class set came out slightly different, instead of minting a second entry for the same finding. "stale" lists FIXED findings whose outcome was never settled: no `fix_outcome` (or "pending") and nothing confirmed in the last `max_age_days` (default 60), or a gate that is no longer serving. Those are the fixes that may never have shipped, or were removed after shipping.',
+          '"check" (fingerprint + look up, no write), "record" (add/update), "amend" (edit an EXISTING entry in place, without counting a sighting), "delete" (remove an entry), "import" (bulk-seed history), "export" (write the whole index to a file so it can be checked in), "list", "cover" (log combos driven in a round). `amend` and `delete` address an entry by `fingerprint` — which is how a bad entry is repaired, since a wrong signature cannot be re-derived from a path. "reconfirm" adds a sighting (`round`, optional `rate` and `note`) to an EXISTING entry by `fingerprint`: the way to attach a re-sighting whose path or class set came out slightly different, instead of minting a second entry for the same finding. "stale" lists FIXED findings whose outcome was never settled: no `fix_outcome` (or "pending") and nothing confirmed in the last `max_age_days` (default 60), or a gate that is no longer serving. Those are the fixes that may never have shipped, or were removed after shipping. "batch" runs the calls in `batch` and returns one line each.',
         ),
       retainer_path: z
         .string()
@@ -1465,39 +1533,56 @@ export function registerFindingIndex(server: McpServer): void {
         .describe(
           'For action "import": findings passed inline, for seeding straight from a team doc without writing a file first. For action "record": a batch, each entry recorded as a sighting exactly as a single `record` would be (top-level `round`, `status`, `fixed_behind`, `fixed_by_diffs`, `verified_by_ab`, `gate_state`, `gate_checked_on`, `fix_outcome`, `fix_outcome_on` and `retraction_reason` apply to entries without their own; `title` and `note` are per entry). Both accept the same fields: retainer_path|signature, growing_classes, round, status, title, note|notes, fixed_behind, fixed_by_diffs, verified_by_ab, gate_state, gate_checked_on, fix_outcome, fix_outcome_on, retraction_reason.',
         ),
+      batch: z
+        .array(z.record(z.unknown()))
+        .optional()
+        .describe(
+          'For action "batch": several actions in ONE call. Each item is the arguments of one call (`{action, fingerprint, round, rate, note, …}`); top-level `workstream` and `run_dir` apply to items without their own. Returns one compact line per item (its verdict heading and any fix status) instead of each full report.',
+        ),
     },
-    async ({
-      action,
-      retainer_path,
-      kind,
-      keys,
-      fingerprint: fingerprintArg,
-      growing_classes,
-      round,
-      since_round,
-      status,
-      fixed_behind,
-      fixed_by_diffs,
-      verified_by_ab,
-      gate_state,
-      gate_checked_on,
-      fix_outcome,
-      fix_outcome_on,
-      max_age_days,
-      retraction_reason,
-      title,
-      note,
-      notes,
-      combos,
-      served_revision,
-      preset_hash,
-      run_dir,
-      workstream: workstreamArg,
-      rate,
-      from,
-      to,
-      findings,
-    }) => {
+    async (
+      {
+        action,
+        retainer_path,
+        kind,
+        keys,
+        fingerprint: fingerprintArg,
+        growing_classes,
+        round,
+        since_round,
+        status,
+        fixed_behind,
+        fixed_by_diffs,
+        verified_by_ab,
+        gate_state,
+        gate_checked_on,
+        fix_outcome,
+        fix_outcome_on,
+        max_age_days,
+        retraction_reason,
+        title,
+        note,
+        notes,
+        combos,
+        served_revision,
+        preset_hash,
+        run_dir,
+        workstream: workstreamArg,
+        rate,
+        from,
+        to,
+        findings,
+        batch,
+      },
+      extra,
+    ) => {
+      if (batch != null && batch.length > 0) {
+        return runFindingBatch(
+          batch,
+          {workstream: workstreamArg, run_dir},
+          extra,
+        );
+      }
       try {
         // A WRITE never inherits a remembered scope. Convenience for a bare
         // `check` is worth a remembered scope; silently filing a finding into

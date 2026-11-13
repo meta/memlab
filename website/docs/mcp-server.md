@@ -416,6 +416,9 @@ same path with another class set, or a path whose last hops share names);
 attach the sighting to one with `action: "reconfirm"`, `fingerprint` and an
 optional `rate`. Set `MEMLAB_FIX_STATUS_CMD` to a shell command containing
 `{diff}` to show the live status of each diff a finding records as its fix.
+`action: "batch"` runs several calls at once (`batch: [{action, fingerprint,
+round, rate}, …]`, with top-level `workstream` and `run_dir` as defaults) and
+returns one line per item, which is what a round's bookkeeping needs.
 A lookup that fails says why (a timeout, the exit code, the first stderr
 line), answers are cached per diff for ten minutes, and `memlab_server_status`
 shows the last lookup's result. `MEMLAB_FIX_STATUS_TIMEOUT_MS` sets the timeout
