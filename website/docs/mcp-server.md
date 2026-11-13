@@ -660,6 +660,11 @@ with the dedicated-worker share: workers and wasm are in no page snapshot, so
 this is the only place their growth shows. Without it, the header gives the
 dedicated workers' JS heap the runner read over CDP instead.
 `memlab_hunt_report` lists the same numbers per rung in its off-heap table.
+`memlab_object_urls` counts unrevoked `blob:` URLs, whose Blobs are pinned
+outside the V8 heap. When the runner recorded `off_heap.object_url_creators`
+per rung (a traced `URL.createObjectURL`: live URLs grouped by the calling
+frame, with their bytes), it also ranks those creators by growth and prints
+the stack of the fastest-growing one, which names the code that never revokes.
 Once per sweep (the round
 directories sharing a parent), a `standard` battery also runs
 `memlab_sparse_elements`, `memlab_duplicated_strings` and

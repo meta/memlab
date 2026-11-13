@@ -128,6 +128,78 @@ function offHeapByRung(
   }
 }
 
+export interface UrlCreator {
+  creator: string;
+  stack?: string[];
+  count: number;
+  bytes: number;
+}
+
+/**
+ * Per-rung live object URLs grouped by creating frame, as recorded by a
+ * runner that traced `URL.createObjectURL` (`off_heap.object_url_creators`).
+ */
+export function creatorsByRung(runDir: string): Array<UrlCreator[] | null> {
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'),
+    ) as {rungs?: Array<{off_heap?: Record<string, unknown>}>};
+    return (raw.rungs ?? []).map(r => {
+      const c = r.off_heap?.object_url_creators;
+      return Array.isArray(c) ? (c as UrlCreator[]) : null;
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Creators ranked by how fast their live URLs grow: the per-rung count of
+ * each, its rate, and the bytes it holds on the last traced rung.
+ */
+export function creatorTable(
+  perRung: Array<UrlCreator[] | null>,
+  xs: number[],
+  limit = 10,
+): Array<{
+  creator: string;
+  stack: string[];
+  counts: Array<number | null>;
+  slope: number | null;
+  bytes: number;
+}> {
+  const names = new Map<string, string[]>();
+  for (const rung of perRung) {
+    for (const c of rung ?? []) {
+      if (!names.has(c.creator)) names.set(c.creator, c.stack ?? []);
+    }
+  }
+  const lastTraced = [...perRung].reverse().find(r => r != null) ?? [];
+  const rows = [...names].map(([creator, stack]) => {
+    const counts = perRung.map(r =>
+      r == null ? null : (r.find(c => c.creator === creator)?.count ?? 0),
+    );
+    const pts = counts
+      .map((y, i) => ({x: xs[i], y}))
+      .filter((p): p is {x: number; y: number} => p.y != null && p.x != null);
+    const slope =
+      pts.length >= 2 && new Set(pts.map(p => p.x)).size >= 2
+        ? linearFit(
+            pts.map(p => p.x),
+            pts.map(p => p.y),
+          ).slope
+        : null;
+    const bytes = lastTraced.find(c => c.creator === creator)?.bytes ?? 0;
+    return {creator, stack, counts, slope, bytes};
+  });
+  return rows
+    .sort(
+      (a, b) =>
+        (b.slope ?? -Infinity) - (a.slope ?? -Infinity) || b.bytes - a.bytes,
+    )
+    .slice(0, limit);
+}
+
 function rate(xs: number[], ys: number[]): string {
   if (xs.length < 2 || new Set(xs).size < 2) return '—';
   const fit = linearFit(xs, ys);
@@ -182,7 +254,7 @@ export function registerObjectUrls(server: McpServer): void {
     'memlab_object_urls',
     'Unrevoked `blob:` object URLs — a leak that every heap-size metric misses, because each live URL pins its Blob in the browser blob registry, OFF the V8 heap. ' +
       'Counts `blob:` URL strings, the entries of an instrumented `URL.createObjectURL` register (grouped by File/Blob/MediaSource), live Blob/File wrappers, and which property edges hold the URLs. ' +
-      'With `run_dir` (or `paths`) it counts every rung and reports per-cycle rates, plus the in-page register byte totals the leak-hunt runner records per rung (`object_url_bytes`). Without either it reads the loaded snapshot.',
+      'With `run_dir` (or `paths`) it counts every rung and reports per-cycle rates, plus the in-page register byte totals the leak-hunt runner records per rung (`object_url_bytes`). When the round traced `URL.createObjectURL` (runner `--trace-object-urls`), it also ranks the CREATORS of the live URLs (calling frame, count per rung, rate, bytes) and prints the stack of the fastest-growing one. Without either it reads the loaded snapshot.',
     {
       run_dir: z
         .string()
@@ -297,6 +369,44 @@ export function registerObjectUrls(server: McpServer): void {
             `**Holders of the URL strings on the last rung:** ${holders
               .map(([k, n]) => `\`${k}\` ${formatNumber(n)}`)
               .join(', ')}`,
+            '',
+          );
+        }
+        const creators =
+          run_dir != null ? creatorsByRung(run_dir).slice(0, rows.length) : [];
+        if (creators.some(c => c != null)) {
+          const ranked = creatorTable(creators, xs);
+          lines.push(
+            '**Who created the live URLs** (traced `URL.createObjectURL`, grouped by the calling frame):',
+            '',
+            markdownTable(
+              [
+                'Creator',
+                ...rows.map((r, i) => (axis != null ? `c${xs[i]}` : r.label)),
+                `Δ/${unit}`,
+                'Bytes (last rung)',
+              ],
+              ranked.map(r => [
+                `\`${r.creator.slice(0, 120)}\``,
+                ...r.counts.map(c => (c == null ? '—' : formatNumber(c))),
+                r.slope == null
+                  ? '—'
+                  : `${r.slope >= 0 ? '+' : ''}${r.slope.toFixed(3)}`,
+                formatBytes(r.bytes),
+              ]),
+            ),
+            '',
+          );
+          const top = ranked.find(r => (r.slope ?? 0) > 0.01);
+          if (top != null && top.stack.length > 1) {
+            lines.push(
+              `Fastest-growing creator's stack: ${top.stack.map(f => `\`${f.slice(0, 100)}\``).join(' ← ')}`,
+              '',
+            );
+          }
+        } else if (run_dir != null) {
+          lines.push(
+            "_No creator stacks in this run.json. Re-run the round with the runner's `--trace-object-urls` to name the code creating each live URL._",
             '',
           );
         }
