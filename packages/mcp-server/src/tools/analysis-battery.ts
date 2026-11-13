@@ -463,6 +463,8 @@ function buildPlan(
     // queue counts from which the one question the tool exists to answer —
     // are chains LENGTHENING or are there just more hooks — cannot be read.
     {tool: 'memlab_react_update_queues', args: {run_dir: runDir}},
+    // `native_bind` is one opaque row in every census; this names whose.
+    {tool: 'memlab_bound_functions', args: {run_dir: runDir, limit: 10}},
     {tool: 'memlab_async_census', args: {}},
     {tool: 'memlab_retention_windows', args: {}},
   ];
@@ -719,6 +721,7 @@ const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
       max: 2,
     },
     {tool: /census_diff/, re: /^Totals:/, max: 4},
+    {tool: /bound_functions/, re: /^Total `native_bind`/, max: 1},
     // The named dev-build patterns. A digest without them listed every row a
     // dev-only chain pinned as a leak candidate, and the pattern was
     // re-identified by hand from the per-tool file.

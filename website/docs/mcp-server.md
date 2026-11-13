@@ -665,6 +665,13 @@ recorded it (`browser_anon_mb`), and per-100-cycle rates of each. It flags
 browser-process or renderer growth that outpaces the JS heap: live object URLs
 keep their Blob bytes in the browser process, so that leak is flat in every
 heap figure and in the renderer's memory.
+`memlab_bound_functions` opens up the `native_bind` row of a census: V8 names
+every `fn.bind(...)` result `native_bind`, so growth there says nothing about
+whose it is. The tool groups bound functions by the target function and its
+module, the receiver or first bound argument (a React `useState` setter is
+bound to its fiber, so the row names the component), and the edge holding
+them, and ranks the groups by growth per cycle across a ladder. The `deep`
+battery profile runs it.
 `memlab_object_urls` counts unrevoked `blob:` URLs, whose Blobs are pinned
 outside the V8 heap. When the runner recorded `off_heap.object_url_creators`
 per rung (a traced `URL.createObjectURL`: live URLs grouped by the calling
