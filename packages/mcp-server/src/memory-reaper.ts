@@ -9,15 +9,16 @@
  */
 
 import {evictLeastRecentlyUsed, unloadIdleSnapshots} from './heap-state.js';
+import {releaseMemory} from './memory-release.js';
 
 /**
  * Keeps a long-lived server from holding memory nobody is using.
  *
  * - Resident snapshots untouched for `MEMLAB_IDLE_UNLOAD_MIN` minutes
  *   (default 30; 0 turns it off) are unloaded, except the current one.
- * - Above `MEMLAB_RSS_SOFT_CAP_MB` (unset by default), least-recently-used
- *   snapshots are evicted until RSS is under it or only the current one is
- *   left.
+ * - Above `MEMLAB_RSS_SOFT_CAP_MB` (unset by default), the least-recently-used
+ *   snapshot is evicted, one per check, until RSS is under it or only the
+ *   current one is left.
  *
  * Checked once a minute on an unref'd timer, so it never keeps the process
  * alive. What it did is kept for `memlab_server_status`.
@@ -62,11 +63,15 @@ export function reapOnce(now = Date.now()): void {
       record('idle', m.handle, m.fileName);
     }
   }
-  if (rssCapMb != null) {
-    while (process.memoryUsage().rss / 1048576 > rssCapMb) {
-      const m = evictLeastRecentlyUsed();
-      if (m == null) break;
+  if (rssCapMb != null && process.memoryUsage().rss / 1048576 > rssCapMb) {
+    // One eviction per pass. RSS falls only after the collector has run and
+    // its sweeper has freed the arrays, which is not synchronous even with
+    // a forced GC: a loop that re-read RSS evicted every snapshot at once.
+    // The next pass, a minute later, sees what this one freed.
+    const m = evictLeastRecentlyUsed();
+    if (m != null) {
       record('rss-cap', m.handle, m.fileName);
+      releaseMemory(1);
     }
   }
 }

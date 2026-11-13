@@ -775,8 +775,8 @@ before a client that backgrounds long calls (at 120 s) would. A RUNNING reply
 carries the time it was written, so a reply delivered late reads as stale.
 A long-lived server unloads resident snapshots other than the current one
 after 30 idle minutes (`MEMLAB_IDLE_UNLOAD_MIN`), and with
-`MEMLAB_RSS_SOFT_CAP_MB` set it evicts the least-recently-used ones while its
-RSS is above that. `memlab_server_status({all: true})` lists every memlab
+`MEMLAB_RSS_SOFT_CAP_MB` set it evicts the least-recently-used one, once a
+minute, while its RSS is above that. `memlab_server_status({all: true})` lists every memlab
 server process on the host with its parent, RSS and age, so an orphaned server
 holding gigabytes is easy to spot.
 Job and async-battery handles are also written to a ledger under

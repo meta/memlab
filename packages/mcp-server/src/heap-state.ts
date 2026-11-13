@@ -160,7 +160,12 @@ export function unloadIdleSnapshots(
     ) {
       continue;
     }
-    const at = lastUsedAt.get(handle) ?? 0;
+    const at = lastUsedAt.get(handle);
+    if (at == null) {
+      // Never stamped: idle from now, not since 1970.
+      lastUsedAt.set(handle, now);
+      continue;
+    }
     if (now - at < idleMs) continue;
     const meta = loaded.get(handle)?.metadata;
     loaded.delete(handle);

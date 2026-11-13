@@ -9,7 +9,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import {execFileSync} from 'child_process';
+import {execFile} from 'child_process';
 import fs from 'fs';
 import {z} from 'zod';
 import {perfSnapshot} from '../perf-stats.js';
@@ -47,23 +47,25 @@ function stableScriptsPath(): {stable: string; resolved: string | null} | null {
  * (its client gone) can hold gigabytes of snapshots with nothing using it,
  * and the status of THIS process cannot show it.
  */
-export function memlabServerProcesses(): Array<{
-  pid: number;
-  ppid: number;
-  rssMb: number;
-  ageS: number;
-  args: string;
-}> {
-  let out: string;
-  try {
-    out = execFileSync('ps', ['-eo', 'pid=,ppid=,rss=,etimes=,args='], {
-      encoding: 'utf8',
-      timeout: 5000,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-  } catch {
-    return [];
-  }
+export async function memlabServerProcesses(): Promise<
+  Array<{
+    pid: number;
+    ppid: number;
+    rssMb: number;
+    ageS: number;
+    args: string;
+  }>
+> {
+  // Asynchronous: a status call must not block the event loop for `ps`.
+  const out = await new Promise<string | null>(resolve => {
+    execFile(
+      'ps',
+      ['-eo', 'pid=,ppid=,rss=,etimes=,args='],
+      {encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024},
+      (err, stdout) => resolve(err != null ? null : String(stdout)),
+    );
+  });
+  if (out == null) return [];
   const rows = [];
   for (const line of out.split('\n')) {
     const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
@@ -221,7 +223,7 @@ export function registerServerStatus(server: McpServer): void {
           '_Recovery: if a prior long/interrupted call left the server unresponsive (even trivial calls hang), starting a FRESH server instance fully recovers it — restart the MCP server and reload the snapshot._',
         );
         if (listAll === true) {
-          const procs = memlabServerProcesses();
+          const procs = await memlabServerProcesses();
           lines.push(
             '',
             `**memlab server processes on this host: ${procs.length}**`,

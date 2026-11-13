@@ -632,7 +632,7 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_REPEAT_NOTES` | `1` prints standing explanatory notes on every call instead of once per session |
 | `MEMLAB_PREWARM_CONCURRENCY` | Number of workers that build sidecar indexes for a ladder in parallel |
 | `MEMLAB_IDLE_UNLOAD_MIN` | Minutes a resident snapshot other than the current one may go untouched before the server unloads it (default 30, `0` off). Sidecar indexes stay on disk, so a reload is cheap |
-| `MEMLAB_RSS_SOFT_CAP_MB` | When set, the server evicts least-recently-used snapshots (never the current one) while its RSS is above this. `memlab_server_status` reports both settings and what they unloaded; `memlab_server_status({all: true})` lists every memlab server process on the host |
+| `MEMLAB_RSS_SOFT_CAP_MB` | When set, the server evicts the least-recently-used snapshot (never the current one) once a minute while its RSS is above this. `memlab_server_status` reports both settings and what they unloaded; `memlab_server_status({all: true})` lists every memlab server process on the host |
 | `MEMLAB_BATTERY_ISOLATE` | `0` runs an `async: true` `memlab_analysis_battery` in the server process instead of a child copy of it (the default, `isolate: true`, keeps the server answering other calls while the battery runs) |
 | `MEMLAB_RETAIN_RUNGS` | Most rungs `memlab_analysis_battery` keeps parsed between its steps, so the next ladder tool reuses them instead of parsing again (default 8, fewer when memory is short; `0` turns it off) |
 | `MEMLAB_NO_INDEX_CACHE` | `1` disables the `.memlab-index.json` sidecar cache, for example for a cold measurement |
