@@ -24,6 +24,8 @@ import fs from 'fs';
 
 /** Set in the child, so it never isolates again. */
 export const CHILD_ENV = 'MEMLAB_ISOLATED_CHILD';
+/** The parent's battery handle id, for the child's done marker. */
+export const PARENT_BATTERY_ENV = 'MEMLAB_PARENT_BATTERY_ID';
 
 export function isIsolatedChild(): boolean {
   return process.env[CHILD_ENV] === '1';
@@ -39,10 +41,26 @@ export interface ChildCall {
  * Spawn `process.argv[1]` (this server's entry point) with the same node
  * flags, call `tool` once, and exit.
  */
+/**
+ * In the child: a parent that exits mid-call closes the child's stdout and
+ * stderr, and the next progress note or log line written there raised EPIPE and killed the child with
+ * its work half done. The child instead keeps going and writes its outputs
+ * to disk, where a later server finds them.
+ */
+export function guardChildStdout(): void {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return;
+      throw err;
+    });
+  }
+}
+
 export function callToolInChild(
   tool: string,
   args: Record<string, unknown>,
   label: string,
+  env: Record<string, string> = {},
 ): ChildCall {
   const entry = process.argv[1];
   if (entry == null || !fs.existsSync(entry)) {
@@ -53,9 +71,17 @@ export function callToolInChild(
       pid: undefined,
     };
   }
+  // Its own process group: a signal to the parent's group (a client
+  // restarting its server) does not take the child's work with it.
   const child = spawn(process.execPath, [...process.execArgv, entry], {
-    env: {...process.env, [CHILD_ENV]: '1'},
+    env: {...process.env, ...env, [CHILD_ENV]: '1'},
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
+  });
+  // The parent's own writes to a child that died must not crash it either;
+  // the child's exit settles the call.
+  child.stdin.on('error', err => {
+    process.stderr.write(`[${label}] stdin: ${String(err)}\n`);
   });
   const send = (msg: object): void => {
     child.stdin.write(`${JSON.stringify(msg)}\n`);

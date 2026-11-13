@@ -57,7 +57,11 @@ import {errorResult, formatBytes, formatNumber, toolResult} from '../utils.js';
 import {runWithReadScope} from '../read-scope.js';
 import {runWithRungRetention} from '../snapshot-borrow.js';
 import {MAX_STATUS_WAIT_MS, statusTime} from './jobs.js';
-import {callToolInChild, isIsolatedChild} from '../battery-child.js';
+import {
+  PARENT_BATTERY_ENV,
+  callToolInChild,
+  isIsolatedChild,
+} from '../battery-child.js';
 import {
   describeForeignEntry,
   readLedger,
@@ -157,18 +161,24 @@ function partialDigestText(run: BatteryRun): string {
  */
 async function runIsolated(
   run: BatteryRun,
-  ledger: LedgerEntry,
+  started: LedgerEntry,
   args: Record<string, unknown>,
 ): Promise<string> {
+  let ledger = started;
   const childArgs: Record<string, unknown> = {async: false, isolate: false};
   for (const [k, v] of Object.entries(args)) {
     if (v !== undefined) childArgs[k] = v;
   }
+  // The child stamps its done marker with THIS handle's id, so a later
+  // server matches the result to the handle even if this process is gone
+  // before it can re-stamp.
   const call = callToolInChild(
     'memlab_analysis_battery',
     childArgs,
     `battery ${run.id}`,
+    {[PARENT_BATTERY_ENV]: run.id},
   );
+  ledger = {...ledger, child_pid: call.pid};
   writeLedger({...ledger, notes: [`isolated in child process ${call.pid}`]});
   const mirror = (): void => {
     try {
@@ -198,7 +208,11 @@ async function runIsolated(
       fs.writeFileSync(
         doneFile,
         JSON.stringify(
-          {...d, battery_id: run.id, child_battery_id: d.battery_id},
+          {
+            ...d,
+            battery_id: run.id,
+            child_battery_id: d.child_battery_id ?? d.battery_id,
+          },
           null,
           2,
         ),
@@ -2149,7 +2163,11 @@ export function registerAnalysisBattery(server: McpServer): void {
               JSON.stringify(
                 {
                   status,
-                  battery_id: tracked.id,
+                  // In an isolated child, the parent's handle id.
+                  battery_id: process.env[PARENT_BATTERY_ENV] ?? tracked.id,
+                  ...(process.env[PARENT_BATTERY_ENV] != null
+                    ? {child_battery_id: tracked.id}
+                    : {}),
                   run_dir,
                   profile,
                   out_dir: outDir,

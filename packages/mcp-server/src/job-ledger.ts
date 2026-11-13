@@ -37,6 +37,8 @@ export interface LedgerEntry {
   result_file?: string;
   /** The latest few progress notes, written as they happen. */
   notes?: string[];
+  /** The isolated child doing the work, which can outlive `pid`. */
+  child_pid?: number;
 }
 
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -167,6 +169,19 @@ export function describeForeignEntry(
     entry.notes != null && entry.notes.length > 0
       ? `\n\nLast progress notes:\n${entry.notes.map(n => `- ${n}`).join('\n')}`
       : '';
+  if (
+    !pidAlive(entry.pid) &&
+    entry.child_pid != null &&
+    pidAlive(entry.child_pid)
+  ) {
+    return {
+      text:
+        `\`${entry.id}\` (\`${entry.tool}\`) is still RUNNING in its isolated child process ${entry.child_pid}; ${who}, which started it, has exited. ` +
+        'Its result is written to disk when it finishes; ask again then.' +
+        notes,
+      isError: false,
+    };
+  }
   if (pidAlive(entry.pid)) {
     return {
       text:

@@ -11,6 +11,7 @@
 
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
+import {guardChildStdout, isIsolatedChild} from './battery-child.js';
 import memlabCore from '@memlab/core';
 const {config, ErrorHandling} = memlabCore;
 import {installAnalysisGuardrail} from './guardrail.js';
@@ -369,6 +370,7 @@ registerReactUpdateQueues(server);
 registerIdSpaceAudit(server);
 
 async function main() {
+  if (isIsolatedChild()) guardChildStdout();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
