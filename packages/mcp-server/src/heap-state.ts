@@ -129,8 +129,47 @@ export function getSessionHandle(): string | null {
 const lastUsed = new Map<string, number>();
 let useCounter = 0;
 
+// Wall-clock time of the last use, for the idle reaper below.
+const lastUsedAt = new Map<string, number>();
+
 function touch(handle: string | null): void {
-  if (handle != null) lastUsed.set(handle, ++useCounter);
+  if (handle != null) {
+    lastUsed.set(handle, ++useCounter);
+    lastUsedAt.set(handle, Date.now());
+  }
+}
+
+/**
+ * Unload resident snapshots no call has touched for `idleMs`, never the
+ * current one or a pinned one. Returns what was dropped.
+ *
+ * `keep_previous` loads stay resident for the life of the process, and a
+ * long session's server was seen at 17 GB RSS a day later with nobody using
+ * it. Sidecar indexes stay on disk, so a reload is cheap.
+ */
+export function unloadIdleSnapshots(
+  idleMs: number,
+  now = Date.now(),
+): SnapshotMetadata[] {
+  const dropped: SnapshotMetadata[] = [];
+  for (const handle of [...loaded.keys()]) {
+    if (
+      handle === currentHandle ||
+      handle === activeHandle() ||
+      pinned.has(handle)
+    ) {
+      continue;
+    }
+    const at = lastUsedAt.get(handle) ?? 0;
+    if (now - at < idleMs) continue;
+    const meta = loaded.get(handle)?.metadata;
+    loaded.delete(handle);
+    lastUsed.delete(handle);
+    lastUsedAt.delete(handle);
+    dropEvalScratch(handle);
+    if (meta != null) dropped.push(meta);
+  }
+  return dropped;
 }
 
 /**
@@ -184,6 +223,7 @@ export function evictLeastRecentlyUsed(): SnapshotMetadata | null {
   const meta = loaded.get(victim)?.metadata ?? null;
   loaded.delete(victim);
   lastUsed.delete(victim);
+  lastUsedAt.delete(victim);
   dropEvalScratch(victim);
   return meta;
 }
