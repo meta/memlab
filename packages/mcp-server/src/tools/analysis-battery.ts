@@ -612,6 +612,7 @@ export function abSegments(
 // Ladder tools that take `segment`, and two-snapshot tools whose ends must sit
 // in one arm.
 const SEGMENTED_TOOLS = new Set([
+  'memlab_bound_functions',
   'memlab_leak_report',
   'memlab_detached_dom',
   'memlab_event_registry',

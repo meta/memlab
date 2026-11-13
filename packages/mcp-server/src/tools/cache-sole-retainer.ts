@@ -13,7 +13,11 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {withSnapshotAt} from '../snapshot-borrow.js';
-import {loadRunManifest} from '../run-manifest.js';
+import {
+  describeSegmentSelection,
+  resolveLadderInputs,
+  segmentArg,
+} from '../run-manifest.js';
 import {resolveLadderPaths} from './ladder.js';
 import {linearFit} from './ladder-probe.js';
 import {moduleCollections} from './cache-inventory.js';
@@ -246,7 +250,7 @@ export function registerCacheSoleRetainer(server: McpServer): void {
   server.tool(
     'memlab_cache_sole_retainer',
     "Module-level caches (Map / Set / Array held by a module scope or by an exported function, such as a memoizer's `fn.$$cache`) counted by the objects that ONLY caches keep alive: reachability from the GC roots is computed with every cache collection refused, and what is lost is attributed to the caches that reach it. The app has let those objects go. " +
-      'Size-ranked cache tools cannot tell this from a cache of live data. With `run_dir` (or `paths`) it ranks caches by cache-only objects gained per cycle, with the classes they hold; without, it lists the loaded snapshot.',
+      'Size-ranked cache tools cannot tell this from a cache of live data. With `run_dir` (or `paths`) it ranks caches by cache-only objects gained per cycle, with the classes they hold; without, it lists the loaded snapshot. A run that reloaded mid-ladder, such as an A/B round, needs `segment` (one arm).',
     {
       run_dir: z
         .string()
@@ -258,6 +262,7 @@ export function registerCacheSoleRetainer(server: McpServer): void {
         .describe(
           'Ordered snapshot paths, oldest first (or ["ladder:<name>"]), instead of run_dir.',
         ),
+      segment: segmentArg(),
       min_entries: z
         .number()
         .int()
@@ -274,7 +279,7 @@ export function registerCacheSoleRetainer(server: McpServer): void {
         .default(15)
         .describe('Rows to show.'),
     },
-    async ({run_dir, paths, min_entries, limit}) => {
+    async ({run_dir, paths, segment, min_entries, limit}) => {
       try {
         if (run_dir == null && (paths == null || paths.length === 0)) {
           const rows = [...soleRetained(getSnapshot(), min_entries).values()]
@@ -314,10 +319,17 @@ export function registerCacheSoleRetainer(server: McpServer): void {
         }
         let rungPaths: string[];
         let axis: number[] | null = null;
+        // A run that reloaded mid-ladder (an A/B round's two arms) is two
+        // isolates: one fit across them reads the reload as growth or loss.
+        let segmentNote: string | null = null;
         if (run_dir != null) {
-          const manifest = loadRunManifest(run_dir);
-          rungPaths = manifest.paths;
-          axis = manifest.cyclesPerRung;
+          const inputs = resolveLadderInputs({run_dir, segment});
+          rungPaths = inputs.paths;
+          axis = inputs.cyclesPerRung;
+          segmentNote = describeSegmentSelection(
+            inputs.segment,
+            inputs.manifest,
+          );
         } else {
           rungPaths = resolveLadderPaths(paths as string[]).paths;
         }
@@ -353,6 +365,7 @@ export function registerCacheSoleRetainer(server: McpServer): void {
           [
             '## What only caches keep alive, across the ladder',
             '',
+            ...(segmentNote != null ? [segmentNote, ''] : []),
             markdownTable(
               [
                 'Module',

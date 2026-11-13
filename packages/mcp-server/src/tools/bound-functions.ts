@@ -13,7 +13,11 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {withSnapshotAt} from '../snapshot-borrow.js';
-import {loadRunManifest} from '../run-manifest.js';
+import {
+  describeSegmentSelection,
+  resolveLadderInputs,
+  segmentArg,
+} from '../run-manifest.js';
 import {resolveLadderPaths} from './ladder.js';
 import {linearFit} from './ladder-probe.js';
 import {sourceOfNode} from './module-attribution.js';
@@ -156,7 +160,7 @@ export function registerBoundFunctions(server: McpServer): void {
   server.tool(
     'memlab_bound_functions',
     'Bound functions (`fn.bind(...)`, all named `native_bind` by V8) grouped by what they are bound to: the target function and its module, the receiver or first bound argument (for a React `useState` setter, the component that owns the state), and the edge holding them. ' +
-      'A class census shows bound functions as one opaque `native_bind` row; this says whose they are. With `run_dir` (or `paths`) it counts every rung and ranks the groups by growth per cycle; without, it reads the loaded snapshot.',
+      'A class census shows bound functions as one opaque `native_bind` row; this says whose they are. With `run_dir` (or `paths`) it counts every rung and ranks the groups by growth per cycle; without, it reads the loaded snapshot. A run that reloaded mid-ladder, such as an A/B round, needs `segment` (one arm).',
     {
       run_dir: z
         .string()
@@ -168,6 +172,7 @@ export function registerBoundFunctions(server: McpServer): void {
         .describe(
           'Ordered snapshot paths, oldest first (or ["ladder:<name>"]), instead of run_dir.',
         ),
+      segment: segmentArg(),
       limit: z
         .number()
         .int()
@@ -177,7 +182,7 @@ export function registerBoundFunctions(server: McpServer): void {
         .default(15)
         .describe('Groups to show.'),
     },
-    async ({run_dir, paths, limit}) => {
+    async ({run_dir, paths, segment, limit}) => {
       try {
         if (run_dir == null && (paths == null || paths.length === 0)) {
           const groups = [...countBoundFunctions(getSnapshot()).values()].sort(
@@ -206,10 +211,17 @@ export function registerBoundFunctions(server: McpServer): void {
         }
         let rungPaths: string[];
         let axis: number[] | null = null;
+        // A run that reloaded mid-ladder (an A/B round's two arms) is two
+        // isolates: one fit across them reads the reload as growth or loss.
+        let segmentNote: string | null = null;
         if (run_dir != null) {
-          const manifest = loadRunManifest(run_dir);
-          rungPaths = manifest.paths;
-          axis = manifest.cyclesPerRung;
+          const inputs = resolveLadderInputs({run_dir, segment});
+          rungPaths = inputs.paths;
+          axis = inputs.cyclesPerRung;
+          segmentNote = describeSegmentSelection(
+            inputs.segment,
+            inputs.manifest,
+          );
         } else {
           rungPaths = resolveLadderPaths(paths as string[]).paths;
         }
@@ -245,6 +257,7 @@ export function registerBoundFunctions(server: McpServer): void {
         const lines = [
           `## Bound functions across the ladder`,
           '',
+          ...(segmentNote != null ? [segmentNote, ''] : []),
           `Total \`native_bind\`: ${totals.map(formatNumber).join(' → ')} (${linearFit(xs, totals).slope >= 0 ? '+' : ''}${linearFit(xs, totals).slope.toFixed(2)}/${unit}).`,
           '',
           markdownTable(
