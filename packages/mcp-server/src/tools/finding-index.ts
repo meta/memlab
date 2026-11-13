@@ -1288,7 +1288,7 @@ async function runFindingBatch(
   const lines: string[] = [];
   let failed = 0;
   for (const [i, item] of batch.entries()) {
-    if ('batch' in item) {
+    if ('batch' in item || item.action === 'batch') {
       failed++;
       lines.push(`${i + 1}. ✗ a batch item cannot hold a batch`);
       continue;
@@ -1305,10 +1305,23 @@ async function runFindingBatch(
       );
       continue;
     }
-    const out = (await entry.handler(parsed.data, extra)) as {
+    let out: {
       content?: Array<{type: string; text?: string}>;
       isError?: boolean;
     };
+    try {
+      out = (await entry.handler(parsed.data, extra)) as typeof out;
+    } catch (err) {
+      // One item's throw must not drop the lines already gathered.
+      failed++;
+      lines.push(
+        `${i + 1}. ✗ ${err instanceof Error ? err.message : String(err)}`.slice(
+          0,
+          260,
+        ),
+      );
+      continue;
+    }
     const text = (out.content ?? [])
       .map(c => (c.type === 'text' ? (c.text ?? '') : ''))
       .join('\n');
