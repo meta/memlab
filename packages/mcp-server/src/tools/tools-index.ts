@@ -68,7 +68,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_pending_promises',
-        'Unsettled Promises ranked by reaction-chain length, tracked by id across a ladder — one never-settling promise gaining `.then`s per cycle.',
+        'Unsettled Promises ranked by reaction-chain length, tracked by id across a ladder — one never-settling promise gaining `.then`s per cycle — with the Blink task-attribution / soft-navigation memory each reaction keeps alive.',
       ],
       [
         'memlab_app_heap',

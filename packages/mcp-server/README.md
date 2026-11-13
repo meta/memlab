@@ -304,7 +304,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_script_census` | How much of the heap is retained JS SOURCE TEXT — and whether the same bundle is retained twice. |
 | `memlab_property_names` | Which property names exist at all; the cheapest way to confirm a field is present before probing for it. |
 | `memlab_async_census` | Pending async work: scheduler task queues (live vs cancelled), timer closures, unsettled Promises. |
-| `memlab_pending_promises` | Unsettled Promises ranked by reaction-chain length, tracked by id across a ladder — one never-settling promise gaining `.then`s per cycle. |
+| `memlab_pending_promises` | Unsettled Promises ranked by reaction-chain length, tracked by id across a ladder — one never-settling promise gaining `.then`s per cycle — with the Blink task-attribution / soft-navigation memory each reaction keeps alive. |
 | `memlab_app_heap` | START HERE on an unfamiliar app: splits the heap into application data vs bundle source vs V8 machinery. On one app this showed ~55% of the heap was JS bundle source, which reframed every number that followed. |
 | `memlab_memory_partition` | "What is using the memory?" in one exclusive table: framework families (React, collections, telemetry records, module system, memo caches, Wasm), DOM/Blink sub-families, and the rest by the module or global on its shortest path. Works minified. |
 | `memlab_path_tree` | WHERE the memory sits, as a tree: shortest-path subtrees with byte sums (they partition the heap, so shared caches show their real size), expanded wherever a branch is big. |

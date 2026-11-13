@@ -665,6 +665,12 @@ recorded it (`browser_anon_mb`), and per-100-cycle rates of each. It flags
 browser-process or renderer growth that outpaces the JS heap: live object URLs
 keep their Blob bytes in the browser process, so that leak is flat in every
 heap figure and in the renderer's memory.
+A promise that never settles costs more than its closures. Chrome keeps
+task-attribution state on every reaction (`PromiseReaction → CppHeapExternal →
+blink::TaskAttributionInfoImpl → blink::SoftNavigationContext`, with its LCP
+calculator and text records), about 1 KB per `.then`, on no JavaScript
+retainer path. `memlab_pending_promises` prints that native memory per promise,
+and `memlab_blink_native_census` watches the family on every rung.
 `memlab_bound_functions` opens up the `native_bind` row of a census: V8 names
 every `fn.bind(...)` result `native_bind`, so growth there says nothing about
 whose it is. The tool groups bound functions by the target function and its

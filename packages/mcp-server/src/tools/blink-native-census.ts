@@ -79,6 +79,11 @@ const WATCHED_HOLDERS: ReadonlyArray<{
     what: 'User Timing buffer: no cap, held until clearMarks() / clearMeasures()',
   },
   {
+    label: 'Task attribution / soft navigation',
+    re: /^blink::(TaskAttributionInfoImpl|SoftNavigationContext|LargestContentfulPaintCalculator|TextRecord)$/,
+    what: 'per-task attribution state: every reaction on a pending promise keeps one alive (see memlab_pending_promises)',
+  },
+  {
     label: 'blink::EventTargetData',
     re: /^blink::EventTargetData$/,
     what: 'per-target listener storage',

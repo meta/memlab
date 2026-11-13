@@ -76,3 +76,49 @@ export function pendingPromises(
   out.sort((a, b) => b.reactions - a.reactions);
   return out;
 }
+
+/**
+ * Native (Blink) memory a promise's reactions keep alive.
+ *
+ * Chrome stores task-attribution state on every reaction:
+ * `PromiseReaction -> CppHeapExternal -> blink::TaskAttributionInfoImpl`,
+ * which holds a `blink::SoftNavigationContext` with its LCP calculator and
+ * text records (about 1 KB on a real round). A promise that never settles
+ * therefore costs more per `.then` than its JS closures, and none of it is on
+ * a JS-side retainer path. Counted once per distinct native object.
+ */
+export function reactionNativeCost(
+  promise: IHeapNode,
+  cap = 100_000,
+): {attributions: number; softNavContexts: number; bytes: number} {
+  const natives = new Set<number>();
+  const softNav = new Set<number>();
+  const visited = new Set<number>();
+  let bytes = 0;
+  let cur = firstReaction(promise);
+  while (cur != null && !visited.has(cur.id) && visited.size < cap) {
+    visited.add(cur.id);
+    let next: IHeapNode | null = null;
+    for (const e of cur.references) {
+      const t = e.toNode;
+      if (t.name === REACTION) {
+        if (next == null && !visited.has(t.id)) next = t;
+        continue;
+      }
+      if (t.name !== 'system / CppHeapExternal') continue;
+      for (const ce of t.references) {
+        const n = ce.toNode;
+        if (!n.name.startsWith('blink::') || natives.has(n.id)) continue;
+        natives.add(n.id);
+        bytes += n.retainedSize;
+        for (const se of n.references) {
+          if (se.toNode.name === 'blink::SoftNavigationContext') {
+            softNav.add(se.toNode.id);
+          }
+        }
+      }
+    }
+    cur = next;
+  }
+  return {attributions: natives.size, softNavContexts: softNav.size, bytes};
+}

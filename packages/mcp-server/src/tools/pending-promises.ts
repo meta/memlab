@@ -18,6 +18,7 @@ import {
   isPendingPromise,
   pendingPromises,
   promiseReactions,
+  reactionNativeCost,
 } from '../promise-chains.js';
 import {resolveLadderPaths} from './ladder.js';
 import {linearFit} from './ladder-probe.js';
@@ -37,10 +38,24 @@ import {
  * per cycle — the signature of a promise that never settles while every
  * interaction attaches another `.then`.
  */
+function nativeCell(c: ReturnType<typeof reactionNativeCost>): string {
+  if (c.attributions === 0) return '—';
+  return (
+    `${formatBytes(c.bytes)} (${formatNumber(c.attributions)} task-attribution` +
+    (c.softNavContexts > 0
+      ? `, ${formatNumber(c.softNavContexts)} soft-nav context(s)`
+      : '') +
+    ')'
+  );
+}
+
+const NATIVE_NOTE =
+  '_Native via reactions: Blink objects each `.then` keeps alive through its task-attribution record (`PromiseReaction → CppHeapExternal → blink::TaskAttributionInfoImpl → SoftNavigationContext`). They are on no JS retainer path, so a never-settling promise costs this much more per reaction. A `Promise.all` attaches one reaction to each input, so promises it spans can share these objects: do not sum the column. Check whether the promise ever settles in production before calling it a leak._';
+
 export function registerPendingPromises(server: McpServer): void {
   server.tool(
     'memlab_pending_promises',
-    'Unsettled Promises ranked by REACTION-CHAIN length, with retained size and the production owner path. One promise that never settles keeps every `.then` callback attached to it, so the leak is a long chain on ONE promise — invisible to a count of unsettled promises. ' +
+    'Unsettled Promises ranked by REACTION-CHAIN length, with retained size, the native (Blink task-attribution / soft-navigation) memory their reactions keep alive, and the production owner path. One promise that never settles keeps every `.then` callback attached to it, so the leak is a long chain on ONE promise — invisible to a count of unsettled promises. ' +
       'With `run_dir` (or `paths`) it takes the top promises on the last rung and reads each one, by node id, at every rung: "+N reactions/cycle on one promise" is a promise that never settles while every interaction attaches to it. Without either it ranks the loaded snapshot.',
     {
       run_dir: z
@@ -72,6 +87,7 @@ export function registerPendingPromises(server: McpServer): void {
               `@${node.id}`,
               formatNumber(reactions),
               formatBytes(node.retainedSize),
+              nativeCell(reactionNativeCost(node)),
               ownerLabel(snapshot, node),
             ]);
           return toolResult(
@@ -83,11 +99,14 @@ export function registerPendingPromises(server: McpServer): void {
                   'Promise',
                   'Reactions',
                   'Retained',
+                  'Native via reactions',
                   'Owner (production path tail)',
                 ],
                 rows,
                 new Set([1, 2]),
               ),
+              '',
+              NATIVE_NOTE,
               '',
               '_Pass `run_dir` to see whether a chain grows per cycle._',
             ].join('\n'),
@@ -124,6 +143,7 @@ export function registerPendingPromises(server: McpServer): void {
                 id: node.id,
                 owner: ownerLabel(snap, node),
                 retained: node.retainedSize,
+                native: nativeCell(reactionNativeCost(node)),
               })),
               lastCounts: head.map(({node}) => chainOf(node)),
               lastTotal: pending.length,
@@ -198,6 +218,7 @@ export function registerPendingPromises(server: McpServer): void {
                 ? '—'
                 : `${slope >= 0 ? '+' : ''}${slope.toFixed(3)}`,
             formatBytes(t.retained),
+            t.native,
             t.owner,
           ];
         });
@@ -216,6 +237,7 @@ export function registerPendingPromises(server: McpServer): void {
                 ),
                 `Δ reactions/${unit}`,
                 'Retained',
+                'Native via reactions (last rung)',
                 'Owner (production path tail)',
               ],
               rows,
@@ -230,6 +252,8 @@ export function registerPendingPromises(server: McpServer): void {
                   `**${atCap} promise(s) hold a chain at the walk cap** — at least that many reactions on one promise, growth unknown. Treat each as a leak until \`helpers.promiseReactions(id)\` says otherwise.`,
                 ]
               : []),
+            '',
+            NATIVE_NOTE,
             '',
             '_`—` = the promise does not exist at that rung (created later, or the page reloaded and ids changed). `≥N` = the chain walk stopped at its cap._',
           ].join('\n'),
