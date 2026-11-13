@@ -413,6 +413,14 @@ function buildPlan(
     // were run by hand every round because the battery did not.
     {tool: 'memlab_detached_dom', args: {run_dir: runDir}},
     {tool: 'memlab_event_registry', args: {run_dir: runDir}},
+    // User content: a discarded attachment that stays reachable shows here as
+    // +1 File/Blob per attempt, and its bytes are outside the heap, so no
+    // size-ranked step above notices it.
+    {
+      tool: 'memlab_census',
+      args: {run_dir: runDir, metrics: [...USER_CONTENT_CENSUS]},
+      stem: 'memlab_census.user_content',
+    },
     // Native growth is invisible to every JS-side step above: a Blink
     // scope tree adding 19 entries per cycle was found only by hand.
     {tool: 'memlab_blink_native_census', args: {run_dir: runDir}},
@@ -600,7 +608,12 @@ const SEGMENTED_TOOLS = new Set([
 ]);
 const PAIRED_TOOLS = new Set(['memlab_artifact_budget', 'memlab_census_diff']);
 // Built-in census populations every A/B verdict table includes.
-export const AB_CENSUS = ['react_update_records'] as const;
+export const AB_CENSUS = [
+  'react_update_records',
+  'files',
+  'blobs',
+  'blob_urls',
+] as const;
 
 /**
  * An A/B round's plan: every ladder step once per arm (`.off` / `.on`), the
@@ -656,7 +669,9 @@ export function perArmPlan(
       st.tool !== 'memlab_blink_native_census' &&
       // Its `grows`/`flat` verdicts would span both arms, and the kept
       // results would then record the fix as a flip.
-      st.tool !== 'memlab_hypothesis'
+      st.tool !== 'memlab_hypothesis' &&
+      // The A/B verdict table counts the same populations per arm.
+      st.stem !== 'memlab_census.user_content'
     ) {
       // The native census has no `segment`; over the whole round it would
       // fit one rate across two isolates.
@@ -696,6 +711,14 @@ export function applySkip(
 }
 
 /** Lines worth lifting into the digest, per tool. */
+const USER_CONTENT_CENSUS = [
+  'files',
+  'blobs',
+  'blob_urls',
+  'abort_controllers',
+  'media_handles',
+] as const;
+
 const DIGEST_PATTERNS: ReadonlyArray<{tool: RegExp; re: RegExp; max: number}> =
   [
     {tool: /round_audit/, re: /^\*\*Verdict:.*$|^\| [⚠✅❌]/, max: 10},

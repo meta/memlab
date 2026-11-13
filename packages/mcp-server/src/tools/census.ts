@@ -109,6 +109,49 @@ export const BUILTIN: Metric[] = [
     needsProps: false,
     match: n => n.name === 'ArrayBuffer',
   },
+  // What a user hands the page (a pasted image, a dropped document) and what
+  // the page makes of it. A discarded attachment that stays reachable keeps
+  // each of these +1 per attempt, while its bytes sit in the browser's blob
+  // store, outside the heap — so the counts are the heap-side signal.
+  {
+    name: 'files',
+    describe: 'File objects (user-supplied files).',
+    needsProps: false,
+    // Any node type: these wrappers appear as `native` on some builds.
+    match: n => n.name === 'File',
+  },
+  {
+    name: 'blobs',
+    describe: 'Blob objects.',
+    needsProps: false,
+    match: n => n.name === 'Blob',
+  },
+  {
+    name: 'blob_urls',
+    describe:
+      '`blob:` URL strings: each live object URL pins its Blob outside the heap until revoked (see memlab_object_urls).',
+    needsProps: false,
+    match: n => n.isString && n.name.startsWith('blob:'),
+  },
+  {
+    name: 'abort_controllers',
+    describe:
+      'AbortController objects: one per in-flight upload, fetch or processing job; a count that grows per cycle is jobs that were never released.',
+    needsProps: false,
+    match: n => n.name === 'AbortController',
+  },
+  {
+    name: 'media_handles',
+    describe:
+      'Decoded-media handles: ImageBitmap, OffscreenCanvas, MediaSource, VideoFrame, ImageData.',
+    needsProps: false,
+    match: n =>
+      n.name === 'ImageBitmap' ||
+      n.name === 'OffscreenCanvas' ||
+      n.name === 'MediaSource' ||
+      n.name === 'VideoFrame' ||
+      n.name === 'ImageData',
+  },
   {
     name: 'promise_reactions',
     describe:

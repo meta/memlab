@@ -643,7 +643,12 @@ and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one
 `memlab_ab_compare` verdict table. That table always has a row for React
 state-update records (the `react_update_records` census population), the
-population a no-op `setState` fix removes. Each arm starts on a freshly
+population a no-op `setState` fix removes, and rows for `files`, `blobs` and
+`blob_urls`. Every standard battery also counts the user-content populations
+per rung (`files`, `blobs`, `blob_urls`, `abort_controllers`,
+`media_handles`): a discarded attachment that stays reachable grows them by
+one per attempt while its bytes sit outside the heap, where no size-ranked
+step notices. Each arm starts on a freshly
 loaded page, so `memlab_ab_compare` leaves each arm's first rung out of its fit
 by default (`skip_intervals`, 1 when every arm keeps at least three rungs) and
 prints the all-rung rate beside the steady one. When leaving out that warm-up
