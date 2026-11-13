@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import {perfSnapshot} from '../perf-stats.js';
 import {SERVER_VERSION} from '../server-version.js';
+import {fixStatusCommand, lastFixStatusOutcome} from '../fix-status.js';
 import {listSnapshots, getCurrentHandle} from '../heap-state.js';
 import {
   formatBytes,
@@ -75,6 +76,18 @@ export function registerServerStatus(server: McpServer): void {
         }
         if (all.length === 0) {
           lines.push('  (none loaded — use memlab_load_snapshot)');
+        }
+        const fixCmd = fixStatusCommand();
+        if (fixCmd != null) {
+          const last = lastFixStatusOutcome();
+          lines.push(
+            `- Fix-status lookup (\`MEMLAB_FIX_STATUS_CMD\`): configured` +
+              (last == null
+                ? '; not used yet in this process'
+                : last.ok
+                  ? `; last lookup (${last.diff}) OK`
+                  : `; last lookup (${last.diff}) FAILED: ${last.detail}`),
+          );
         }
         const perf = perfSnapshot();
         lines.push(

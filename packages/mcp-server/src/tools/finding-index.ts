@@ -9,11 +9,11 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import {exec} from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
+import {fixStatusLinesFor} from '../fix-status.js';
 import {
   formatNumber,
   markdownTable,
@@ -1249,45 +1249,17 @@ export function possibleSameFinding(
 
 /**
  * The live status of each diff a finding names as its fix, when the operator
- * configured a lookup.
+ * configured a lookup (`MEMLAB_FIX_STATUS_CMD`, see `fix-status.ts`).
  *
  * A finding recorded with a fix reads as handled, and one round spent its
  * investigation re-deriving a leak whose fix was still an unlanded draft.
- * `MEMLAB_FIX_STATUS_CMD` is a shell command with `{diff}` in it (for example
- * a code-review CLI that prints whether a change landed); its first output
- * line is shown per diff. Unset, nothing is run.
  */
 async function fixStatusLines(findings: readonly Finding[]): Promise<string[]> {
-  const template = process.env.MEMLAB_FIX_STATUS_CMD;
-  if (template == null || template === '') return [];
-  // Only an identifier reaches the shell; each diff is looked up once.
+  // Each diff is looked up once.
   const diffs = [
     ...new Set(findings.flatMap(f => (f.fixed_by_diffs ?? []).slice(0, 4))),
-  ]
-    .filter(diff => /^[A-Za-z]{0,4}\d+$/.test(diff))
-    .slice(0, MAX_FIX_LOOKUPS);
-  // In parallel and off the event loop: a slow CLI costs one timeout, not
-  // one per diff, and other calls keep being served meanwhile.
-  const lines = await Promise.all(
-    diffs.map(
-      diff =>
-        new Promise<string | null>(resolve => {
-          exec(
-            template.split('{diff}').join(diff),
-            {timeout: 8000},
-            (err, stdout) => {
-              if (err != null) {
-                resolve(`- Fix status of ${diff}: (lookup failed)`);
-                return;
-              }
-              const out = String(stdout).trim().split('\n')[0]?.slice(0, 200);
-              resolve(out ? `- Fix status of ${diff}: ${out}` : null);
-            },
-          );
-        }),
-    ),
-  );
-  return lines.filter((l): l is string => l != null);
+  ].slice(0, MAX_FIX_LOOKUPS);
+  return fixStatusLinesFor(diffs);
 }
 
 const MAX_FIX_LOOKUPS = 8;

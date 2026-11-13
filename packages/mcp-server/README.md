@@ -632,6 +632,7 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_FRAMEWORK_BUFFERS` | Path to a probe file of app-specific buffers for `memlab_framework_buffers` |
 | `MEMLAB_FINDINGS_INDEX`, `MEMLAB_JUDGE_LEDGER`, `MEMLAB_STATE_DIR` | Relocate state files (see [State and Cache Files](#state-and-cache-files)) |
 | `MEMLAB_FIX_STATUS_CMD` | Shell command with `{diff}` in it; `memlab_finding_index` prints its first output line for each fix diff a finding records (whether it landed) |
+| `MEMLAB_FIX_STATUS_TIMEOUT_MS` | Timeout for one `MEMLAB_FIX_STATUS_CMD` lookup (default 20000). A failed lookup prints why (timeout, exit code, first stderr line); `memlab_server_status` shows the last result |
 
 ## Investigation Skill for AI Assistants
 
