@@ -714,7 +714,11 @@ snapshot can be loaded the same way with `memlab_load_snapshot({async: true})`,
 and `memlab_eval_across` takes `async: true` too. `memlab_job_status` and
 `memlab_battery_status` take `wait_ms`, capped at 90 s so the call returns
 before a client that backgrounds long calls (at 120 s) would. A RUNNING reply
-carries the time it was written, so a reply delivered late reads as stale. Every call
+carries the time it was written, so a reply delivered late reads as stale.
+Job and async-battery handles are also written to a ledger under
+`~/.memlab/jobs/` (`MEMLAB_STATE_DIR`), so a restarted server, or a second one,
+still answers for them: with the recorded result, "running in another memlab
+server", or ORPHANED when the process running it exited before it finished. Every call
 also runs under a wall-clock budget (90 s by default; override it with
 `timeout_ms` or `MEMLAB_ANALYSIS_TIMEOUT_MS`), so a runaway scan returns a clean
 "analysis stopped" result instead of wedging the server.

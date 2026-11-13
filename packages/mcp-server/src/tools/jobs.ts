@@ -24,11 +24,20 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import crypto from 'crypto';
+import fs from 'fs';
 import {z} from 'zod';
 import {runWithProgress, type ProgressReporter} from '../progress.js';
 import {getRegisteredTool, listToolNames} from '../tool-registry.js';
 import {errorResult, markdownTable, toolResult} from '../utils.js';
 import {runWithReadScope} from '../read-scope.js';
+import {
+  describeForeignEntry,
+  ledgerNoteWriter,
+  readLedger,
+  writeLedger,
+  writeLedgerResult,
+  type LedgerEntry,
+} from '../job-ledger.js';
 
 export interface Job {
   id: string;
@@ -74,6 +83,14 @@ function textOf(result: unknown): string {
     .join('\n');
 }
 
+function readText(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 function elapsed(job: Job): string {
   return `${Math.round(((job.finishedAt ?? Date.now()) - job.startedAt) / 1000)}s`;
 }
@@ -115,10 +132,35 @@ export function startJob(
     jobs.delete(oldest.id);
   }
   jobs.set(job.id, job);
+  // On disk too, so a restarted server can still answer for it.
+  const ledger: LedgerEntry = {
+    id: job.id,
+    kind: 'job',
+    tool,
+    pid: process.pid,
+    started_at: new Date(job.startedAt).toISOString(),
+    status: 'running',
+  };
+  writeLedger(ledger);
+  const writeNotes = ledgerNoteWriter(ledger);
   const reporter: ProgressReporter = {
-    phase: (step, total, message) =>
-      job.notes.push(`[${elapsed(job)}] ${step}/${total} ${message}`),
-    note: message => job.notes.push(`[${elapsed(job)}] ${message}`),
+    phase: (step, total, message) => {
+      job.notes.push(`[${elapsed(job)}] ${step}/${total} ${message}`);
+      writeNotes(job.notes);
+    },
+    note: message => {
+      job.notes.push(`[${elapsed(job)}] ${message}`);
+      writeNotes(job.notes);
+    },
+  };
+  const record = (): void => {
+    writeLedger({
+      ...ledger,
+      status: job.status,
+      finished_at: new Date(job.finishedAt ?? Date.now()).toISOString(),
+      result_file: writeLedgerResult(job.id, textOf(job.result)) ?? undefined,
+      notes: job.notes.slice(-8),
+    });
   };
   // Deliberately not awaited: the point is to return before the work.
   // No sendNotification in `extra`: the reporter above is the job's
@@ -142,6 +184,7 @@ export function startJob(
         `abandoned after ${JOB_MAX_AGE_MS / 3600000} h without finishing`,
       ),
     );
+    record();
   }, JOB_MAX_AGE_MS);
   abandon.unref();
   // Started on a later turn of the event loop, so the "started" reply is
@@ -158,12 +201,14 @@ export function startJob(
       job.result = result;
       job.finishedAt = Date.now();
       job.status = (result as {isError?: boolean})?.isError ? 'error' : 'done';
+      record();
     })
     .catch((err: unknown) => {
       if (job.status !== 'running') return;
       job.result = errorResult(err);
       job.finishedAt = Date.now();
       job.status = 'error';
+      record();
     })
     .finally(() => clearTimeout(abandon));
   return job;
@@ -252,8 +297,21 @@ export function registerJobs(server: McpServer): void {
       }
       const job = jobs.get(job_id);
       if (job == null) {
+        // Not this process's: a restarted server, or a second server. The
+        // ledger still knows how it ended.
+        const entry = readLedger(job_id);
+        if (entry != null && entry.kind === 'job') {
+          const answer = describeForeignEntry(entry, e =>
+            e.result_file != null ? readText(e.result_file) : null,
+          );
+          return answer.isError
+            ? errorResult(new Error(answer.text))
+            : toolResult(answer.text);
+        }
         return errorResult(
-          new Error(`no job \`${job_id}\` in this server process`),
+          new Error(
+            `no job \`${job_id}\` in this server process or in the job ledger`,
+          ),
         );
       }
       if (wait_ms != null && wait_ms > 0) {

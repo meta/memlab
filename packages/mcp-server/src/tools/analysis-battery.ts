@@ -33,6 +33,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -56,6 +57,12 @@ import {errorResult, formatBytes, formatNumber, toolResult} from '../utils.js';
 import {runWithReadScope} from '../read-scope.js';
 import {runWithRungRetention} from '../snapshot-borrow.js';
 import {MAX_STATUS_WAIT_MS, statusTime} from './jobs.js';
+import {
+  describeForeignEntry,
+  readLedger,
+  writeLedger,
+  type LedgerEntry,
+} from '../job-ledger.js';
 
 /**
  * A battery started with `async: true`, tracked so `memlab_battery_status` can
@@ -138,6 +145,46 @@ function partialDigestText(run: BatteryRun): string {
         ]
       : lines;
   return `**Digest so far**\n\n${shown.join('\n')}\n\n`;
+}
+
+/**
+ * A ledger entry corrected by the battery's own done marker: the marker is
+ * written by the run itself, so it wins over a ledger write that a crash
+ * between the two may have lost.
+ */
+function batteryEntryFromDisk(entry: LedgerEntry): LedgerEntry {
+  if (entry.out_dir == null) return entry;
+  try {
+    const done = JSON.parse(
+      fs.readFileSync(path.join(entry.out_dir, 'battery.done.json'), 'utf8'),
+    ) as {status?: string; battery_id?: string; finished_at?: string};
+    if (done.battery_id !== entry.id) return entry;
+    return {
+      ...entry,
+      status: done.status === 'done' ? 'done' : 'error',
+      finished_at: done.finished_at ?? entry.finished_at,
+    };
+  } catch {
+    return entry;
+  }
+}
+
+function readBatteryReport(entry: LedgerEntry): string | null {
+  if (entry.out_dir == null) return null;
+  try {
+    return fs.readFileSync(path.join(entry.out_dir, 'battery.md'), 'utf8');
+  } catch {
+    const files = (() => {
+      try {
+        return fs.readdirSync(entry.out_dir).filter(f => f.endsWith('.txt'));
+      } catch {
+        return [];
+      }
+    })();
+    return files.length > 0
+      ? `No \`battery.md\` report; per-tool output in \`${entry.out_dir}/\`: ${files.join(', ')}.`
+      : null;
+  }
 }
 
 const batteries = new Map<string, BatteryRun>();
@@ -1541,7 +1588,8 @@ export function registerAnalysisBattery(server: McpServer): void {
 
         const progress = makeProgressReporter(extra, 'battery');
         const tracked: BatteryRun = {
-          id: `battery-${++batterySeq}`,
+          // Unique across processes: the job ledger outlives this one.
+          id: `battery-${++batterySeq}-${crypto.randomBytes(2).toString('hex')}`,
           runDir: run_dir,
           profile,
           outDir,
@@ -1966,8 +2014,24 @@ export function registerAnalysisBattery(server: McpServer): void {
         const reportFile = path.join(outDir, 'battery.md');
         fs.rmSync(doneFile, {force: true});
         fs.rmSync(path.join(outDir, PARTIAL_FILE), {force: true});
+        const ledger: LedgerEntry = {
+          id: tracked.id,
+          kind: 'battery',
+          tool: 'memlab_analysis_battery',
+          pid: process.pid,
+          started_at: new Date(tracked.startedAt).toISOString(),
+          status: 'running',
+          out_dir: outDir,
+        };
         const mark = (status: 'done' | 'failed', error?: string): void => {
           const finishedAt = Date.now();
+          if (runAsync === true) {
+            writeLedger({
+              ...ledger,
+              status: status === 'done' ? 'done' : 'error',
+              finished_at: new Date(finishedAt).toISOString(),
+            });
+          }
           try {
             fs.writeFileSync(
               doneFile,
@@ -2035,6 +2099,7 @@ export function registerAnalysisBattery(server: McpServer): void {
         // battery id that does not exist.
         try {
           trackBattery(tracked);
+          writeLedger(ledger);
         } catch (e) {
           finish();
           throw e;
@@ -2156,6 +2221,16 @@ export function registerAnalysisBattery(server: McpServer): void {
                 'Start fewer concurrent batteries, or read the files directly.',
             ),
           );
+        }
+        const entry = readLedger(battery_id);
+        if (entry != null && entry.kind === 'battery') {
+          const answer = describeForeignEntry(
+            batteryEntryFromDisk(entry),
+            readBatteryReport,
+          );
+          return answer.isError
+            ? errorResult(new Error(answer.text))
+            : toolResult(answer.text);
         }
         return errorResult(
           new Error(

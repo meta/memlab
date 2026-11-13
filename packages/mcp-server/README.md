@@ -571,7 +571,7 @@ Output: a per-step output block for each step, headed by a run/failed step count
 
 ### `memlab_start_job` / `memlab_job_status`
 
-Starts any tool in the background and returns a job id at once. Use it for ladder tools that would run past the client's tool timeout. `memlab_job_status` reports per-rung progress while the job runs and the full result once it finishes. With no `job_id`, it lists every job the server knows about.
+Starts any tool in the background and returns a job id at once. Use it for ladder tools that would run past the client's tool timeout. `memlab_job_status` reports per-rung progress while the job runs and the full result once it finishes. With no `job_id`, it lists every job the server knows about. Jobs and async batteries are also recorded in a ledger on disk, so after a server restart (or from a second server) a status call still returns a finished job's result, says the job is running in another server process, or reports it ORPHANED when the process running it exited first.
 
 ```
 Input:  memlab_start_job { tool, args }    memlab_job_status { job_id? }
@@ -610,6 +610,7 @@ The server keeps a few small files so that work survives a restart:
 | `~/.memlab/probes.json` | `memlab_probes`: saved probe sets, which `memlab_ladder_probe`, `memlab_ab_compare` and `memlab_analysis_battery` run | `MEMLAB_STATE_DIR` |
 | `~/.memlab/battery-caveats.json` | `memlab_analysis_battery`: run.json caveats, Next calls and `memlab_round_audit` digest rows already printed for a sweep (a round's parent directory), so later rounds print them as one "unchanged" line; a Next call for a different class, or an audit row whose figures changed, counts as new | `MEMLAB_STATE_DIR` |
 | `~/.memlab/hypothesis-watch.json` | `memlab_hypothesis({watch: true})`: the predicates kept for a sweep and each one's last two results, which `memlab_analysis_battery` re-judges on every later round of that sweep | `MEMLAB_STATE_DIR` |
+| `~/.memlab/jobs/<id>.json` (and `<id>.md`) | `memlab_start_job` and `memlab_analysis_battery({async: true})`: one entry per handle (tool, server pid, status, a battery's output directory, a job's result text), read by `memlab_job_status` / `memlab_battery_status` for a handle this process does not hold. Entries older than 7 days are deleted | `MEMLAB_STATE_DIR` |
 | `$TMPDIR/memlab-cache-<uid>/` | Decompressed `.gz` snapshots, mode `0700` | — |
 
 ## Environment Variables
