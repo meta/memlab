@@ -392,6 +392,10 @@ const GROUPS: Group[] = [
         'Unrevoked `blob:` object URLs per rung — their Blobs are pinned OFF the V8 heap, so this leak never shows in heap size.',
       ],
       [
+        'memlab_cache_sole_retainer',
+        'Module-level caches counted by the objects that ONLY caches keep alive (reachability with every cache refused): objects the app let go; per-cycle growth across a ladder.',
+      ],
+      [
         'memlab_bound_functions',
         'Bound functions (`native_bind`) grouped by target function and module, receiver or first bound argument (a React setter names its component), and holder; per-cycle growth across a ladder.',
       ],

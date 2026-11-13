@@ -676,6 +676,13 @@ blink::TaskAttributionInfoImpl → blink::SoftNavigationContext`, with its LCP
 calculator and text records), about 1 KB per `.then`, on no JavaScript
 retainer path. `memlab_pending_promises` prints that native memory per promise,
 and `memlab_blink_native_census` watches the family on every rung.
+`memlab_cache_sole_retainer` asks which objects only caches keep alive. It
+computes reachability from the GC roots twice, once refusing to traverse any
+module-level cache (a Map or Set held by a module scope, by an exported
+function, or inside a memoizer object on one, such as `fn.$$cache.$1.$2`), and
+attributes what is lost to the caches that reach it. Those are objects the app
+has let go. Across a ladder it ranks caches by such objects gained per cycle.
+An object held by two caches counts under both.
 `memlab_bound_functions` opens up the `native_bind` row of a census: V8 names
 every `fn.bind(...)` result `native_bind`, so growth there says nothing about
 whose it is. The tool groups bound functions by the target function and its

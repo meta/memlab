@@ -144,6 +144,55 @@ function functionPropertyCollections(
   return out;
 }
 
+/**
+ * Every module-level collection: held by a module scope, or as a property of
+ * a module's exported function or class. `name` is stable across captures
+ * (module + holder), so a ladder can match a cache rung to rung.
+ */
+export function moduleCollections(
+  snapshot: Parameters<typeof moduleRecords>[0],
+): Array<{module: string; name: string; key: string; node: IHeapNode}> {
+  const out: Array<{
+    module: string;
+    name: string;
+    key: string;
+    node: IHeapNode;
+  }> = [];
+  const seen = new Set<number>();
+  for (const [id, module] of cachedModuleScopes(snapshot)) {
+    const scope = snapshot.getNodeById(id);
+    if (scope == null || !scope.name.startsWith('system / Context')) continue;
+    for (const e of scope.references) {
+      const t = e.toNode;
+      if (
+        e.type !== 'context' ||
+        t.type !== 'object' ||
+        !COLLECTIONS.has(t.name)
+      )
+        continue;
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      const name = String(e.name_or_index);
+      out.push({module, name, key: `${module}\u0000${name}`, node: t});
+    }
+  }
+  for (const [id, fp] of functionPropertyCollections(snapshot)) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      module: fp.module,
+      name:
+        fp.holderCount > 1
+          ? `${fp.holders[0]} (shared by ${formatNumber(fp.holderCount)} functions)`
+          : fp.holders[0],
+      // The lexically first holder: capture order differs between rungs.
+      key: `${fp.module}\u0000${[...fp.holders].sort()[0]}`,
+      node: fp.node,
+    });
+  }
+  return out;
+}
+
 function keyTypes(node: IHeapNode): string {
   if (node.name !== 'Map' && node.name !== 'WeakMap') return '—';
   const entries = enumerateMapEntries(node).slice(0, 50);
