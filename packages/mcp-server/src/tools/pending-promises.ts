@@ -52,11 +52,19 @@ function nativeCell(c: ReturnType<typeof reactionNativeCost>): string {
 const NATIVE_NOTE =
   '_Native via reactions: Blink objects each `.then` keeps alive through its task-attribution record (`PromiseReaction → CppHeapExternal → blink::TaskAttributionInfoImpl → SoftNavigationContext`). They are on no JS retainer path, so a never-settling promise costs this much more per reaction. A `Promise.all` attaches one reaction to each input, so promises it spans can share these objects: do not sum the column. Check whether the promise ever settles in production before calling it a leak._';
 
+/** How many of a rung's longest chains an owner-path match looks through. */
+const OWNER_MATCH_POOL = 200;
+
+/** An owner label specific enough to identify one promise across rungs. */
+function matchableOwner(owner: string): boolean {
+  return owner !== '(no retainer path)' && owner !== '(root)';
+}
+
 export function registerPendingPromises(server: McpServer): void {
   server.tool(
     'memlab_pending_promises',
     'Unsettled Promises ranked by REACTION-CHAIN length, with retained size, the native (Blink task-attribution / soft-navigation) memory their reactions keep alive, and the production owner path. One promise that never settles keeps every `.then` callback attached to it, so the leak is a long chain on ONE promise — invisible to a count of unsettled promises. ' +
-      'With `run_dir` (or `paths`) it takes the top promises on the last rung and reads each one, by node id, at every rung: "+N reactions/cycle on one promise" is a promise that never settles while every interaction attaches to it. Without either it ranks the loaded snapshot.',
+      'With `run_dir` (or `paths`) it takes the top promises on the last rung and reads each one at every rung, by node id or else by owner path: "+N reactions/cycle on one promise" is a promise that never settles while every interaction attaches to it. Without either it ranks the loaded snapshot.',
     {
       run_dir: z
         .string()
@@ -125,7 +133,7 @@ export function registerPendingPromises(server: McpServer): void {
         if (rungPaths.length < 2) {
           return errorResult(new Error('Need at least two rungs.'));
         }
-        type Chain = {count: number; capped: boolean};
+        type Chain = {count: number; capped: boolean; byOwner?: boolean};
         const chainOf = (node: IHeapNode): Chain => {
           const {count, truncated} = promiseReactions(node);
           return {count, capped: truncated};
@@ -157,8 +165,8 @@ export function registerPendingPromises(server: McpServer): void {
         const pendingTotals: number[] = [];
         for (const p of rungPaths.slice(0, -1)) {
           const {counts, total} = await withSnapshotAt(p, snap => {
-            // By id: no walk. Only the pending total needs one pass. A
-            // promise that exists but has settled reads 0, not "absent".
+            // By id first: no walk. A promise that exists but has settled
+            // reads 0, not "absent".
             const out: Array<Chain | null> = tracked.map(t => {
               const node = snap.getNodeById(t.id);
               return node != null &&
@@ -167,6 +175,28 @@ export function registerPendingPromises(server: McpServer): void {
                 ? chainOf(node)
                 : null;
             });
+            // Ids are not stable across rungs, so a promise the id misses is
+            // looked for by its owner path among this rung's longest chains.
+            // Without this, a promise that grew all ladder long read absent
+            // on every rung but the last.
+            if (out.some(c => c == null)) {
+              const used = new Set<number>();
+              const byOwner = new Map<string, IHeapNode>();
+              for (const {node} of pendingPromises(snap).slice(
+                0,
+                OWNER_MATCH_POOL,
+              )) {
+                const owner = ownerLabel(snap, node);
+                if (!byOwner.has(owner)) byOwner.set(owner, node);
+              }
+              tracked.forEach((t, i) => {
+                if (out[i] != null || !matchableOwner(t.owner)) return;
+                const node = byOwner.get(t.owner);
+                if (node == null || used.has(node.id)) return;
+                used.add(node.id);
+                out[i] = {...chainOf(node), byOwner: true};
+              });
+            }
             let n = 0;
             snap.nodes.forEach(node => {
               if (isPendingPromise(node)) n++;
@@ -210,7 +240,7 @@ export function registerPendingPromises(server: McpServer): void {
             ...chains.map(c =>
               c == null
                 ? '—'
-                : `${c.capped ? '≥' : ''}${formatNumber(c.count)}`,
+                : `${c.capped ? '≥' : ''}${formatNumber(c.count)}${c.byOwner === true ? '*' : ''}`,
             ),
             capped
               ? '? (at cap)'
@@ -255,7 +285,7 @@ export function registerPendingPromises(server: McpServer): void {
             '',
             NATIVE_NOTE,
             '',
-            '_`—` = the promise does not exist at that rung (created later, or the page reloaded and ids changed). `≥N` = the chain walk stopped at its cap._',
+            '_`—` = no promise with that id or owner path at that rung (created later, or settled and collected). `N*` = matched by owner path, because node ids change between rungs. `≥N` = the chain walk stopped at its cap._',
           ].join('\n'),
         );
       } catch (err) {
