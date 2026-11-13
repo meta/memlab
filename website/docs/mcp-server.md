@@ -659,7 +659,12 @@ cross-origin isolated), the header gives its first and last value per segment,
 with the dedicated-worker share: workers and wasm are in no page snapshot, so
 this is the only place their growth shows. Without it, the header gives the
 dedicated workers' JS heap the runner read over CDP instead.
-`memlab_hunt_report` lists the same numbers per rung in its off-heap table.
+`memlab_hunt_report` lists the same numbers per rung in its off-heap table,
+with the browser process's anonymous memory beside the renderer's when the run
+recorded it (`browser_anon_mb`), and per-100-cycle rates of each. It flags
+browser-process or renderer growth that outpaces the JS heap: live object URLs
+keep their Blob bytes in the browser process, so that leak is flat in every
+heap figure and in the renderer's memory.
 `memlab_object_urls` counts unrevoked `blob:` URLs, whose Blobs are pinned
 outside the V8 heap. When the runner recorded `off_heap.object_url_creators`
 per rung (a traced `URL.createObjectURL`: live URLs grouped by the calling

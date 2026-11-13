@@ -71,6 +71,60 @@ interface RunManifest {
 }
 
 /**
+ * Per-cycle growth of the memory a heap snapshot cannot see, from the
+ * per-rung process figures, with a flag when it outgrows the JS heap.
+ *
+ * The blob registry (every live object URL's bytes) lives in the BROWSER
+ * process, not the renderer: 80 MB of unrevoked object URLs moved the
+ * browser's anonymous RSS by +80 MB and the renderer's by +21 MB. A leak
+ * there is flat in every heap figure.
+ */
+export function offHeapGrowthLines(
+  rungs: ReadonlyArray<{cycles?: number; off_heap?: Record<string, unknown>}>,
+): string[] {
+  const series = (key: string): Array<{x: number; y: number}> =>
+    rungs
+      .map(r => ({x: r.cycles, y: r.off_heap?.[key]}))
+      .filter(
+        (p): p is {x: number; y: number} =>
+          typeof p.x === 'number' && typeof p.y === 'number',
+      );
+  const slope = (pts: Array<{x: number; y: number}>): number | null => {
+    if (pts.length < 2) return null;
+    const n = pts.length;
+    const mx = pts.reduce((a, p) => a + p.x, 0) / n;
+    const my = pts.reduce((a, p) => a + p.y, 0) / n;
+    const sxx = pts.reduce((a, p) => a + (p.x - mx) ** 2, 0);
+    if (sxx === 0) return null;
+    return pts.reduce((a, p) => a + (p.x - mx) * (p.y - my), 0) / sxx;
+  };
+  const per100 = (m: number | null): string =>
+    m == null ? '—' : `${m >= 0 ? '+' : ''}${(m * 100).toFixed(1)} MB`;
+  const js = slope(series('js_heap_mb'));
+  const renderer = slope(series('renderer_anon_mb'));
+  const browser = slope(series('browser_anon_mb'));
+  const gpu = slope(series('gpu_anon_mb'));
+  if (renderer == null && browser == null) return [];
+  const lines = [
+    `Per 100 cycles: JS heap ${per100(js)}, renderer anon ${per100(renderer)}, browser-process anon ${per100(browser)}` +
+      (gpu != null ? `, GPU-process anon ${per100(gpu)}` : '') +
+      '.',
+  ];
+  const jsRate = js ?? 0;
+  if (browser != null && browser - Math.max(0, jsRate) > 0.01) {
+    lines.push(
+      `> ⚠️ The browser process grows ${per100(browser)} per 100 cycles beyond anything on the JS heap. Live object URLs keep their Blob bytes there (\`memlab_object_urls\`); other tabs share this process, so close them before trusting the figure.`,
+    );
+  }
+  if (renderer != null && renderer - Math.max(0, jsRate) > 0.01) {
+    lines.push(
+      `> ⚠️ The renderer grows ${per100(renderer)} per 100 cycles beyond the JS heap: decoded media, Oilpan (\`memlab_blink_native_census\`), WASM or workers.`,
+    );
+  }
+  return lines;
+}
+
+/**
  * Dedicated-worker MB from `measureUserAgentSpecificMemory`, or else the
  * workers' JS heap the runner read over CDP, as a cell.
  */
@@ -258,6 +312,7 @@ export function registerHuntReport(server: McpServer): void {
                     ),
                   )
                 : '—',
+              String(r.off_heap?.browser_anon_mb ?? '—'),
               String(r.off_heap?.dom_nodes ?? '—'),
               typeof r.off_heap?.uasm_total_mb === 'number'
                 ? r.off_heap.uasm_total_mb.toFixed(1)
@@ -280,14 +335,17 @@ export function registerHuntReport(server: McpServer): void {
                   'JS heap (MB)',
                   'Renderer anon (MB)',
                   'Outside JS heap (MB)',
+                  'Browser process anon (MB)',
                   'DOM nodes',
                   'UA memory (MB)',
                   'Workers (MB)',
                   'Longtasks',
                 ],
                 offHeapRows,
-                new Set([1, 2, 3, 4, 5, 6, 7, 8]),
+                new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]),
               ),
+              '',
+              ...offHeapGrowthLines(rungs),
               '',
             );
           }
