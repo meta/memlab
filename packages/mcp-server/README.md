@@ -363,6 +363,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_cache_inventory` | Module-scope Maps/Sets/Arrays ranked by what their entries hold, with the owning module and any clear/reset API it already has — memory-pressure candidates in one call. |
 | `memlab_module_source` | The served source of one module (`__d` span) read from the snapshot: is the fix served (`gate`), is it a dev-compile artifact (`compare_to` a prod capture), what does it do (`grep`). |
 | `memlab_source_for_node` | Which module's code a node belongs to (closure scope chain → Haste module, exact), for going from "which object" to "which file" without code search. `context_lines` also prints the function's definition from the served source, and a context's variables and closures. |
+| `memlab_source_for_finding` | A finding's likely source files: the module names on its retainer path resolved to files (with `MEMLAB_SOURCE_LOOKUP_CMD`), and in each the lines that assign the path's field names. |
 | `memlab_stale_refs` | React refs whose `.current` is detached DOM, by owner and variable, against the owner's fiber count — bounded (≤1 per instance) or accumulating. |
 | `memlab_dev_subtracted_delta` | Per-class growth between two snapshots with everything reachable only through a dev root or dev edge removed — the dev build's honest "what did the app grow". |
 | `memlab_job_status` | Poll a `memlab_start_job` job: per-rung notes while it runs, the full result when it is done. `wait_ms` (up to 90 s) waits for it to finish. |
@@ -641,6 +642,8 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_FINDINGS_INDEX`, `MEMLAB_JUDGE_LEDGER`, `MEMLAB_STATE_DIR` | Relocate state files (see [State and Cache Files](#state-and-cache-files)) |
 | `MEMLAB_FIX_STATUS_CMD` | Shell command with `{diff}` in it; `memlab_finding_index` prints its first output line for each fix diff a finding records (whether it landed) |
 | `MEMLAB_FIX_STATUS_TIMEOUT_MS` | Timeout for one `MEMLAB_FIX_STATUS_CMD` lookup (default 20000). A failed lookup prints why (timeout, exit code, first stderr line); `memlab_server_status` shows the last result |
+| `MEMLAB_SOURCE_LOOKUP_CMD` | Shell command with `{module}` in it that prints file paths; `memlab_source_for_finding` runs it for each module name on a finding's retainer path |
+| `MEMLAB_SOURCE_ROOT` | Directory the paths it prints are read from, to find the lines that assign the path's fields (default: the working directory) |
 
 ## Investigation Skill for AI Assistants
 

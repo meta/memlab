@@ -426,6 +426,14 @@ line), answers are cached per diff for ten minutes, and `memlab_server_status`
 shows the last lookup's result. `MEMLAB_FIX_STATUS_TIMEOUT_MS` sets the timeout
 (default 20 s).
 
+`memlab_source_for_finding({fingerprint})` goes from a finding to the files
+behind it. It reads the module names and field names off the finding's
+retainer path and resolves each module with `MEMLAB_SOURCE_LOOKUP_CMD`, a
+shell command containing `{module}` that prints file paths (a filename search
+for `{module}.js`, for example). It then lists up to three files, each with
+the lines that assign the path's fields, read from `MEMLAB_SOURCE_ROOT` or the
+working directory.
+
 ## Reading the numbers
 
 memlab and the browser's own heap profiler read the same snapshot, but a few
