@@ -13,7 +13,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
-import {fixStatusLinesFor} from '../fix-status.js';
+import {fixStatusLinesFor, isDiffId} from '../fix-status.js';
 import {getRegisteredTool} from '../tool-registry.js';
 import {
   formatNumber,
@@ -1257,8 +1257,13 @@ export function possibleSameFinding(
  */
 async function fixStatusLines(findings: readonly Finding[]): Promise<string[]> {
   // Each diff is looked up once.
+  // Malformed entries are dropped before the cap, so they take no slot.
   const diffs = [
-    ...new Set(findings.flatMap(f => (f.fixed_by_diffs ?? []).slice(0, 4))),
+    ...new Set(
+      findings.flatMap(f =>
+        (f.fixed_by_diffs ?? []).filter(isDiffId).slice(0, 4),
+      ),
+    ),
   ].slice(0, MAX_FIX_LOOKUPS);
   return fixStatusLinesFor(diffs);
 }

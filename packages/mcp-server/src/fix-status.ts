@@ -38,6 +38,11 @@ export function lastFixStatusOutcome(): FixStatusOutcome | null {
   return lastOutcome;
 }
 
+/** Only identifiers reach the shell. */
+export function isDiffId(diff: string): boolean {
+  return /^[A-Za-z]{0,4}\d+$/.test(diff);
+}
+
 export function fixStatusCommand(): string | null {
   const template = process.env.MEMLAB_FIX_STATUS_CMD;
   return template == null || template === '' ? null : template;
@@ -55,7 +60,9 @@ export function describeLookupFailure(
   timeoutMs: number,
 ): string {
   const parts: string[] = [];
-  if (err.killed === true || err.signal === 'SIGTERM') {
+  // `killed` is set only when exec's own timeout killed the child; a
+  // SIGTERM from elsewhere is reported as a signal below.
+  if (err.killed === true) {
     parts.push(`timed out after ${Math.round(timeoutMs / 1000)}s`);
   } else if (typeof err.code === 'number') {
     parts.push(`exit ${err.code}`);
@@ -92,42 +99,38 @@ export async function fixStatusLinesFor(
   }
   const timeoutMs = lookupTimeoutMs();
   const lines = await Promise.all(
-    diffs
-      .filter(diff => /^[A-Za-z]{0,4}\d+$/.test(diff))
-      .map(
-        diff =>
-          new Promise<string | null>(resolve => {
-            const hit = cache.get(diff);
-            if (hit != null && Date.now() - hit.at < CACHE_TTL_MS) {
-              resolve(hit.line);
-              return;
-            }
-            exec(
-              template.split('{diff}').join(diff),
-              {timeout: timeoutMs},
-              (err, stdout, stderr) => {
-                const at = Date.now();
-                if (err != null) {
-                  const detail = describeLookupFailure(
-                    err,
-                    String(stderr),
-                    timeoutMs,
-                  );
-                  lastOutcome = {diff, ok: false, detail, at};
-                  resolve(
-                    `- Fix status of ${diff}: (lookup failed: ${detail})`,
-                  );
-                  return;
-                }
-                const out = String(stdout).trim().split('\n')[0]?.slice(0, 200);
-                lastOutcome = {diff, ok: true, detail: out ?? '', at};
-                const line = out ? `- Fix status of ${diff}: ${out}` : null;
-                if (line != null) cache.set(diff, {line, at});
-                resolve(line);
-              },
-            );
-          }),
-      ),
+    diffs.filter(isDiffId).map(
+      diff =>
+        new Promise<string | null>(resolve => {
+          const hit = cache.get(diff);
+          if (hit != null && Date.now() - hit.at < CACHE_TTL_MS) {
+            resolve(hit.line);
+            return;
+          }
+          exec(
+            template.split('{diff}').join(diff),
+            {timeout: timeoutMs},
+            (err, stdout, stderr) => {
+              const at = Date.now();
+              if (err != null) {
+                const detail = describeLookupFailure(
+                  err,
+                  String(stderr),
+                  timeoutMs,
+                );
+                lastOutcome = {diff, ok: false, detail, at};
+                resolve(`- Fix status of ${diff}: (lookup failed: ${detail})`);
+                return;
+              }
+              const out = String(stdout).trim().split('\n')[0]?.slice(0, 200);
+              lastOutcome = {diff, ok: true, detail: out ?? '', at};
+              const line = out ? `- Fix status of ${diff}: ${out}` : null;
+              if (line != null) cache.set(diff, {line, at});
+              resolve(line);
+            },
+          );
+        }),
+    ),
   );
   return lines.filter((l): l is string => l != null);
 }
