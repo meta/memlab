@@ -13,6 +13,7 @@ import {exec} from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
+import {describeLookupFailure} from '../fix-status.js';
 import {loadFindingIndex} from './finding-index.js';
 import {errorResult, markdownTable, toolResult} from '../utils.js';
 
@@ -105,8 +106,11 @@ export function pathTokens(text: string): PathTokens {
     ) {
       if (!modules.includes(t)) modules.push(t);
     } else if (/^[$_a-z][$\w]*$/.test(t) && t.length >= 3) {
-      if (!fields.includes(t) && !PATH_WORDS.has(t)) {
-        fields.push(t);
+      // A model field is stored as `__x_<name>` and written in source as
+      // `<name>`.
+      const f = t.startsWith('__x_') && t.length > 4 ? t.slice(4) : t;
+      if (!fields.includes(f) && !PATH_WORDS.has(f)) {
+        fields.push(f);
       }
     }
   }
@@ -118,32 +122,49 @@ function lookupCommand(): string | null {
   return cmd == null || cmd === '' || !cmd.includes('{module}') ? null : cmd;
 }
 
-function runLookup(template: string, module: string): Promise<string[]> {
+interface LookupResult {
+  files: string[];
+  /** Why the command failed, when it did. */
+  error: string | null;
+}
+
+function runLookup(template: string, module: string): Promise<LookupResult> {
   return new Promise(resolve => {
     exec(
       template.split('{module}').join(module),
       {timeout: LOOKUP_TIMEOUT_MS},
-      (err, stdout) => {
-        if (err != null) {
-          resolve([]);
-          return;
-        }
-        resolve(
-          String(stdout)
-            .split('\n')
-            .map(l => l.trim())
-            .filter(l => /^[\w.@/-]+\/[\w.@-]+\.\w+$/.test(l))
-            .slice(0, MAX_FILES),
-        );
+      (err, stdout, stderr) => {
+        const files = String(stdout)
+          .split('\n')
+          .map(l => l.trim())
+          .filter(l => /^[\w.@/-]+\/[\w.@-]+\.\w+$/.test(l))
+          .slice(0, MAX_FILES);
+        resolve({
+          files,
+          error:
+            err != null
+              ? describeLookupFailure(err, String(stderr), LOOKUP_TIMEOUT_MS)
+              : null,
+        });
       },
     );
   });
 }
 
-function readable(file: string, roots: string[]): string | null {
-  if (path.isAbsolute(file)) return fs.existsSync(file) ? file : null;
+/**
+ * The file on disk under one of `roots`, or null. A path the lookup printed
+ * is never followed outside the roots: `../` or an absolute path elsewhere
+ * is not read.
+ */
+export function readable(
+  file: string,
+  roots: readonly string[],
+): string | null {
   for (const root of roots) {
-    const p = path.join(root, file);
+    const base = path.resolve(root);
+    const p = path.resolve(base, file);
+    const rel = path.relative(base, p);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) continue;
     if (fs.existsSync(p)) return p;
   }
   return null;
@@ -238,13 +259,18 @@ export function registerSourceForFinding(server: McpServer): void {
           (r): r is string => r != null && r !== '',
         );
         const picked = modules.slice(0, MAX_MODULES);
+        if (picked.length === 0) {
+          lines.push('No module name on this path to look up.');
+          return toolResult(lines.join('\n'));
+        }
         const found = await Promise.all(
           picked.map(async (module, rank) => ({
             module,
             rank,
-            files: await runLookup(template, module),
+            ...(await runLookup(template, module)),
           })),
         );
+        const failures = found.filter(f => f.error != null);
         const rows: Array<{
           module: string;
           rank: number;
@@ -266,10 +292,17 @@ export function registerSourceForFinding(server: McpServer): void {
             rows.push({module, rank, file, local, hits});
           }
         }
+        // A failed command is not "no file": say why, so a broken lookup is
+        // not read as an unknown module.
+        const failureNote =
+          failures.length > 0
+            ? `_The lookup command failed for ${failures.map(f => `\`${f.module}\` (${f.error ?? ''})`).join(', ')}._`
+            : '';
         if (rows.length === 0) {
           lines.push(
             `The lookup command found no file for ${picked.map(m => `\`${m}\``).join(', ')}.`,
           );
+          if (failureNote !== '') lines.push('', failureNote);
           return toolResult(lines.join('\n'));
         }
         rows.sort(
@@ -308,6 +341,7 @@ export function registerSourceForFinding(server: McpServer): void {
               .join(', ')}._`,
           );
         }
+        if (failureNote !== '') lines.push('', failureNote);
         return toolResult(lines.join('\n'));
       } catch (err) {
         return errorResult(err);

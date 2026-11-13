@@ -432,7 +432,8 @@ retainer path and resolves each module with `MEMLAB_SOURCE_LOOKUP_CMD`, a
 shell command containing `{module}` that prints file paths (a filename search
 for `{module}.js`, for example). It then lists up to three files, each with
 the lines that assign the path's fields, read from `MEMLAB_SOURCE_ROOT` or the
-working directory.
+working directory. A printed path outside that directory is not read, and a
+lookup command that fails says why rather than reading as "no file".
 
 ## Reading the numbers
 

@@ -643,7 +643,7 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_FIX_STATUS_CMD` | Shell command with `{diff}` in it; `memlab_finding_index` prints its first output line for each fix diff a finding records (whether it landed) |
 | `MEMLAB_FIX_STATUS_TIMEOUT_MS` | Timeout for one `MEMLAB_FIX_STATUS_CMD` lookup (default 20000). A failed lookup prints why (timeout, exit code, first stderr line); `memlab_server_status` shows the last result |
 | `MEMLAB_SOURCE_LOOKUP_CMD` | Shell command with `{module}` in it that prints file paths; `memlab_source_for_finding` runs it for each module name on a finding's retainer path |
-| `MEMLAB_SOURCE_ROOT` | Directory the paths it prints are read from, to find the lines that assign the path's fields (default: the working directory) |
+| `MEMLAB_SOURCE_ROOT` | Directory the paths it prints are read from, to find the lines that assign the path's fields (default: the working directory). A printed path outside it is not read |
 
 ## Investigation Skill for AI Assistants
 
