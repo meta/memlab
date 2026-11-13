@@ -495,8 +495,14 @@ export function registerAbCompare(server: McpServer): void {
           const onFit = rateOf(steady(on.cycles), steady(onYs));
           const offAll = rateOf(off.cycles, offYs);
           const onAll = rateOf(on.cycles, onYs);
-          const offNums = offYs.filter((v): v is number => v != null);
-          const offMax = offNums.length > 0 ? Math.max(...offNums) : null;
+          const peak = (ys: Array<number | null>): number | null => {
+            const nums = ys.filter((v): v is number => v != null);
+            return nums.length > 0 ? Math.max(...nums) : null;
+          };
+          // The cap gate follows the fit: a warm-up rung over the cap must
+          // not let a steady state that never reaches it be judged.
+          const offMax = peak(offYs);
+          const offSteadyMax = peak(steady(offYs));
           const fmt = (
             f: ReturnType<typeof rateOf>,
             all: ReturnType<typeof rateOf>,
@@ -514,7 +520,7 @@ export function registerAbCompare(server: McpServer): void {
           const verdict = abVerdict(
             offFit?.slope ?? null,
             onFit?.slope ?? null,
-            offMax,
+            offSteadyMax,
             caps.get(name),
             offGrowth(steady(off.cycles), steady(offYs)),
           );
