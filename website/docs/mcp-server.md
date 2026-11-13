@@ -642,7 +642,12 @@ and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one
 `memlab_ab_compare` verdict table. That table always has a row for React
 state-update records (the `react_update_records` census population), the
-population a no-op `setState` fix removes. Every profile also runs
+population a no-op `setState` fix removes. Each arm starts on a freshly
+loaded page, so `memlab_ab_compare` leaves each arm's first rung out of its fit
+by default (`skip_intervals`, 1 when every arm keeps at least three rungs) and
+prints the all-rung rate beside the steady one. When leaving out that warm-up
+changes the call, the verdict says so (for example "all-rung fit: REGRESSION?,
+from the warm-up interval only"). Every profile also runs
 `memlab_blink_native_census`, which counts native (Blink) objects per rung and
 rates a fixed list of uncapped browser holders (ordered scopes, performance
 entries, User Timing marks, event-target data, style caches, observer

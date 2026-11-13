@@ -185,10 +185,38 @@ export function abVerdict(
   return `PARTIAL (−${((1 - kept) * 100).toFixed(0)}%)`;
 }
 
+function signed(x: number): string {
+  return `${x >= 0 ? '+' : ''}${x.toFixed(3)}`;
+}
+
+/**
+ * How many leading rungs of each arm the fit leaves out. Explicit wins; by
+ * default one, when every arm keeps at least three rungs (two intervals) after
+ * it, because each arm starts on a freshly loaded page.
+ */
+export function resolveSkip(
+  requested: number | undefined,
+  arms: ReadonlyArray<{cycles: number[]}>,
+): number {
+  if (requested != null) {
+    const most = Math.min(...arms.map(a => a.cycles.length)) - 2;
+    return Math.max(0, Math.min(requested, most));
+  }
+  return arms.every(a => a.cycles.length - 1 >= 3) ? 1 : 0;
+}
+
+/** Say so when leaving out the warm-up changed the call. */
+export function warmupNote(steady: string, all: string): string {
+  if (steady === all) return '';
+  const head = (v: string) => v.replace(/\*\*/g, '').split(' (')[0];
+  if (head(steady) === head(all)) return '';
+  return ` — all-rung fit: ${head(all)}, from the warm-up interval only`;
+}
+
 export function registerAbCompare(server: McpServer): void {
   server.tool(
     'memlab_ab_compare',
-    "Judge an A/B round (`hunt_runner --ab`) in one call: run the same probes on the OFF arm and the ON arm, fit each arm against its own cycles, and print one table with per-cycle rates, the ON/OFF ratio and a verdict per metric — FIX EFFECTIVE / PARTIAL / NO EFFECT / CANNOT JUDGE. Each arm's heap total is a row too, production-only beside raw, so a dev-only resize in one arm is not read as that arm growing more. " +
+    "Judge an A/B round (`hunt_runner --ab`) in one call: run the same probes on the OFF arm and the ON arm, fit each arm against its own cycles, and print one table with per-cycle rates, the ON/OFF ratio and a verdict per metric — FIX EFFECTIVE / PARTIAL / NO EFFECT / CANNOT JUDGE. Each arm's heap total is a row too, production-only beside raw, so a dev-only resize in one arm is not read as that arm growing more. Each arm's first rung is left out of its fit by default (`skip_intervals`), because an arm starts on a freshly loaded page and that warm-up is not a per-cycle rate. " +
       'Reads the arms from run.json `ab`. Probes are `memlab_eval` code assigning a number to `result` (as in `memlab_ladder_probe`); `census` adds built-in `memlab_census` populations. Give a metric a `cap` when the fix bounds a population at a size: a round whose OFF arm never reached the cap cannot show the fix working, and is reported CANNOT JUDGE rather than NO EFFECT.',
     {
       run_dir: z.string().describe('The A/B round directory (holds run.json).'),
@@ -232,6 +260,14 @@ export function registerAbCompare(server: McpServer): void {
         .optional()
         .default(20000000)
         .describe('Per-rung node-visit budget for full-heap walks.'),
+      skip_intervals: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe(
+          'Leading rungs of EACH arm to leave out of the fit. Each arm starts on a freshly loaded page, so its first interval mixes warm-up (first mounts, lazy modules, caches filling) with the per-cycle rate; on a fix-ON arm that warm-up alone has read as a REGRESSION. Default: 1 when every arm keeps at least 3 rungs after skipping, else 0. The table shows the all-rung rate beside the steady one, and the verdict uses the steady rate.',
+        ),
       totals: z
         .boolean()
         .optional()
@@ -249,6 +285,7 @@ export function registerAbCompare(server: McpServer): void {
       timeout_ms,
       max_nodes,
       totals,
+      skip_intervals,
     }) => {
       try {
         const specs = Object.entries(
@@ -449,44 +486,69 @@ export function registerAbCompare(server: McpServer): void {
               (values.get(arm.name)?.get(name) ?? []).some(v => v != null),
             ),
         );
+        const skip = resolveSkip(skip_intervals, arms);
+        const steady = <T>(xs: T[]): T[] => xs.slice(skip);
         const rows = shown.map(name => {
           const offYs = values.get('off')?.get(name) ?? [];
           const onYs = values.get('on')?.get(name) ?? [];
-          const offFit = rateOf(off.cycles, offYs);
-          const onFit = rateOf(on.cycles, onYs);
+          const offFit = rateOf(steady(off.cycles), steady(offYs));
+          const onFit = rateOf(steady(on.cycles), steady(onYs));
+          const offAll = rateOf(off.cycles, offYs);
+          const onAll = rateOf(on.cycles, onYs);
           const offNums = offYs.filter((v): v is number => v != null);
           const offMax = offNums.length > 0 ? Math.max(...offNums) : null;
-          const fmt = (f: ReturnType<typeof rateOf>) =>
+          const fmt = (
+            f: ReturnType<typeof rateOf>,
+            all: ReturnType<typeof rateOf>,
+          ) =>
             f == null
               ? '—'
-              : `${f.slope >= 0 ? '+' : ''}${f.slope.toFixed(3)} (r² ${f.r2.toFixed(2)})`;
+              : `${signed(f.slope)} (r² ${f.r2.toFixed(2)})` +
+                (skip > 0 && all != null
+                  ? `; all rungs ${signed(all.slope)}`
+                  : '');
           const ratio =
             offFit != null && onFit != null && Math.abs(offFit.slope) > 1e-9
               ? (onFit.slope / offFit.slope).toFixed(2)
               : '—';
-          return [
-            name,
-            offYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
-            fmt(offFit),
-            onYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
-            fmt(onFit),
-            ratio,
-            failedArm(name, offYs, onYs) ??
-              partialNote(offYs, onYs) +
-                abVerdict(
-                  offFit?.slope ?? null,
-                  onFit?.slope ?? null,
+          const verdict = abVerdict(
+            offFit?.slope ?? null,
+            onFit?.slope ?? null,
+            offMax,
+            caps.get(name),
+            offGrowth(steady(off.cycles), steady(offYs)),
+          );
+          const allVerdict =
+            skip > 0
+              ? abVerdict(
+                  offAll?.slope ?? null,
+                  onAll?.slope ?? null,
                   offMax,
                   caps.get(name),
                   offGrowth(off.cycles, offYs),
-                ),
+                )
+              : verdict;
+          return [
+            name,
+            offYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
+            fmt(offFit, offAll),
+            onYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
+            fmt(onFit, onAll),
+            ratio,
+            failedArm(name, offYs, onYs) ??
+              partialNote(offYs, onYs) +
+                verdict +
+                warmupNote(verdict, allVerdict),
           ];
         });
 
         const lines = [
           `## A/B: \`${off.prop ?? '?'}\` = ${JSON.stringify(off.value)} (OFF) vs ${JSON.stringify(on.value)} (ON)`,
           '',
-          `OFF arm: ${off.paths.length} rungs, cycles ${off.cycles.join(', ')}. ON arm: ${on.paths.length} rungs, cycles ${on.cycles.join(', ')}. Each arm is fitted against its own cycles.`,
+          `OFF arm: ${off.paths.length} rungs, cycles ${off.cycles.join(', ')}. ON arm: ${on.paths.length} rungs, cycles ${on.cycles.join(', ')}. Each arm is fitted against its own cycles` +
+            (skip > 0
+              ? `, leaving out its first ${skip === 1 ? 'rung' : `${skip} rungs`} (warm-up after the page load; \`skip_intervals: 0\` fits every rung).`
+              : '.'),
           '',
           ...(picked != null
             ? [

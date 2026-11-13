@@ -385,7 +385,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_ab_compare',
-        "Judge an A/B round in one call: the same probes on the OFF and ON arms, per-cycle rates, ON/OFF ratio and a FIX EFFECTIVE / NO EFFECT / CANNOT JUDGE verdict per metric, plus each arm's heap total with dev-only memory removed.",
+        "Judge an A/B round in one call: the same probes on the OFF and ON arms, per-cycle rates, ON/OFF ratio and a FIX EFFECTIVE / NO EFFECT / CANNOT JUDGE verdict per metric, plus each arm's heap total with dev-only memory removed. Each arm's first (warm-up) rung is left out of the fit by default.",
       ],
       [
         'memlab_object_urls',
