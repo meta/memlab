@@ -57,6 +57,7 @@ import {errorResult, formatBytes, formatNumber, toolResult} from '../utils.js';
 import {runWithReadScope} from '../read-scope.js';
 import {runWithRungRetention} from '../snapshot-borrow.js';
 import {MAX_STATUS_WAIT_MS, statusTime} from './jobs.js';
+import {callToolInChild, isIsolatedChild} from '../battery-child.js';
 import {
   describeForeignEntry,
   readLedger,
@@ -145,6 +146,83 @@ function partialDigestText(run: BatteryRun): string {
         ]
       : lines;
   return `**Digest so far**\n\n${shown.join('\n')}\n\n`;
+}
+
+/**
+ * Run the battery in a child server (see `battery-child.ts`), mirroring its
+ * progress from `battery.partial.json` into `run` so a status poll here reads
+ * the same as for an in-process run. The child writes the report, the done
+ * marker and the per-tool files; the marker is re-stamped with this
+ * process's handle id so the ledger can match it.
+ */
+async function runIsolated(
+  run: BatteryRun,
+  ledger: LedgerEntry,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const childArgs: Record<string, unknown> = {async: false, isolate: false};
+  for (const [k, v] of Object.entries(args)) {
+    if (v !== undefined) childArgs[k] = v;
+  }
+  const call = callToolInChild(
+    'memlab_analysis_battery',
+    childArgs,
+    `battery ${run.id}`,
+  );
+  writeLedger({...ledger, notes: [`isolated in child process ${call.pid}`]});
+  const mirror = (): void => {
+    try {
+      const p = JSON.parse(
+        fs.readFileSync(path.join(run.outDir, PARTIAL_FILE), 'utf8'),
+      ) as {steps_processed?: number; steps?: BatteryRun['partial']};
+      if (typeof p.steps_processed === 'number') {
+        run.doneSteps = p.steps_processed;
+      }
+      if (Array.isArray(p.steps)) {
+        run.partial = p.steps;
+        run.currentTool = null;
+      }
+    } catch {
+      // Not written yet, or mid-rename.
+    }
+  };
+  const timer = setInterval(mirror, 3000);
+  timer.unref();
+  const restamp = (status: 'done' | 'error'): void => {
+    const doneFile = path.join(run.outDir, 'battery.done.json');
+    try {
+      const d = JSON.parse(fs.readFileSync(doneFile, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      fs.writeFileSync(
+        doneFile,
+        JSON.stringify(
+          {...d, battery_id: run.id, child_battery_id: d.battery_id},
+          null,
+          2,
+        ),
+      );
+    } catch {
+      // The child failed before writing it; the ledger still records how.
+    }
+    writeLedger({
+      ...ledger,
+      status,
+      finished_at: new Date().toISOString(),
+    });
+  };
+  try {
+    const text = await call.done;
+    mirror();
+    restamp('done');
+    return text;
+  } catch (err) {
+    restamp('error');
+    throw err;
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 /**
@@ -1383,6 +1461,12 @@ export function registerAnalysisBattery(server: McpServer): void {
         .describe(
           'A probe set saved with `memlab_probes` to measure at every rung (a `memlab_ladder_probe` step, with OK / VIOLATED per probe that has an `expect`). Default: the set whose `match` appears in the round\'s URL filter, if exactly one does. `"none"` turns it off.',
         ),
+      isolate: z
+        .boolean()
+        .optional()
+        .describe(
+          "With `async: true`, run the battery in a child copy of this server (default true; `MEMLAB_BATTERY_ISOLATE=0` changes the default). The server is single-threaded and the battery's parses are synchronous, so in-process every other call — an eval, a status check — waits behind it for minutes. The child has its own event loop and heap; the report, files and handle are the same.",
+        ),
       async: z
         .boolean()
         .optional()
@@ -1403,6 +1487,7 @@ export function registerAnalysisBattery(server: McpServer): void {
         skip,
         probes,
         async: runAsync,
+        isolate,
       },
       extra,
     ) => {
@@ -2104,7 +2189,21 @@ export function registerAnalysisBattery(server: McpServer): void {
           finish();
           throw e;
         }
-        void executeAndMark().then(
+        const isolated =
+          !isIsolatedChild() &&
+          (isolate ?? process.env.MEMLAB_BATTERY_ISOLATE !== '0');
+        const work = isolated
+          ? runIsolated(tracked, ledger, {
+              run_dir,
+              out_dir: outDir,
+              profile,
+              timeout_ms,
+              digest_rows,
+              skip,
+              probes,
+            })
+          : executeAndMark();
+        void work.then(
           text => {
             tracked.result = text;
             tracked.finishedAt = Date.now();

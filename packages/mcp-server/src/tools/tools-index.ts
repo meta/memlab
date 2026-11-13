@@ -235,7 +235,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_analysis_battery',
-        "Run a whole round's analysis in one call, write per-tool detail to disk, return only a digest — the way to read a multi-round sweep without spending a context window on it.",
+        "Run a whole round's analysis in one call, write per-tool detail to disk, return only a digest — the way to read a multi-round sweep without spending a context window on it. With `async: true` it runs in a child server process, so the server stays responsive.",
       ],
       [
         'memlab_retention_windows',

@@ -636,7 +636,8 @@ first results can be read while a slow step still runs, and it writes
 `battery.done.json` to its output directory last, so a script can wait on that
 one file;
 `memlab_battery_status({battery_id, wait_ms})` waits for it from the assistant
-side, and `wait_for_rungs: "all"` queues a battery until the round's
+side (an `async: true` battery runs in a child copy of the server by default,
+`isolate`, so the server keeps answering other calls while it runs), and `wait_for_rungs: "all"` queues a battery until the round's
 `round.done` marker appears. On an A/B round (run.json has an `ab` section
 and the ladder splits between the arms), the battery runs each ladder step
 once per arm, writes `<tool>.off.txt` and `<tool>.on.txt`, and adds one

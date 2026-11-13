@@ -350,7 +350,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_build_pair_compare` | A dev-build round and a production-build round of the same combo, lined up per population by property set and unmangled class: dev-only, production-real, production-saturating or production-only, and how much of the dev heap growth a production build keeps. |
 | `memlab_compare_rounds` | Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder). |
 | `memlab_field_release_impact` | If a fix nulls this property, how many bytes come back — and is it the only reference? The question every memory fix asks, in the form fixes actually take. |
-| `memlab_analysis_battery` | Run a whole round's analysis in one call, write per-tool detail to disk, return only a digest — the way to read a multi-round sweep without spending a context window on it. |
+| `memlab_analysis_battery` | Run a whole round's analysis in one call, write per-tool detail to disk, return only a digest — the way to read a multi-round sweep without spending a context window on it. With `async: true` it runs in a child server process, so the server stays responsive. |
 | `memlab_retention_windows` | What windows could BOUND this population — timeouts, TTLs, cleanup intervals? Run it before calling any growth unbounded: a ladder shorter than the app's window cannot tell a leak from a working set. |
 | `memlab_prune_run` | Reclaim the disk a round occupies by gzipping its rungs (still analysable) or deleting them. A sweep is tens of GB. |
 | `memlab_battery_status` | Wait on a `memlab_analysis_battery({async: true})` run (`wait_ms`, up to 90 s) and collect its report when it finishes. While it runs, the reply quotes the digest of the steps already done; `battery.partial.json` holds the same, and `battery.done.json` is written last. |
@@ -626,6 +626,7 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_CLI_VERBOSE` | `1` prints full tool output, with suggestions, from `memlab-cli script` |
 | `MEMLAB_REPEAT_NOTES` | `1` prints standing explanatory notes on every call instead of once per session |
 | `MEMLAB_PREWARM_CONCURRENCY` | Number of workers that build sidecar indexes for a ladder in parallel |
+| `MEMLAB_BATTERY_ISOLATE` | `0` runs an `async: true` `memlab_analysis_battery` in the server process instead of a child copy of it (the default, `isolate: true`, keeps the server answering other calls while the battery runs) |
 | `MEMLAB_RETAIN_RUNGS` | Most rungs `memlab_analysis_battery` keeps parsed between its steps, so the next ladder tool reuses them instead of parsing again (default 8, fewer when memory is short; `0` turns it off) |
 | `MEMLAB_NO_INDEX_CACHE` | `1` disables the `.memlab-index.json` sidecar cache, for example for a cold measurement |
 | `MEMLAB_DEV_ARTIFACT_GLOBALS` | Comma-separated extra dev-only globals for `memlab_dev_artifacts`, for example `myDebugHook,__MY_DEVTOOLS__` |
