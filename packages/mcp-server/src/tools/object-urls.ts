@@ -78,9 +78,13 @@ export function countObjectUrls(snapshot: IHeapSnapshot): ObjectUrlCounts {
       }
       return;
     }
+    // A File or Blob is a `native` node on some builds, as `memlab_census`
+    // counts them; reading only `object` nodes reported 0 where it saw 206.
+    if (node.type === 'object' || node.type === 'native') {
+      if (node.name === 'Blob') out.blobs++;
+      else if (node.name === 'File') out.files++;
+    }
     if (node.type !== 'object') return;
-    if (node.name === 'Blob') out.blobs++;
-    else if (node.name === 'File') out.files++;
     let entries = 0;
     for (const e of node.references) {
       if (e.type !== 'property') continue;
@@ -103,6 +107,22 @@ export function countObjectUrls(snapshot: IHeapSnapshot): ObjectUrlCounts {
   });
   out.uniqueBlobUrls = unique.size;
   return out;
+}
+
+/**
+ * A stack frame as `fn @ file:line:col`. A bundled page's frame names its
+ * script by URL, and a packaged bundle URL runs to a thousand characters of
+ * package ids that said nothing and pushed the function name off the table.
+ */
+export function shortFrame(frame: string): string {
+  const m =
+    /^(.*?)\s*\((.+):(\d+):(\d+)\)$/.exec(frame) ??
+    /^()(.+):(\d+):(\d+)$/.exec(frame);
+  if (m == null) return frame.slice(0, 120);
+  const fn = m[1].trim() || '(anonymous)';
+  let file = m[2].split(/[?#]/)[0].replace(/^.*\//, '');
+  if (file.length > 40) file = `${file.slice(0, 24)}…`;
+  return `${fn.slice(0, 80)} @ ${file}:${m[3]}:${m[4]}`;
 }
 
 /** Per-rung in-page register totals the runner recorded, by rung index. */
@@ -387,7 +407,7 @@ export function registerObjectUrls(server: McpServer): void {
                 'Bytes (last rung)',
               ],
               ranked.map(r => [
-                `\`${r.creator.slice(0, 120)}\``,
+                `\`${shortFrame(r.creator)}\``,
                 ...r.counts.map(c => (c == null ? '—' : formatNumber(c))),
                 r.slope == null
                   ? '—'
@@ -400,7 +420,7 @@ export function registerObjectUrls(server: McpServer): void {
           const top = ranked.find(r => (r.slope ?? 0) > 0.01);
           if (top != null && top.stack.length > 1) {
             lines.push(
-              `Fastest-growing creator's stack: ${top.stack.map(f => `\`${f.slice(0, 100)}\``).join(' ← ')}`,
+              `Fastest-growing creator's stack: ${top.stack.map(f => `\`${shortFrame(f)}\``).join(' ← ')}`,
               '',
             );
           }
