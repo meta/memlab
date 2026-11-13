@@ -731,6 +731,15 @@ one eval program over chosen rungs the same way, without loading them first.
 Each rung gets a timeout scaled from its size, as `memlab_eval` does, unless
 `timeout_ms` is given.
 
+Both eval tools take `code_file`, a `.js` file to run instead of inline `code`,
+and `use`, a list of probe sets whose `prelude` runs first. Setup that every
+probe repeats (collecting the targets of one edge, say) is saved once with
+`memlab_probes({mode: "save", set, prelude})` and reused in later sessions.
+Inside an eval, `helpers.targets(edge)` returns the nodes an edge points at,
+and `helpers.pathAll(ids, "mirror.listeners[*]")` follows a dotted path,
+fanning out over collection entries at `[*]`, with the node count after each
+hop.
+
 The first load of a rung writes a sidecar index next to it
 (`<snapshot>.memlab-index.json`) with class counts, edge names and shape
 tables. Later ladder calls read the sidecar instead of parsing the rung:

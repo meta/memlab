@@ -585,6 +585,8 @@ The escape hatch when no fixed-shape tool matches the question. It runs JavaScri
 
 - **`save_as`:** keeps a result set server-side, and `helpers.load(name)` reads it back in a later call. To compare two snapshots, save counts keyed by `helpers.stableKey` rather than node ids, and read them back with `{allowCrossSnapshot: true}`.
 - **`max_nodes`:** bounds a full-heap walk.
+- **`code_file` and `use`:** `code_file` runs a `.js` file instead of inline `code`. `use: ["<set>"]` runs the `prelude` of each named probe set first, so shared setup is saved once with `memlab_probes({mode: "save", set, prelude})` and reused across sessions. `memlab_eval_across` takes both, and `prelude`.
+- **Walking to targets:** `helpers.targets(edge, {from?})` returns the nodes an edge points at (`byEdgeName` returns the holders), and `helpers.pathAll(ids, "mirror.listeners[*]")` follows a dotted path from one node or many, fanning out over collection entries at `[*]` and reporting the node count after each hop. `helpers.sampleNatives(cls, n)` samples a native class and ages each member, by its JS wrapper when its own id carries no age.
 - **Pre-scan lint:** before anything runs, the call is refused for a helper name that does not exist, for code with no output (no `result`, `return`, `console` or `helpers.save`), and for an `e.type === 'context'` filter in code that never reaches a scope object. `skip_lint: true` runs it anyway; `memlab_eval_across` stops after the first refused rung.
 - **`async: true`:** runs the eval as a background job.
 - **Module source:** `helpers.moduleSource(name)` returns a module's served source spans, and `helpers.module(name)` its registry record, so a query can print the code behind a finding. `mode: "recipes"` shows worked examples.
@@ -595,7 +597,7 @@ The escape hatch when no fixed-shape tool matches the question. It runs JavaScri
 > `memlab_eval` executes arbitrary code with the full privileges of the server process. See [Tools that execute JavaScript](#tools-that-execute-javascript).
 
 ```
-Input:  { code, mode?, prelude?, timeout_ms?, max_nodes?, save_as?, async?, ... }
+Input:  { code | code_file, mode?, prelude?, use?, timeout_ms?, max_nodes?, save_as?, async?, ... }
 ```
 
 ## State and Cache Files

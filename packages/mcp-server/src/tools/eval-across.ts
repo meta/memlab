@@ -21,7 +21,7 @@ import {
   markdownTable,
   toolResult,
 } from '../utils.js';
-import {LINT_REFUSED, runEval} from './eval.js';
+import {LINT_REFUSED, resolveEvalSource, runEval} from './eval.js';
 import {startJob} from './jobs.js';
 import {runWithReadScope} from '../read-scope.js';
 import {loadRunManifest} from '../run-manifest.js';
@@ -149,8 +149,25 @@ export function registerEvalAcross(server: McpServer): void {
     {
       code: z
         .string()
+        .optional()
         .describe(
           'JavaScript to run against each snapshot. Same conventions as memlab_eval: assign to `result`, iterate with `snapshot.nodes.forEach`, use `helpers.*`. Run `memlab_eval({mode:"describe_env"})` for the full surface.',
+        ),
+      code_file: z
+        .string()
+        .optional()
+        .describe('Path to a .js file to run instead of `code`.'),
+      prelude: z
+        .string()
+        .optional()
+        .describe(
+          'Source run before `code` on every snapshot, as in `memlab_eval`.',
+        ),
+      use: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Saved libraries (probe-set preludes) to run before `prelude`, as in `memlab_eval`.',
         ),
       handles: z
         .array(z.string())
@@ -218,7 +235,16 @@ export function registerEvalAcross(server: McpServer): void {
           '"table": when every rung\'s `result` is a scalar or a flat object of scalars (e.g. `{maps: 12, entries: 340}`), print ONE key × rung table with a first-to-last Δ column instead of a block per rung. Results of any other shape fall back to "sections" (the default).',
         ),
     },
-    async args => {
+    async raw => {
+      let args: Omit<typeof raw, 'use' | 'code_file'>;
+      try {
+        args = resolveEvalSource(raw);
+      } catch (err) {
+        return errorResult(err);
+      }
+      if (args.code == null || args.code.trim() === '') {
+        return errorResult(new Error('Pass `code` or `code_file`.'));
+      }
       if (args.async === true) {
         const job = startJob('memlab_eval_across', () =>
           runWithReadScope(() => runEvalAcross(args)),
@@ -236,6 +262,7 @@ export function registerEvalAcross(server: McpServer): void {
 
 async function runEvalAcross({
   code,
+  prelude,
   handles,
   paths,
   run_dir,
@@ -247,7 +274,8 @@ async function runEvalAcross({
   format = 'sections',
 }: {
   format?: 'sections' | 'table';
-  code: string;
+  code?: string;
+  prelude?: string;
   handles?: string[];
   paths?: string[];
   run_dir?: string;
@@ -340,6 +368,7 @@ async function runEvalAcross({
         const ran = await target.run(() =>
           runEval({
             code,
+            prelude,
             timeout_ms,
             max_nodes,
             skip_lint,

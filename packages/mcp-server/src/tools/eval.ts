@@ -24,6 +24,7 @@ import {
 import {sizeInput, withSizeHint} from '../byte-size.js';
 import {minifiedSignal} from '../minified.js';
 import {promiseReactions} from '../promise-chains.js';
+import {readProbeSets} from '../probe-sets.js';
 import {
   buildPathTree,
   cachedFamilyResolver,
@@ -444,6 +445,10 @@ const HELPER_SYNONYMS: Record<string, string> = {
   scopeVars: 'ctxVars',
   findContextsWithVar: 'byContextVar',
   contextsWithVar: 'byContextVar',
+  path: 'pathAll',
+  derefAll: 'pathAll',
+  holders: 'byEdgeName',
+  edgeTargets: 'targets',
   mapSize: 'arrayLen',
   sizeOf: 'arrayLen',
   retainer: 'firstRetainer',
@@ -1128,6 +1133,7 @@ const HELPER_NAMES = [
   'formatNumber',
   'getProp',
   'groupArrayElementsByProperty',
+  'groupCount',
   'groupReferrersByEdge',
   'hasShape',
   'histogram',
@@ -1137,6 +1143,7 @@ const HELPER_NAMES = [
   'isRealDetached',
   'iterByClass',
   'iterByType',
+  'len',
   'listFns',
   'listSaved',
   'listenerRecords',
@@ -1155,6 +1162,7 @@ const HELPER_NAMES = [
   'nodesByClass',
   'ownProps',
   'owner',
+  'pathAll',
   'pathBetween',
   'pathLabel',
   'pathTree',
@@ -1168,6 +1176,7 @@ const HELPER_NAMES = [
   'rootPath',
   'rootPathAvoidingDev',
   'sample',
+  'sampleNatives',
   'save',
   'scripts',
   'serializeNodeDetail',
@@ -1182,6 +1191,7 @@ const HELPER_NAMES = [
   'stringValue',
   'stringsBySize',
   'stringsWithPrefix',
+  'targets',
   'walk',
   'walkChain',
   'withProp',
@@ -1664,6 +1674,18 @@ export function registerEval(server: McpServer): void {
         .describe(
           'Source run in the SAME context immediately before `code` — shared setup, without pasting it into every probe. Define functions and constants here and call them from `code`. For code that should outlive the call, `helpers.defineFn(name, src)` stores a function on disk and `helpers.fn(name)` reads it back in a later session.',
         ),
+      use: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Saved libraries to run before `prelude` and `code`: the `prelude` of each named probe set (`memlab_probes({mode: "save", set, prelude})`). Shared setup is saved once and reused across sessions instead of pasted into every eval.',
+        ),
+      code_file: z
+        .string()
+        .optional()
+        .describe(
+          'Path to a .js file to run instead of `code`, so a long probe does not have to be inlined as a JSON string.',
+        ),
       section: z
         .string()
         .optional()
@@ -1691,11 +1713,57 @@ export function registerEval(server: McpServer): void {
           'Abort a `snapshot.nodes.forEach` walk after this many node visits. Defaults to a budget SCALED from the loaded graph (6 full passes, floored at 20,000,000) — a probe that makes several passes is the normal shape, so a flat cap silently truncated ordinary multi-pass analysis on large heaps. On abort the partial `result` is returned with a note; an abort that produced NO result is refused outright, because an empty value is indistinguishable from a genuine empty census. Reported back as `nodes_visited` on every call.',
         ),
     },
-    async ({async: background, ...args}) =>
-      background === true
+    async ({async: background, use, code_file, ...rest}) => {
+      let args: typeof rest;
+      try {
+        args = resolveEvalSource({...rest, use, code_file});
+      } catch (err) {
+        return errorResult(err);
+      }
+      return background === true
         ? startEvalJob(args)
-        : runEval({...args, ownsScanBudget: true}),
+        : runEval({...args, ownsScanBudget: true});
+    },
   );
+}
+
+/**
+ * `code_file` read into `code`, and the preludes of the `use`d probe sets put
+ * ahead of `prelude`. Shared by `memlab_eval` and `memlab_eval_across`.
+ */
+export function resolveEvalSource<T extends {code?: string; prelude?: string}>(
+  args: T & {use?: string[]; code_file?: string},
+): T {
+  const {use, code_file, ...rest} = args;
+  const out = {...rest} as unknown as T;
+  if (code_file != null && code_file !== '') {
+    if (rest.code != null && rest.code.trim() !== '') {
+      throw new Error('Pass `code` or `code_file`, not both.');
+    }
+    out.code = fs.readFileSync(code_file, 'utf8');
+  }
+  if (use != null && use.length > 0) {
+    const sets = readProbeSets();
+    const libs = use.map(name => {
+      const set = sets[name];
+      if (set == null) {
+        const known = Object.keys(sets);
+        throw new Error(
+          `No saved library (probe set) named "${name}". ${known.length > 0 ? `Saved: ${known.join(', ')}.` : 'Save one with `memlab_probes({mode: "save", set, prelude})`.'}`,
+        );
+      }
+      if (set.prelude == null || set.prelude.trim() === '') {
+        throw new Error(
+          `Probe set "${name}" has no prelude to use. Save one with \`memlab_probes({mode: "save", set: "${name}", prelude})\`.`,
+        );
+      }
+      return set.prelude;
+    });
+    out.prelude = [...libs, rest.prelude ?? '']
+      .filter(src => src.trim() !== '')
+      .join('\n;\n');
+  }
+  return out;
 }
 
 const PREWARM_CHUNK = 250_000;
@@ -4389,6 +4457,111 @@ export async function runEval({
       return [...hits];
     };
 
+    // The nodes an edge points at. `byEdgeName` returns the HOLDERS, so a probe
+    // that wanted what is stored under `.mirror` re-walked every holder by hand.
+    const targets = (
+      edgeName: string,
+      opts?: {from?: Iterable<number | {id: number}>},
+    ): number[] => {
+      if (opts?.from == null) return byReferrerEdge(edgeName);
+      const hits = new Set<number>();
+      for (const x of opts.from) {
+        const n = resolveNode(x);
+        if (n == null) continue;
+        forEachTargetRef(n, (e, target) => {
+          if (e.type === 'hidden') return;
+          if (String(e.name_or_index) !== edgeName) return;
+          if (target.id > 3) hits.add(target.id);
+        });
+      }
+      return [...hits];
+    };
+
+    // Every node a dotted path reaches, fanning out at `[*]` (the entries of
+    // an Array, Map or Set, as `entries` reads them) and at `*` (every
+    // property). Where the walk thins out to nothing is reported per hop, so
+    // an empty answer says which level was wrong.
+    const pathAll = (
+      start: number | {id: number} | Iterable<number | {id: number}>,
+      pattern: string,
+    ): {ids: number[]; hops: Array<{hop: string; nodes: number}>} => {
+      const seeds: Array<number | {id: number}> =
+        typeof start === 'number' ||
+        (start != null && typeof (start as {id?: unknown}).id === 'number')
+          ? [start as number | {id: number}]
+          : [...(start as Iterable<number | {id: number}>)];
+      let cur = seeds.map(resolveNode).filter((n): n is IHeapNode => n != null);
+      const hops: Array<{hop: string; nodes: number}> = [];
+      const parts = pattern
+        .replace(/\[\*\]/g, '.[*]')
+        .split('.')
+        .filter(Boolean);
+      for (const part of parts) {
+        const next = new Map<number, IHeapNode>();
+        for (const node of cur) {
+          if (part === '[*]') {
+            for (const e of allEntries(node)) {
+              const v = unwrapNode(e.value) as IHeapNode | null;
+              if (v != null && v.id > 3) next.set(v.id, v);
+            }
+            continue;
+          }
+          forEachTargetRef(node, (e, target) => {
+            if (e.type === 'hidden' || target.id <= 3) return;
+            if (part === '*') {
+              if (e.type === 'property') next.set(target.id, target);
+              return;
+            }
+            if (String(e.name_or_index) === part) next.set(target.id, target);
+          });
+        }
+        cur = [...next.values()];
+        hops.push({hop: part, nodes: cur.length});
+        if (cur.length === 0) break;
+      }
+      return {ids: cur.map(n => n.id), hops};
+    };
+
+    // A native whose id is even (address- or hash-derived) carries no age,
+    // and `newest` drops it. Its JS wrapper, when it has one, has an odd id
+    // that does, so each member is aged by its own id when that is odd, else
+    // by its wrapper's.
+    const sampleNatives = (
+      cls: string,
+      n = 10,
+    ): Array<{
+      id: number;
+      name: string;
+      selfSize: number;
+      wrapper: number | null;
+      ageRank: number | null;
+    }> => {
+      const all = byClass(cls, {type: 'native'})
+        .map(id => snapshot.getNodeById(id))
+        .filter((x): x is IHeapNode => x != null);
+      return sample(all, n).map(node => {
+        let wrapper: number | null = null;
+        for (const e of node.referrers) {
+          if (e.type === 'weak' || e.type === 'shortcut') continue;
+          if (isObjectId(e.fromNode.id)) {
+            wrapper = e.fromNode.id;
+            break;
+          }
+        }
+        return {
+          id: node.id,
+          name: node.name,
+          selfSize: node.self_size,
+          wrapper,
+          ageRank: isObjectId(node.id)
+            ? ageRank(node.id)
+            : wrapper == null
+              ? null
+              : ageRank(wrapper),
+        };
+      });
+    };
+
     // Group-and-count over ids. The single most-rewritten block in ad-hoc eval
     // code, and the one whose hand-written versions most often silently drop
     // the undefined bucket.
@@ -4823,6 +4996,7 @@ export async function runEval({
       contextOf,
       ctxVars,
       arrayLen,
+      len: arrayLen,
       firstRetainer,
       byContextSlot,
       byContextVar,
@@ -4839,12 +5013,15 @@ export async function runEval({
       walkChain,
       elements,
       byReferrerEdge,
+      targets,
       derefPath,
+      pathAll,
       findWithin,
       entries,
       dominates,
       owner,
       histogram,
+      groupCount: histogram,
       pathBetween,
       save,
       load,
@@ -4856,6 +5033,7 @@ export async function runEval({
       listFns,
       forgetFn,
       sample,
+      sampleNatives,
     } satisfies Record<(typeof HELPER_NAMES)[number], unknown>;
 
     /**
@@ -5700,6 +5878,8 @@ function describeEnvLines(): string[] {
     '- `helpers.classCounts({pattern?, type?, minCount?, baseline?, minDelta?}) -> [{name, type, count, selfSize, baselineCount?, delta?}]` — one-pass class histogram, cached; `pattern` is a case-insensitive regex (substring fallback). With `baseline` (a resident snapshot handle) it returns only classes that grew by at least `minDelta` (default 1), largest delta first.',
     '- `helpers.entries(nodeOrId) -> [{key, value}]` — generic container walk: Map/WeakMap (paired, SMI gaps handled), Set/WeakSet, Array (both direct `element` edges and the `(object elements)` backing store), plain object properties. Holes and `__proto__`/`map` are filtered.',
     '- `helpers.derefPath(nodeOrId, "value._PSD.trans") -> {found, stoppedAt, missingEdge?, available?, node}` — walk a dotted edge path and, on failure, say WHICH hop failed and what was there instead. Use this instead of chaining edgeTarget: a null halfway looks identical to a null at the end, which is how a probe tests the wrong level and reports a confident zero.',
+    '- `helpers.pathAll(idOrIds, "mirror.listeners[*].callback") -> {ids, hops: [{hop, nodes}]}` — every node a dotted path reaches, from one node or many. `[*]` fans out over the entries of an Array, Map or Set (as `entries` reads them) and `*` over every property. `hops` gives the node count after each hop, so an empty `ids` says which level was wrong. Distinct ids: a node reached twice counts once.',
+    '- `helpers.targets(edgeName, {from?}) -> ids[]` — the nodes an edge of that name POINTS AT (distinct), across the heap or only from the `from` nodes. `byEdgeName` returns the holders.',
     '- `helpers.findWithin(nodeOrId, edgeName, {maxDepth}) -> [{path,id,name}]` — is this property anywhere within N hops, and at what path? Answers "which level is it on?" in one call.',
     '- `helpers.edgeTarget(nodeOrId, edgeName) -> node | null` — the node behind a named edge, when you need the node and not the `{ref,name,type}` wrapper `props()` returns.',
     '- `helpers.walkChain(startOrNode, edgeName, {maxHops?, collectIds?}) -> {length, terminated: "cycle" | "end" | "cap", truncated}` — walk a linked structure (`.next` update queues, `.prev` closure chains, LRU lists) and report HOW it ended. Use this rather than a hand-written loop: React update queues are CIRCULAR, and a hand-rolled `while (next && next.id !== start)` with a hop guard reports the guard as the length. A measured case printed 800 for a chain of 2,066. `terminated: "cap"` means the length is a floor. For the full per-link report (what each link captures, distinct vs repeated) use the `memlab_chain_walk` tool.',
@@ -5711,7 +5891,7 @@ function describeEnvLines(): string[] {
     '- `helpers.defineFn(name, src)` / `helpers.fn(name)` / `helpers.listFns()` / `helpers.forgetFn(name)` — persist CODE, not just data. `save`/`load` and `remember`/`recall` keep values; there was nothing for the edge-name walk that gets rewritten, slightly differently, in every fourth eval. `src` is a FUNCTION EXPRESSION (`"id => helpers.props(id).foo"`), compiled at definition time so a syntax error is reported there rather than inside a later probe, and compiled inside the running eval\'s context so it sees `helpers` and `snapshot`. Stored on disk, so it survives into a later session. For setup that is only needed for THIS call, pass `prelude` instead — it runs in the same context immediately before `code`, and `memlab_ladder_probe` applies it to every metric.',
     '- `helpers.remember(name, value)` / `helpers.recall(name?)` — persist a derived fact to disk (`~/.memlab/eval-store.json`, override with `MEMLAB_STATE_DIR`) and read it back in a LATER session. `save`/`load` are per-snapshot and dropped on unload, which is right for id lists (ids are per-capture) and wrong for a conclusion. `recall()` with no name lists the keys.',
     '- `helpers.sample(items, n) -> items[]` — evenly-spaced sample, NOT random: two calls over the same population return the same members, so a follow-up question lands on the objects the first answer described.',
-    '- `helpers.histogram(ids, keyFn, {limit?}) -> [{key, count}]` — group-and-count over ids, sorted by count; a null/undefined key becomes `(none)` rather than being dropped.',
+    '- `helpers.histogram(ids, keyFn, {limit?}) -> [{key, count}]` — group-and-count over ids, sorted by count; a null/undefined key becomes `(none)` rather than being dropped. `helpers.groupCount` is the same helper.',
     '- `helpers.pathBetween(fromId, toId, {maxNodes?}) -> {found, exhausted, path[]}` — BFS over outgoing edges; `exhausted:true` means the budget ran out, which is NOT the same as "no path".',
     '- `helpers.save(name, value)` / `helpers.load(name, {allowCrossSnapshot?})` / `helpers.listSaved()` — named result sets, SESSION-scoped: they survive loading another snapshot, which is what makes a baseline-vs-final comparison possible. The snapshot each was saved against is recorded, and a cross-snapshot read is refused unless you opt in — node ids are per-capture and mean nothing in another snapshot. To compare collections across snapshots, save `{stableKey → count}` instead of ids (recipe 18).',
     '- `helpers.aggregateRetained(ids[]) -> {retained, exact}` — dominator-deduped retained size for a SET of ids (does not double-count when one id dominates another); `exact:false` means the bounded walk was truncated (upper bound).',
@@ -5729,7 +5909,8 @@ function describeEnvLines(): string[] {
     "V8 gives a heap object an ODD snapshot id the first time the heap profiler sees it, and those ids only grow within one isolate (one tab session, no reload). So a larger id was first seen later. Across two rungs of one isolate, ids above the earlier rung's `maxObjectId()` were allocated after it. Within the objects first seen by ONE capture, id order is heap-walk order, not allocation order (unless allocation tracking was on). Native and synthetic nodes have EVEN ids derived from an address or hash: they carry no age, and a plain max over all ids picks one of them.",
     '- `helpers.newest(ids, n = 10) -> ids[]` — the n largest heap-object ids, newest first (even ids are dropped). `helpers.newest(helpers.byClass(name), n)` is the newest n of a class.',
     "- `helpers.ctxVars(contextOrClosure) -> {variable: brief}` — a scope's captured variables, from a context or through a closure over it.",
-    "- `helpers.arrayLen(nodeOrId) -> number | null` — entries of an Array, Map, Set or object, not backing-store slots (a Map's table holds each key and value, so counting slots doubles it).",
+    "- `helpers.arrayLen(nodeOrId) -> number | null` — entries of an Array, Map, Set or object, not backing-store slots (a Map's table holds each key and value, so counting slots doubles it). `helpers.len` is the same helper.",
+    '- `helpers.sampleNatives(cls, n = 10) -> [{id, name, selfSize, wrapper, ageRank}]` — an evenly spaced sample of a NATIVE class (`File`, `HTMLImageElement`, …), each aged by its own id when that is odd, else by its JS wrapper (the first strong referrer with an odd id). `ageRank: null` means neither can be aged.',
     '- `helpers.firstRetainer(nodeOrId, {skipWeak = true, skipInternal = false}) -> {edge, edgeType, holder} | null` — the holder one hop up on the shortest path to the roots, else the first other referrer.',
     "- `helpers.ageRank(nodeOrId) -> number | null` — the share of this snapshot's heap objects with a smaller id: 0 is the oldest, 1 the newest. Null for an even id or one not in this snapshot. The sorted id list is built once per snapshot.",
     '- `helpers.maxObjectId() -> id` — the largest heap-object id in this snapshot. To split a population into "existed at the earlier rung" and "allocated since", save it on the earlier rung (`helpers.save("maxId", helpers.maxObjectId())`) and compare ids against it on the later rung with `helpers.load("maxId", {allowCrossSnapshot: true})` — only for rungs of the same isolate.',
