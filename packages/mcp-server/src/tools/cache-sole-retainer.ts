@@ -95,7 +95,7 @@ function wrappedFunctionCaches(
   }
   return [...found.values()].map(f => {
     const first = [...f.holders].sort()[0];
-    // `getter.$$cache.$1.$2` -> stable as `$$cache.$1.$2` when shared.
+    // `getter.$$cache.$1.$2` -> `$$cache.$1.$2` for display when shared.
     const tail = first.slice(first.indexOf('.') + 1);
     return {
       module: f.module,
@@ -103,7 +103,10 @@ function wrappedFunctionCaches(
         f.holders.length > 1
           ? `${tail} (shared by ${formatNumber(f.holders.length)} functions)`
           : first,
-      key: `${f.module}\u0000${tail}`,
+      // Keyed by the first holder's full path, function name included: one
+      // module's getters hold several distinct `$$cache.$1.$2` maps, and a
+      // key without the function merged them into one row.
+      key: `${f.module}\u0000${first}`,
       node: f.node,
     };
   });
@@ -118,7 +121,12 @@ export interface SoleRow {
   objects: number;
   selfBytes: number;
   classes: Map<string, number>;
+  /** The walk stopped at MAX_WALK_NODES: `objects` is a lower bound. */
+  truncated: boolean;
 }
+
+/** Nodes one cache's walk visits before it stops and says so. */
+const MAX_WALK_NODES = 2_000_000;
 
 /** Classes that are structure, not what a cache keeps. */
 const SKIP_CLASS = /^(system \/|\(|Array$|Object$|$)/;
@@ -172,10 +180,15 @@ export function soleRetained(
       objects: 0,
       selfBytes: 0,
       classes: new Map(),
+      truncated: false,
     };
     const seen = new Set<number>([c.node.id]);
     const walk: IHeapNode[] = [c.node];
-    while (walk.length > 0 && seen.size < 2_000_000) {
+    while (walk.length > 0) {
+      if (seen.size >= MAX_WALK_NODES) {
+        row.truncated = true;
+        break;
+      }
       const node = walk.pop() as IHeapNode;
       for (const e of node.references) {
         if (e.type === 'weak') continue;
@@ -190,7 +203,12 @@ export function soleRetained(
         }
       }
     }
-    if (row.objects > 0) rows.set(row.key, row);
+    if (row.objects === 0) continue;
+    // Two caches that still share a key (same module, same path) are
+    // counted apart, not merged into one row.
+    let key = row.key;
+    for (let n = 2; rows.has(key); n++) key = `${row.key}\u0000#${n}`;
+    rows.set(key, {...row, key});
   }
   return rows;
 }
@@ -201,6 +219,18 @@ function countOf(node: IHeapNode): number {
   let n = 0;
   for (const e of node.references) if (e.type === 'element') n++;
   return n;
+}
+
+function objectsCell(r: SoleRow): string {
+  return `${r.truncated ? '≥' : ''}${formatNumber(r.objects)}`;
+}
+
+/** Said under a table with a capped walk, whose count is a lower bound. */
+function truncationNote(rows: readonly SoleRow[]): string {
+  const capped = new Set(rows.filter(r => r.truncated).map(r => r.holder));
+  return capped.size === 0
+    ? ''
+    : `\n_≥: the walk of ${[...capped].map(h => `\`${h}\``).join(', ')} stopped at ${formatNumber(MAX_WALK_NODES)} nodes, so its count is a lower bound and a growth rate read from it can be too low._\n`;
 }
 
 function topClasses(m: Map<string, number> | undefined): string {
@@ -272,12 +302,13 @@ export function registerCacheSoleRetainer(server: McpServer): void {
                   r.module,
                   `\`${r.holder}\``,
                   r.kind,
-                  formatNumber(r.objects),
+                  objectsCell(r),
                   formatBytes(r.selfBytes),
                   topClasses(r.classes),
                 ]),
                 new Set([3, 4]),
               ),
+              truncationNote(rows),
             ].join('\n'),
           );
         }
@@ -334,13 +365,27 @@ export function registerCacheSoleRetainer(server: McpServer): void {
               ranked.map(r => [
                 r.last?.module ?? '—',
                 `\`${r.last?.holder ?? '?'}\``,
-                r.ys.map(formatNumber).join(' → '),
+                r.ys
+                  .map((y, i) =>
+                    perRung[i].get(r.k)?.truncated === true
+                      ? `≥${formatNumber(y)}`
+                      : formatNumber(y),
+                  )
+                  .join(' → '),
                 `${r.slope >= 0 ? '+' : ''}${r.slope.toFixed(3)}`,
                 r.last != null ? formatBytes(r.last.selfBytes) : '—',
                 topClasses(r.last?.classes),
               ]),
             ),
             '',
+            truncationNote(
+              ranked.flatMap(r =>
+                perRung.flatMap(m => {
+                  const row = m.get(r.k);
+                  return row != null ? [row] : [];
+                }),
+              ),
+            ),
             growing.length > 0
               ? `**${growing.length} cache(s) keep more objects alive every ${unit} that nothing but caches reaches.** The app dropped them; evict the entry where the object is discarded (or key the cache weakly). An object held by two caches counts under both.`
               : '_No cache gains cache-only objects across the ladder._',
