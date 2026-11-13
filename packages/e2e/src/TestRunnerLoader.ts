@@ -12,6 +12,8 @@ import path from 'path';
 import type {E2EScenarioSynthesizerConstructor} from '@memlab/core';
 import {fileManager} from '@memlab/core';
 import BaseSynthesizer from './BaseSynthesizer';
+import DefaultScenarioSynthesizer from './plugins/DefaultScenarioSynthesizer';
+import TestSPAVisitSynthesizer from './plugins/TestSPAVisitSynthesizer';
 
 class TestRunnerLoader {
   load(): E2EScenarioSynthesizerConstructor[] {
@@ -35,7 +37,9 @@ class TestRunnerLoader {
       }
       ret.push(constructor);
     });
-    return ret;
+    return ret.length > 0
+      ? ret
+      : [DefaultScenarioSynthesizer, TestSPAVisitSynthesizer];
   }
 }
 
