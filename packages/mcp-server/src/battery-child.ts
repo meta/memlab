@@ -38,23 +38,28 @@ export interface ChildCall {
 }
 
 /**
- * Spawn `process.argv[1]` (this server's entry point) with the same node
- * flags, call `tool` once, and exit.
- */
-/**
  * In the child: a parent that exits mid-call closes the child's stdout and
- * stderr, and the next progress note or log line written there raised EPIPE and killed the child with
- * its work half done. The child instead keeps going and writes its outputs
- * to disk, where a later server finds them.
+ * stderr, and the next progress note or log line written there raised EPIPE
+ * and killed the child with its work half done. The child instead keeps
+ * going and writes its outputs to disk, where a later server finds them.
+ *
+ * Every error on these two streams is ignored, not only EPIPE: they carry
+ * nothing but notes to the parent, and an error on either has nowhere to be
+ * reported. Rethrowing one would kill the child just the same.
  */
 export function guardChildStdout(): void {
   for (const stream of [process.stdout, process.stderr]) {
-    stream.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') return;
-      throw err;
+    stream.on('error', () => {
+      // The battery's results are on disk; a lost note to the parent is not
+      // worth its work.
     });
   }
 }
+
+/**
+ * Spawn `process.argv[1]` (this server's entry point) with the same node
+ * flags, call `tool` once, and exit.
+ */
 
 export function callToolInChild(
   tool: string,
