@@ -55,6 +55,9 @@ const NATIVE_NOTE =
 /** How many of a rung's longest chains an owner-path match looks through. */
 const OWNER_MATCH_POOL = 200;
 
+/** A rung's cell where two promises share the tracked one's owner path. */
+const AMBIGUOUS = 'ambiguous';
+
 /** An owner label specific enough to identify one promise across rungs. */
 function matchableOwner(owner: string): boolean {
   return owner !== '(no retainer path)' && owner !== '(root)';
@@ -134,6 +137,7 @@ export function registerPendingPromises(server: McpServer): void {
           return errorResult(new Error('Need at least two rungs.'));
         }
         type Chain = {count: number; capped: boolean; byOwner?: boolean};
+        type Cell = Chain | null | typeof AMBIGUOUS;
         const chainOf = (node: IHeapNode): Chain => {
           const {count, truncated} = promiseReactions(node);
           return {count, capped: truncated};
@@ -161,13 +165,18 @@ export function registerPendingPromises(server: McpServer): void {
         if (tracked.length === 0) {
           return toolResult('No unsettled promise on the last rung.');
         }
-        const perRung: Array<Array<Chain | null>> = [];
+        // An owner path shared by two tracked promises cannot tell them apart.
+        const trackedPerOwner = new Map<string, number>();
+        for (const t of tracked) {
+          trackedPerOwner.set(t.owner, (trackedPerOwner.get(t.owner) ?? 0) + 1);
+        }
+        const perRung: Array<Array<Cell>> = [];
         const pendingTotals: number[] = [];
         for (const p of rungPaths.slice(0, -1)) {
           const {counts, total} = await withSnapshotAt(p, snap => {
             // By id first: no walk. A promise that exists but has settled
             // reads 0, not "absent".
-            const out: Array<Chain | null> = tracked.map(t => {
+            const out: Array<Cell> = tracked.map(t => {
               const node = snap.getNodeById(t.id);
               return node != null &&
                 node.type === 'object' &&
@@ -179,22 +188,36 @@ export function registerPendingPromises(server: McpServer): void {
             // looked for by its owner path among this rung's longest chains.
             // Without this, a promise that grew all ladder long read absent
             // on every rung but the last.
+            // A match needs the owner path to name one promise on both sides:
+            // with two candidates either could be the tracked one, and the
+            // cell reads `?` rather than another promise's chain.
             if (out.some(c => c == null)) {
-              const used = new Set<number>();
-              const byOwner = new Map<string, IHeapNode>();
+              const byId = new Set(
+                tracked.filter((_, i) => out[i] != null).map(t => t.id),
+              );
+              const byOwner = new Map<string, IHeapNode[]>();
               for (const {node} of pendingPromises(snap).slice(
                 0,
                 OWNER_MATCH_POOL,
               )) {
+                if (byId.has(node.id)) continue;
                 const owner = ownerLabel(snap, node);
-                if (!byOwner.has(owner)) byOwner.set(owner, node);
+                const nodes = byOwner.get(owner);
+                if (nodes == null) byOwner.set(owner, [node]);
+                else nodes.push(node);
               }
               tracked.forEach((t, i) => {
                 if (out[i] != null || !matchableOwner(t.owner)) return;
-                const node = byOwner.get(t.owner);
-                if (node == null || used.has(node.id)) return;
-                used.add(node.id);
-                out[i] = {...chainOf(node), byOwner: true};
+                const nodes = byOwner.get(t.owner);
+                if (nodes == null) return;
+                if (
+                  nodes.length > 1 ||
+                  (trackedPerOwner.get(t.owner) ?? 0) > 1
+                ) {
+                  out[i] = AMBIGUOUS;
+                  return;
+                }
+                out[i] = {...chainOf(nodes[0]), byOwner: true};
               });
             }
             let n = 0;
@@ -217,7 +240,8 @@ export function registerPendingPromises(server: McpServer): void {
         const slopes: Array<number | null> = [];
         let atCap = 0;
         const rows = tracked.map((t, ti) => {
-          const chains = perRung.map(r => r[ti]);
+          const cells = perRung.map(r => r[ti]);
+          const chains = cells.map(c => (c === AMBIGUOUS ? null : c));
           const series = chains.map(c => c?.count ?? null);
           // A chain at the walk cap is at least that long, so its flat
           // series says nothing about growth.
@@ -237,10 +261,12 @@ export function registerPendingPromises(server: McpServer): void {
           slopes.push(capped ? null : slope);
           return [
             `@${t.id}`,
-            ...chains.map(c =>
+            ...cells.map(c =>
               c == null
                 ? '—'
-                : `${c.capped ? '≥' : ''}${formatNumber(c.count)}${c.byOwner === true ? '*' : ''}`,
+                : c === AMBIGUOUS
+                  ? '?'
+                  : `${c.capped ? '≥' : ''}${formatNumber(c.count)}${c.byOwner === true ? '*' : ''}`,
             ),
             capped
               ? '? (at cap)'
@@ -285,7 +311,7 @@ export function registerPendingPromises(server: McpServer): void {
             '',
             NATIVE_NOTE,
             '',
-            '_`—` = no promise with that id or owner path at that rung (created later, or settled and collected). `N*` = matched by owner path, because node ids change between rungs. `≥N` = the chain walk stopped at its cap._',
+            '_`—` = no promise with that id or owner path at that rung (created later, or settled and collected). `N*` = matched by owner path, because node ids change between rungs. `?` = more than one promise has that owner path at that rung, so none is matched. `≥N` = the chain walk stopped at its cap._',
           ].join('\n'),
         );
       } catch (err) {
