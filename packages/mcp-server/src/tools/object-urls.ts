@@ -110,19 +110,21 @@ export function countObjectUrls(snapshot: IHeapSnapshot): ObjectUrlCounts {
 }
 
 /**
- * A stack frame as `fn @ file:line:col`. A bundled page's frame names its
- * script by URL, and a packaged bundle URL runs to a thousand characters of
- * package ids that said nothing and pushed the function name off the table.
+ * A stack frame as `fn @ file:line:col`, or `fn @ file:line` for a frame
+ * with no column. A bundled page's frame names its script by URL, and a
+ * packaged bundle URL runs to a thousand characters of package ids that said
+ * nothing and pushed the function name off the table.
  */
 export function shortFrame(frame: string): string {
   const m =
-    /^(.*?)\s*\((.+):(\d+):(\d+)\)$/.exec(frame) ??
-    /^()(.+):(\d+):(\d+)$/.exec(frame);
+    /^(.*?)\s*\((.+?):(\d+)(?::(\d+))?\)$/.exec(frame) ??
+    /^()(.+?):(\d+)(?::(\d+))?$/.exec(frame);
   if (m == null) return frame.slice(0, 120);
   const fn = m[1].trim() || '(anonymous)';
   let file = m[2].split(/[?#]/)[0].replace(/^.*\//, '');
   if (file.length > 40) file = `${file.slice(0, 24)}…`;
-  return `${fn.slice(0, 80)} @ ${file}:${m[3]}:${m[4]}`;
+  const at = m[4] != null ? `${m[3]}:${m[4]}` : m[3];
+  return `${fn.slice(0, 80)} @ ${file}:${at}`;
 }
 
 /** Per-rung in-page register totals the runner recorded, by rung index. */
