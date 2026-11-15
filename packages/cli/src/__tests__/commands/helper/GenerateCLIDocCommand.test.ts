@@ -122,12 +122,23 @@ test('writes an index, one page per public command, and the sidebar', () => {
   expect(fs.readdirSync(path.join(docDir, 'cli')).sort()).toEqual([
     'CLI-commands.md',
     'misc.md',
+    'parent',
     'parent.md',
     'sidebar.json',
   ]);
-  // commands are ordered by category: COMMON before MISC
+  // subcommands get their own pages in a directory named after the command
+  expect(fs.readdirSync(path.join(docDir, 'cli', 'parent'))).toEqual([
+    'sub.md',
+  ]);
+  // commands are ordered by category: COMMON before MISC; a command with
+  // subcommands is a category that links to its own page
   expect(JSON.parse(read('sidebar.json'))).toEqual([
-    {type: 'doc', id: 'cli/parent', label: 'parent'},
+    {
+      type: 'category',
+      label: 'parent',
+      link: {type: 'doc', id: 'cli/parent'},
+      items: [{type: 'doc', id: 'cli/parent/sub', label: 'sub'}],
+    },
     {type: 'doc', id: 'cli/misc', label: 'misc'},
   ]);
 });
@@ -143,7 +154,7 @@ test('the index links each command and keeps the old anchors', () => {
   expect(index).not.toContain('internal');
 });
 
-test('a command page lists its own options and its subcommands', () => {
+test('a command page lists its own options and links its subcommands', () => {
   const page = read('parent.md');
   expect(page).toMatch(/^---\ntitle: memlab parent\nsidebar_label: parent\n/);
   expect(page).toContain(
@@ -153,8 +164,32 @@ test('a command page lists its own options and its subcommands', () => {
   // universal options are linked, not repeated
   expect(page).not.toContain('**`--help`**');
   expect(page).toContain('./CLI-commands.md#universal-options');
-  expect(page).toContain('## memlab parent sub\n\nRun the sub analysis');
-  expect(page).toContain('### Options');
+  // each subcommand is a row that keeps the anchor of its former section
+  expect(page).toContain(
+    '## Subcommands\n\n| Command | Description |\n| --- | --- |\n' +
+      '| <a id="memlab-parent-sub"></a>[`memlab parent sub`](./parent/sub.md) | ' +
+      'Run the sub analysis |',
+  );
+  expect(page).not.toContain('## memlab parent sub');
+  expect(page.indexOf('## Subcommands')).toBeLessThan(
+    page.indexOf('## Options'),
+  );
+});
+
+test('a subcommand page links relative to its own directory', () => {
+  const page = read('parent/sub.md');
+  expect(page).toMatch(/^---\ntitle: memlab parent sub\nsidebar_label: sub\n/);
+  expect(page).toContain('Run the sub analysis');
+  expect(page).toContain('../CLI-commands.md#universal-options');
+  // a recorded session is imported and passed as the replay
+  expect(page).toContain(
+    "import parent_sub_output from '!!raw-loader!../../_cli/output/parent-sub.txt';\n" +
+      "import parent_sub_replay from '../../_cli/replay/parent-sub.json';\n",
+  );
+  expect(page).toContain(
+    '## Example output\n\n' +
+      '<TerminalOutput output={parent_sub_output} replay={parent_sub_replay} />',
+  );
 });
 
 test('a command page shows its example output and how to read it', () => {
@@ -168,18 +203,7 @@ test('a command page shows its example output and how to read it', () => {
     '## Example output\n\n<TerminalOutput output={parent_output} />\n',
   );
   expect(page).toContain('## How to read the output\n\nEach row is a class.');
-  // subcommands look up `<parent>-<sub>` one heading level deeper
-  expect(page).toContain(
-    "import parent_sub_output from '!!raw-loader!../_cli/output/parent-sub.txt';",
-  );
-  // a recorded session is imported and passed as the replay
-  expect(page).toContain(
-    "import parent_sub_replay from '../_cli/replay/parent-sub.json';",
-  );
-  expect(page).toContain(
-    '### Example output\n\n' +
-      '<TerminalOutput output={parent_sub_output} replay={parent_sub_replay} />',
-  );
+  expect(page).not.toContain('parent_sub_output');
   expect(page).not.toContain('parent_replay');
   expect(page.split('import TerminalOutput').length).toBe(2);
   // sections appear only when their file exists

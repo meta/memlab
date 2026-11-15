@@ -24,19 +24,30 @@ const UNIVERSAL_OPTIONS_ANCHOR = 'universal-options';
 const TERMINAL_OUTPUT = 'TerminalOutput';
 const TERMINAL_OUTPUT_MODULE = '@site/src/components/TerminalOutput';
 
-type SidebarItem = {
+type SidebarDoc = {
   type: 'doc';
   id: string;
   label: string;
 };
 
+type SidebarItem =
+  | SidebarDoc
+  | {
+      type: 'category';
+      label: string;
+      link: {type: 'doc'; id: string};
+      items: SidebarDoc[];
+    };
+
 export default class GenerateCLIDocCommand extends BaseCommand {
   private modules: Map<string, BaseCommand> = new Map();
   private universalOptions: BaseOption[] = universalOptions;
+  private cliDocsDir = '';
   private examplesDir = '';
+  // the directory of the page being written, which its links are relative to
+  private pageDir = '';
   // the example output files the current page imports
   private outputImports: string[] = [];
-  private examplesImportDir = '';
 
   getCommandName(): string {
     return 'gen-cli-doc';
@@ -62,16 +73,17 @@ export default class GenerateCLIDocCommand extends BaseCommand {
 
   // writes an index page, one page per top-level command, and the sidebar
   // items listing those pages (required by website/sidebars.js); a command
-  // page also shows `<examplesDir>/output/<id>.txt` as its example output,
-  // played from the recording in `<examplesDir>/replay/<id>.json` if there is
-  // one, and `<examplesDir>/<id>.md` as the guide to that output, where `<id>`
-  // is the full command with dashes (e.g. `analyze-detached-DOM`)
+  // with subcommands also gets one page per subcommand in a directory named
+  // after it, and a sidebar category; a command page also shows
+  // `<examplesDir>/output/<id>.txt` as its example output, played from the
+  // recording in `<examplesDir>/replay/<id>.json` if there is one, and
+  // `<examplesDir>/<id>.md` as the guide to that output, where `<id>` is the
+  // full command with dashes (e.g. `analyze-detached-DOM`); a subcommand's
+  // guide is written for its own page (e.g. `../trace.md` links a sibling of
+  // its parent)
   generateDocs(cliDocsDir: string, examplesDir: string): void {
+    this.cliDocsDir = cliDocsDir;
     this.examplesDir = examplesDir;
-    this.examplesImportDir = path
-      .relative(cliDocsDir, examplesDir)
-      .split(path.sep)
-      .join('/');
     fs.removeSync(cliDocsDir);
     fs.mkdirSync(cliDocsDir, {recursive: true});
 
@@ -92,8 +104,30 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       for (const command of commands) {
         const name = command.getCommandName();
         documented.add(name);
-        this.writeFile(cliDocsDir, `${name}.md`, this.getCommandPage(command));
-        sidebarItems.push({type: 'doc', id: `cli/${name}`, label: name});
+        const subCommands = this.getPublicSubCommands(command);
+        this.writeCommandPage(cliDocsDir, command, subCommands);
+        const doc: SidebarDoc = {type: 'doc', id: `cli/${name}`, label: name};
+        if (subCommands.length === 0) {
+          sidebarItems.push(doc);
+          continue;
+        }
+        const subCommandDir = path.join(cliDocsDir, name);
+        fs.mkdirSync(subCommandDir);
+        const items = subCommands.map(subCommand => {
+          const subName = subCommand.getCommandName();
+          this.writeCommandPage(subCommandDir, subCommand, []);
+          return {
+            type: 'doc' as const,
+            id: `cli/${name}/${subName}`,
+            label: subName,
+          };
+        });
+        sidebarItems.push({
+          type: 'category',
+          label: name,
+          link: {type: 'doc', id: doc.id},
+          items,
+        });
       }
     }
 
@@ -173,10 +207,37 @@ export default class GenerateCLIDocCommand extends BaseCommand {
     ].join('\n');
   }
 
-  private getCommandPage(command: BaseCommand): string {
+  private getPublicSubCommands(command: BaseCommand): BaseCommand[] {
+    return (command.getSubCommands() ?? []).filter(
+      subCommand => !subCommand.isInternalCommand(),
+    );
+  }
+
+  // the path of `target` relative to the page being written, with `/`
+  private getRelativePath(target: string): string {
+    return path.relative(this.pageDir, target).split(path.sep).join('/') || '.';
+  }
+
+  private writeCommandPage(
+    dir: string,
+    command: BaseCommand,
+    subCommands: BaseCommand[],
+  ): void {
+    this.pageDir = dir;
+    this.writeFile(
+      dir,
+      `${command.getCommandName()}.md`,
+      this.getCommandPage(command, subCommands),
+    );
+  }
+
+  private getCommandPage(
+    command: BaseCommand,
+    subCommands: BaseCommand[],
+  ): string {
     const name = command.getCommandName();
     this.outputImports = [];
-    const body = this.getCommandBody(command, '##');
+    const body = this.getCommandBody(command, subCommands);
     const imports =
       this.outputImports.length === 0
         ? []
@@ -187,7 +248,7 @@ export default class GenerateCLIDocCommand extends BaseCommand {
           ];
     return [
       '---',
-      `title: memlab ${name}`,
+      `title: memlab ${command.getFullCommand()}`,
       `sidebar_label: ${name}`,
       'custom_edit_url: null',
       '---',
@@ -197,8 +258,12 @@ export default class GenerateCLIDocCommand extends BaseCommand {
     ].join('\n');
   }
 
-  private getCommandBody(command: BaseCommand, headingLevel: string): string {
+  private getCommandBody(
+    command: BaseCommand,
+    subCommands: BaseCommand[],
+  ): string {
     const name = command.getFullCommand();
+    const examplesImportDir = this.getRelativePath(this.examplesDir);
     const lines: string[] = [];
     lines.push(utils.upperCaseFirstCharacter(command.getDescription().trim()));
     lines.push('');
@@ -219,11 +284,7 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       .map(example => docUtils.generateExampleCommand(name, example))
       .join('\n');
     if (exampleBlock.length > 0) {
-      lines.push(
-        `${headingLevel} Examples`,
-        '',
-        this.getCodeBlock(exampleBlock),
-      );
+      lines.push('## Examples', '', this.getCodeBlock(exampleBlock));
       lines.push('');
     }
 
@@ -234,7 +295,7 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       // changes only the output files
       const variable = `${exampleId.replace(/\W/g, '_')}_output`;
       this.outputImports.push(
-        `import ${variable} from '!!raw-loader!${this.examplesImportDir}/output/${outputFile}';`,
+        `import ${variable} from '!!raw-loader!${examplesImportDir}/output/${outputFile}';`,
       );
       // a recorded terminal session plays as a replay where there is room
       let replayProp = '';
@@ -242,11 +303,11 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       if (fs.existsSync(path.join(this.examplesDir, 'replay', replayFile))) {
         const replayVariable = `${exampleId.replace(/\W/g, '_')}_replay`;
         this.outputImports.push(
-          `import ${replayVariable} from '${this.examplesImportDir}/replay/${replayFile}';`,
+          `import ${replayVariable} from '${examplesImportDir}/replay/${replayFile}';`,
         );
         replayProp = ` replay={${replayVariable}}`;
       }
-      lines.push(`${headingLevel} Example output`, '');
+      lines.push('## Example output', '');
       lines.push(
         `<${TERMINAL_OUTPUT} output={${variable}}${replayProp} />`,
         '',
@@ -254,28 +315,47 @@ export default class GenerateCLIDocCommand extends BaseCommand {
     }
     const guide = this.readExample(`${exampleId}.md`);
     if (guide != null) {
-      lines.push(`${headingLevel} How to read the output`, '', guide, '');
+      lines.push('## How to read the output', '', guide, '');
     }
 
-    lines.push(`${headingLevel} Options`, '');
+    if (subCommands.length > 0) {
+      lines.push(this.getSubCommandIndex(command, subCommands), '');
+    }
+
+    lines.push('## Options', '');
     const options = this.getCommandOptions(command);
     if (options.length > 0) {
       lines.push(this.getOptionList(options), '');
     }
     lines.push(
-      `The [universal options](./${INDEX_DOC_NAME}.md#${UNIVERSAL_OPTIONS_ANCHOR}) ` +
+      `The [universal options](${this.getRelativePath(this.cliDocsDir)}/${INDEX_DOC_NAME}.md#${UNIVERSAL_OPTIONS_ANCHOR}) ` +
         '(`--help`, `--verbose`, ...) work with this command too.',
     );
     lines.push('');
-
-    for (const subCommand of command.getSubCommands() ?? []) {
-      if (subCommand.isInternalCommand()) {
-        continue;
-      }
-      lines.push(`${headingLevel} memlab ${subCommand.getFullCommand()}`, '');
-      lines.push(this.getCommandBody(subCommand, headingLevel + '#'));
-    }
     return lines.join('\n');
+  }
+
+  private getSubCommandIndex(
+    command: BaseCommand,
+    subCommands: BaseCommand[],
+  ): string {
+    const name = command.getCommandName();
+    const rows = subCommands.map(subCommand => {
+      const fullCommand = subCommand.getFullCommand();
+      // keeps the `#memlab-<command>-<subcommand>` anchors of the sections
+      // that the subcommands had on this page before they got their own pages
+      const anchorId = `memlab-${fullCommand.replace(/ /g, '-')}`.toLowerCase();
+      const anchor = `<a id="${anchorId}"></a>`;
+      const link = `[\`memlab ${fullCommand}\`](./${name}/${subCommand.getCommandName()}.md)`;
+      return `| ${anchor}${link} | ${this.getSummary(subCommand)} |`;
+    });
+    return [
+      '## Subcommands',
+      '',
+      '| Command | Description |',
+      '| --- | --- |',
+      ...rows,
+    ].join('\n');
   }
 
   private getCommandOptions(command: BaseCommand): BaseOption[] {
