@@ -25,7 +25,10 @@
 // run because later examples read their output. `browser` entries get the
 // Chromium binary. `tui` entries are full-screen UIs: the visible screen is
 // captured after `waitMs` (and, if given, after typing the `input(ctx)`
-// command and waiting `afterInputMs`), then `quitKeys` are sent.
+// command and waiting `afterInputMs`), then `quitKeys` are sent. A `tui` entry
+// with a `size` runs in a terminal of that size. With `replay` steps, the
+// session is also recorded for the replay on the doc page: each step presses
+// `keys` and waits `waitMs`.
 
 const examples = [
   // runs whose snapshots the other examples read
@@ -228,7 +231,19 @@ const examples = [
   },
   {
     id: 'view-heap',
-    tui: {waitMs: 15000, quitKeys: ['C-c']},
+    tui: {
+      size: {columns: 100, rows: 30},
+      waitMs: 15000,
+      // starts on the detached dialog, then walks its retainer trace up to
+      // the `openedDialogs` Set that keeps it alive and selects the Set
+      replay: [
+        {keys: ['6'], waitMs: 1500},
+        {keys: ['Down'], waitMs: 900},
+        {keys: ['Down'], waitMs: 1800},
+        {keys: ['Enter'], waitMs: 3500},
+      ],
+      quitKeys: ['C-c'],
+    },
     args: (ctx) => ['view-heap', '--snapshot', ctx.snapshot('leak', 3)],
   },
 

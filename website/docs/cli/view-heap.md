@@ -6,6 +6,7 @@ custom_edit_url: null
 
 import TerminalOutput from '@site/src/components/TerminalOutput';
 import view_heap_output from '!!raw-loader!../_cli/output/view-heap.txt';
+import view_heap_replay from '../_cli/replay/view-heap.json';
 
 Interactive command to view a single heap snapshot
 
@@ -15,7 +16,7 @@ memlab view-heap --snapshot <HEAP_SNAPSHOT_FILE>
 
 ## Example output
 
-<TerminalOutput output={view_heap_output} />
+<TerminalOutput output={view_heap_output} replay={view_heap_replay} />
 
 ## How to read the output
 
@@ -29,6 +30,8 @@ memlab view-heap --snapshot <HEAP_SNAPSHOT_FILE>
 6. **Retainer Trace**: the chain of references that keeps the selected object alive. Here it goes through the global `openedDialogs` `Set`.
 
 Selecting an object in panels 1, 4, or 6 makes it the selected object, so you can follow references in both directions.
+
+On a wide screen, the example above is a recording of a session. It opens on the closed dialog's `<div class="settings">`, then presses `6` to move to the Retainer Trace, moves down to the `openedDialogs` `Set`, and presses Enter. The `Set` becomes the selected object, and the other panels show its referrers, its references, and its details. Press **Replay** to watch it again.
 
 ## Options
 

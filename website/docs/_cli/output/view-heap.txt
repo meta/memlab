@@ -1,46 +1,31 @@
 $ memlab view-heap --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-[90m┌─[0mReferrers of @65915[90m (press 1 to ─────┐[0m[37m┌─[0mClustered Objects[90m (press 3 to focus) [0m[37m┐[0m[90m┌─[0mReferences of @65915[90m (press 4 to ────┐[0m
-[90m│[0m[[1mblink::FormController[0m](native) @5170 [90m│[0m[37m│[0m[1m[Cluster] [Detached <div class="settin[0m[37m│[0m[90m│[0m--7(element)---> [[1mDetached <div       [0m[90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <button id="close-settings">[0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37m5[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(nati│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72363 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37m6[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mHTMLDocument[0m[32m][0m[90m(native│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72361 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--3 / part of key (<div class="setting│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72359 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37m4[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mDetached blink::Uniq[0m[90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72357 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37m__proto__[0m[90m(property)---[0m[37m> [0m[32m[HTMLDivElem[0m[90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72355 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37mmap[0m[90m(internal)---[0m[37m> [0m[32m[system / Map][0m[90m(obj│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72353 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72351 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72349 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72347 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72345 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72343 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72341 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m└──────────────────────────────────────┘[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72339 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m┌─[0mRetainer Trace of @65915[90m (press 6 to ┐[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72337 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m[[1mWindow / http://localhost:3000[0m](nati[90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72335 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37mglobal_object[0m[90m(shortcut)---[0m[37m> [0m[32m[Window [0m[90m│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72333 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--[0m[37mopenedDialogs[0m[90m(property)---[0m[37m> [0m[32m[Set][0m[90m(ob│[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72331 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--table(internal)---> [0m[32m[][0m[90m(array)       │[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native) @72329 [[0m[1;34m184  [0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│--5(internal)---> [0m[32m[[0m[1;90mDetached <div      [0m[90m│[0m
-[90m└──────────────────────────────────────┘[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m┌─[0mObjects[90m (press 2 to focus) 1 items───┐[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m[Detached] [[1mDetached <div class="setti[0m[90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│[0m[37m│[0m                                      [37m│[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│[0m[37m└──────────────────────────────────────┘[0m[90m│[0m                                      [90m│[0m
-[90m│[0m                                      [90m│┌─[0mObject: @65915[90m (press 5 to focus) 10 ┐│[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0mid: @65915                            [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37mname[0m[90m: [0m[32mDetached <div class="settings">[0m [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37mtype[0m[90m: [0m[32mnative[0m                          [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37mself size[0m[90m: [0m[32m104 bytes[0m                  [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37mretained size[0m[90m: [0m[32m45.3KB[0m                 [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37m# of references[0m[90m: [0m[32m7[0m                    [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37m# of referrers[0m[90m: [0m[32m245[0m                   [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││dominator node: [0m[32m[[0m[1;90m(GC roots)[0m[32m][0m[90m(synthetic││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37m# of clusters[0m[90m: [0m[32m1[0m                      [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m[37maggregated retained size[0m[90m: [0m[32m45.3KB[0m      [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m                                      [90m││[0m                                      [90m│[0m
-[90m│[0m                                      [90m││[0m                                      [90m││[0m                                      [90m│[0m
-[90m└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘[0m
+[90m┌─[0mReferrers of @65915[90m (press 1 ─┐[0m[37m┌─[0mClustered Objects[90m (press 3 to [0m[37m┐[0m[90m┌─[0mReferences of @65915[90m (press 4 ─┐[0m
+[90m│[0m[[1mblink::FormController[0m](native)[90m│[0m[37m│[0m[1m[Cluster] [Detached <div       [0m[37m│[0m[90m│[0m--7(element)---> [[1mDetached <div [0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <button id="close-set[0m[90m│[0m[37m│[0m                               [37m│[0m[90m│--[0m[37m5[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mDetached      [0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37m6[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mHTMLDocument[0m[32m][0m[90m(│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--3 / part of key (<div         │[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37m4[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mDetached      [0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37m__proto__[0m[90m(property)---[0m[37m> [0m[32m[HTMLD[0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37mmap[0m[90m(internal)---[0m[37m> [0m[32m[system /   [0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m└────────────────────────────────┘[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m┌─[0mRetainer Trace of @65915[90m  ─────┐[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│[0m[[1mWindow / http://localhost:3000[0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37mglobal_object[0m[90m(shortcut)---[0m[37m> [0m[32m[W[0m[90m│[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37mopenedDialogs[0m[90m(property)---[0m[37m> [0m[32m[S[0m[90m│[0m
+[90m└───────────────────────────────┘[0m[37m│[0m                               [37m│[0m[90m│--table(internal)---> [0m[32m[][0m[90m(array) │[0m
+[90m┌─[0mObjects[90m (press 2 to focus) 1 ─┐[0m[37m│[0m                               [37m│[0m[90m│--5(internal)---> [0m[32m[[0m[1;90mDetached     [0m[90m│[0m
+[90m│[0m[Detached] [[1mDetached <div      [0m[90m│[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
+[90m│[0m                               [90m│[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
+[90m│[0m                               [90m│[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
+[90m│[0m                               [90m│[0m[37m└───────────────────────────────┘[0m[90m│[0m                                [90m│[0m
+[90m│[0m                               [90m│┌─[0mObject: @65915[90m (press 5 to ───┐│[0m                                [90m│[0m
+[90m│[0m                               [90m││[0mid: @65915                     [90m││[0m                                [90m│[0m
+[90m│[0m                               [90m││[0m[37mname[0m[90m: [0m[32mDetached <div class="sett[0m[90m││[0m                                [90m│[0m
+[90m│[0m                               [90m││[0m[37mtype[0m[90m: [0m[32mnative[0m                   [90m││[0m                                [90m│[0m
+[90m│[0m                               [90m││[0m[37mself size[0m[90m: [0m[32m104 bytes[0m           [90m││[0m                                [90m│[0m
+[90m│[0m                               [90m││[0m[37mretained size[0m[90m: [0m[32m45.3KB[0m          [90m││[0m                                [90m│[0m
+[90m│[0m                               [90m││[0m[37m# of references[0m[90m: [0m[32m7[0m             [90m││[0m                                [90m│[0m
+[90m│[0m                               [90m││[0m[37m# of referrers[0m[90m: [0m[32m245[0m            [90m││[0m                                [90m│[0m
+[90m└───────────────────────────────┘└───────────────────────────────┘└────────────────────────────────┘[0m
  [90mKeys: ↑[0m [90m↓[0m [90m←[0m [90m→[0m [90mEnter(select) f(full screen) q(quit) 1[0m [90m2[0m [90m3[0m [90m4[0m [90m5[0m [90m6[0m
