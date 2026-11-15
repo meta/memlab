@@ -50,9 +50,84 @@
     "label": "trace"
   },
   {
-    "type": "doc",
-    "id": "cli/analyze",
-    "label": "analyze"
+    "type": "category",
+    "label": "analyze",
+    "link": {
+      "type": "doc",
+      "id": "cli/analyze"
+    },
+    "items": [
+      {
+        "type": "doc",
+        "id": "cli/analyze/unbound-collection",
+        "label": "unbound-collection"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/collections-with-stale",
+        "label": "collections-with-stale"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/detached-DOM",
+        "label": "detached-DOM"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/global-variable",
+        "label": "global-variable"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/object",
+        "label": "object"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/object-fanout",
+        "label": "object-fanout"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/object-shallow",
+        "label": "object-shallow"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/shape",
+        "label": "shape"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/object-size",
+        "label": "object-size"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/unbound-object",
+        "label": "unbound-object"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/react-hooks",
+        "label": "react-hooks"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/unbound-shape",
+        "label": "unbound-shape"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/string",
+        "label": "string"
+      },
+      {
+        "type": "doc",
+        "id": "cli/analyze/unmounted-fiber-node",
+        "label": "unmounted-fiber-node"
+      }
+    ]
   },
   {
     "type": "doc",

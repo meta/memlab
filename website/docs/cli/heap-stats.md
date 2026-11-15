@@ -33,7 +33,7 @@ The first table splits the total by where the memory lives:
 
 The second table splits the same total by why the memory exists: the source text of scripts, compiled code and function metadata, and objects the program allocated.
 
-In this example, `JS arrays` is 37.3% of the heap, which is unusual for a page this small. The leaked dialog keeps an 800KB `history` array, and [`memlab class-histogram`](./class-histogram.md) and [`memlab analyze object-size`](./analyze.md#memlab-analyze-object-size) point to it.
+In this example, `JS arrays` is 37.3% of the heap, which is unusual for a page this small. The leaked dialog keeps an 800KB `history` array, and [`memlab class-histogram`](./class-histogram.md) and [`memlab analyze object-size`](./analyze/object-size.md) point to it.
 
 ## Options
 
