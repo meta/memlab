@@ -34,7 +34,7 @@ function getIntroEndTime(stdouts, introLines) {
     return -1;
   }
   let lines = 0;
-  for (const {content, time} of stdouts) {
+  for (const {content = '', time} of stdouts) {
     lines += content.split('\r\n').length - 1;
     if (lines >= introLines) {
       return time;
@@ -66,7 +66,9 @@ let gid = 0;
 // it was printed) in a `cols` x `rows` terminal. The first `introLines` lines
 // play right away; the rest plays once the terminal scrolls into view. With
 // `scrollbackOnEnd`, the whole output becomes scrollable when the replay ends.
-// `onEnd` is called when the replay ends; a new `onEnd` restarts the replay.
+// `onEnd` is called when the replay ends, and `onKey` with each key press
+// event (`{time, key, caption}`) as it plays; a new callback restarts the
+// replay.
 const TerminalDemo = ({
   stdouts,
   cols = 90,
@@ -74,13 +76,14 @@ const TerminalDemo = ({
   introLines = INTRO_LINES,
   scrollbackOnEnd = true,
   onEnd,
+  onKey,
 }) => {
   const [id] = useState(`terminal-${gid++}`);
   const innerRef = useRef(null);
   useEffect(() => {
     const inner = innerRef.current;
     const terminal = initializeTerminal(id, cols, rows);
-    const timeline = createTimeline(terminal, stdouts);
+    const timeline = createTimeline(terminal, stdouts, onKey);
     const introEndTime = getIntroEndTime(stdouts, introLines);
     let revealed = false;
     let inView = false;
@@ -126,7 +129,7 @@ const TerminalDemo = ({
       clearInterval(terminal._blink);
       terminal.element.remove();
     };
-  }, [id, stdouts, cols, rows, introLines, scrollbackOnEnd, onEnd]);
+  }, [id, stdouts, cols, rows, introLines, scrollbackOnEnd, onEnd, onKey]);
 
   return (
     <div className="terminal-content">

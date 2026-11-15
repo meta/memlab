@@ -10,23 +10,28 @@
 
 import Timeline from './Timeline';
 
-export default function createTimeline(term, stdouts) {
+// `stdouts` are `{time, content}` writes to the terminal; an event without
+// `content` is a key press, which is passed to `onKey` when it plays
+export default function createTimeline(term, stdouts, onKey) {
   const totalTime = stdouts[stdouts.length - 1].time;
   const timeline = new Timeline({length: totalTime, frequency: 10});
 
   class Marker {
-    constructor(time, content) {
-      this.time = time;
-      this.content = content;
+    constructor(event) {
+      this.time = event.time;
+      this.event = event;
     }
     forward() {
-      term.write(this.content);
+      if (this.event.content != null) {
+        term.write(this.event.content);
+      } else {
+        onKey?.(this.event);
+      }
     }
   }
 
-  for (let i = 0; i < stdouts.length; i++) {
-    const {content, time} = stdouts[i];
-    timeline.markers.push(new Marker(time, content));
+  for (const event of stdouts) {
+    timeline.markers.push(new Marker(event));
   }
   return timeline;
 }

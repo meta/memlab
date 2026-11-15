@@ -1,4 +1,4 @@
-`memlab view-heap` opens an interactive viewer in the terminal. It starts with a list of objects worth a look: the detached DOM elements and the objects with the largest retained size. Press a number to move to a panel, the arrow keys to move within it, and Enter to select an object. The panels are:
+`memlab view-heap` opens an interactive viewer in the terminal. It starts with a list of objects worth a look: the detached DOM elements and the objects with the largest retained size. Press a number to move to a panel, the arrow keys to move within it, and Enter to select an object. Press `f` to show the panel full screen, and `q` to leave full screen. The panels are:
 
 1. **Referrers** of the selected object, i.e. what references it. Here these are the 240 rows, the close button, and other objects that point back to the dialog's `<div class="settings">`.
 2. **Objects**, the starting list. Each entry is tagged with why it is listed, like `[Detached]`.
@@ -9,4 +9,4 @@
 
 Selecting an object in panels 1, 4, or 6 makes it the selected object, so you can follow references in both directions.
 
-On a wide screen, the example above is a recording of a session. It opens on the closed dialog's `<div class="settings">`, then presses `6` to move to the Retainer Trace, moves down to the `openedDialogs` `Set`, and presses Enter. The `Set` becomes the selected object, and the other panels show its referrers, its references, and its details. Press **Replay** to watch it again.
+On a wide screen, the example above is a recording of a session, with each key pressed shown below it. It opens on the closed dialog's `<div class="settings">` and moves down its Referrers, which the other panels follow. It shows the Referrers full screen, then goes back to the dialog. In the Retainer Trace, it moves down to the `openedDialogs` `Set` and presses Enter, which adds the `Set` to the Objects panel as `[Chosen]`. Pressing `2` then shows the `Set` in the other panels. Press **Replay** to watch it again.

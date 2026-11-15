@@ -1,5 +1,5 @@
 $ memlab view-heap --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
-[90m┌─[0mReferrers of @65915[90m (press 1 ─┐[0m[37m┌─[0mClustered Objects[90m (press 3 to [0m[37m┐[0m[90m┌─[0mReferences of @65915[90m (press 4 ─┐[0m
+[90m┌─[0mReferrers of @65963[90m (press 1 ─┐[0m[37m┌─[0mClustered Objects[90m (press 3 to [0m[37m┐[0m[90m┌─[0mReferences of @65963[90m (press 4 ─┐[0m
 [90m│[0m[[1mblink::FormController[0m](native)[90m│[0m[37m│[0m[1m[Cluster] [Detached <div       [0m[37m│[0m[90m│[0m--7(element)---> [[1mDetached <div [0m[90m│[0m
 [90m│[0m[32m[[0m[1;90mDetached <button id="close-set[0m[90m│[0m[37m│[0m                               [37m│[0m[90m│--[0m[37m5[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mDetached      [0m[90m│[0m
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37m6[0m[90m(element)---[0m[37m> [0m[32m[[0m[1;90mHTMLDocument[0m[32m][0m[90m(│[0m
@@ -9,7 +9,7 @@ $ memlab view-heap --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37mmap[0m[90m(internal)---[0m[37m> [0m[32m[system /   [0m[90m│[0m
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m└────────────────────────────────┘[0m
-[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m┌─[0mRetainer Trace of @65915[90m  ─────┐[0m
+[90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m┌─[0mRetainer Trace of @65963[90m  ─────┐[0m
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│[0m[[1mWindow / http://localhost:3000[0m[90m│[0m
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37mglobal_object[0m[90m(shortcut)---[0m[37m> [0m[32m[W[0m[90m│[0m
 [90m│[0m[32m[[0m[1;90mDetached <div>[0m[32m][0m[90m(native)       │[0m[37m│[0m                               [37m│[0m[90m│--[0m[37mopenedDialogs[0m[90m(property)---[0m[37m> [0m[32m[S[0m[90m│[0m
@@ -19,8 +19,8 @@ $ memlab view-heap --snapshot /tmp/memlab-example/leak/data/cur/s3.heapsnapshot
 [90m│[0m                               [90m│[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
 [90m│[0m                               [90m│[0m[37m│[0m                               [37m│[0m[90m│[0m                                [90m│[0m
 [90m│[0m                               [90m│[0m[37m└───────────────────────────────┘[0m[90m│[0m                                [90m│[0m
-[90m│[0m                               [90m│┌─[0mObject: @65915[90m (press 5 to ───┐│[0m                                [90m│[0m
-[90m│[0m                               [90m││[0mid: @65915                     [90m││[0m                                [90m│[0m
+[90m│[0m                               [90m│┌─[0mObject: @65963[90m (press 5 to ───┐│[0m                                [90m│[0m
+[90m│[0m                               [90m││[0mid: @65963                     [90m││[0m                                [90m│[0m
 [90m│[0m                               [90m││[0m[37mname[0m[90m: [0m[32mDetached <div class="sett[0m[90m││[0m                                [90m│[0m
 [90m│[0m                               [90m││[0m[37mtype[0m[90m: [0m[32mnative[0m                   [90m││[0m                                [90m│[0m
 [90m│[0m                               [90m││[0m[37mself size[0m[90m: [0m[32m104 bytes[0m           [90m││[0m                                [90m│[0m

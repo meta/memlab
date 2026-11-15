@@ -88,13 +88,16 @@ function StaticOutput({output}) {
   );
 }
 
-// plays a recorded terminal session, scaled down to fit the doc column
+// plays a recorded terminal session, scaled down to fit the doc column, and
+// shows the last key pressed in it below
 function ReplayOutput({replay}) {
   const outerRef = useRef(null);
   const [scale, setScale] = useState(1);
   const [run, setRun] = useState(0);
   const [ended, setEnded] = useState(false);
+  const [keyPress, setKeyPress] = useState(null);
   const onEnd = useCallback(() => setEnded(true), []);
+  const onKey = useCallback((event) => setKeyPress(event), []);
 
   useEffect(() => {
     const outer = outerRef.current;
@@ -124,28 +127,37 @@ function ReplayOutput({replay}) {
 
   return (
     <div className="terminal-output-replay" ref={outerRef}>
-      <div style={{zoom: scale}}>
+      <div className="terminal-output-replay-screen" style={{zoom: scale}}>
         <TerminalReplay
           cols={replay.columns}
           introLines={0}
           key={run}
           onEnd={onEnd}
+          onKey={onKey}
           rows={replay.rows}
           scrollbackOnEnd={false}
           stdouts={replay.events}
         />
+        <div className="terminal-output-replay-keys">
+          {keyPress != null ? (
+            <span className="terminal-output-replay-key" key={keyPress.time}>
+              <kbd>{keyPress.key}</kbd> {keyPress.caption}
+            </span>
+          ) : null}
+          {ended ? (
+            <button
+              className="terminal-output-replay-button"
+              onClick={() => {
+                setEnded(false);
+                setKeyPress(null);
+                setRun(run + 1);
+              }}
+              type="button">
+              Replay
+            </button>
+          ) : null}
+        </div>
       </div>
-      {ended ? (
-        <button
-          className="terminal-output-replay-button"
-          onClick={() => {
-            setEnded(false);
-            setRun(run + 1);
-          }}
-          type="button">
-          Replay
-        </button>
-      ) : null}
     </div>
   );
 }

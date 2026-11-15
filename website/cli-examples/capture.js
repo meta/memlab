@@ -224,7 +224,8 @@ function createContext(env) {
 // Runs one example in a new tmux window and returns the rendered terminal as
 // `screen`. A `tui` example with a `size` gets a session of that size. With
 // `replay` steps, the pane is also recorded while the steps run, and the
-// recording is returned as `recording`.
+// recording is returned as `recording`, with the time each step's keys were
+// pressed as `keyPresses`.
 async function runInTerminal(example, command, env) {
   const {id, tui} = example;
   const script = path.join(baseDir, 'tmp', `${id}.sh`);
@@ -268,6 +269,7 @@ async function runInTerminal(example, command, env) {
     tmux(['new-window', '-d', '-n', id, run]);
   }
   let recording = null;
+  const keyPresses = [];
   let screen;
   if (tui != null) {
     if (tui.replay != null) {
@@ -292,6 +294,7 @@ async function runInTerminal(example, command, env) {
     await (tui.replay ?? []).reduce(
       (previous, step) =>
         previous.then(() => {
+          keyPresses.push({time: Date.now(), step});
           tmux(['send-keys', '-t', target, ...step.keys]);
           return sleep(step.waitMs);
         }),
@@ -323,7 +326,7 @@ async function runInTerminal(example, command, env) {
     );
   }
   tmux(['kill-window', '-t', target]);
-  return {screen, recording};
+  return {screen, recording, keyPresses};
 }
 
 function waitForFile(file, deadline = Date.now() + 10000) {
@@ -440,15 +443,22 @@ function keepColors(text, {chart = false} = {}) {
 
 // replaces the paths and the port that differ between machines and runs
 function replaceLocalDetails(text, url) {
-  return text
-    .split(fs.realpathSync(baseDir))
-    .join(shownBaseDir)
-    .split(baseDir)
-    .join(shownBaseDir)
-    .split(url)
-    .join(shownUrl)
-    .split(os.homedir())
-    .join('~');
+  const {port} = new URL(url);
+  return (
+    text
+      .split(fs.realpathSync(baseDir))
+      .join(shownBaseDir)
+      .split(baseDir)
+      .join(shownBaseDir)
+      .split(url)
+      .join(shownUrl)
+      // a panel too narrow for the whole URL shows only the start of the port
+      .replace(/http:\/\/localhost:(\d+)(?!\d)/g, (match, digits) =>
+        port.startsWith(digits) ? shownUrl.slice(0, match.length) : match,
+      )
+      .split(os.homedir())
+      .join('~')
+  );
 }
 
 function normalize(text, url) {
@@ -478,10 +488,14 @@ const FRAME_MS = 30;
 const LOADING_SPEEDUP = 4;
 const MAX_PAUSE_MS = 2000;
 
+// how the keys sent with `tmux send-keys` are shown on the doc page
+const KEY_LABELS = {Down: '↓', Up: '↑', Left: '←', Right: '→', Escape: 'Esc'};
+
 // Turns a pane recording into the replay played on the doc page: the command
 // is typed after a `$ ` prompt, then the command's output plays with its own
 // timing, except that loading plays faster and long pauses are shortened.
-function buildReplay(recorded, shownCommand, url, size) {
+// Each key press is a `{time, key, caption}` event in the replay.
+function buildReplay(recorded, keyPresses, shownCommand, url, size) {
   const events = [{time: 300, content: '$ '}];
   let time = 300;
   const typed = replaceLocalDetails(shownCommand, url).replace(/^\$ /, '');
@@ -491,33 +505,47 @@ function buildReplay(recorded, shownCommand, url, size) {
   }
   time += ENTER_MS;
   events.push({time, content: '\r\n'});
+  const presses = keyPresses.map(({step, time: pressedAt}) => ({
+    time: pressedAt - recorded.start,
+    key: step.keys.map((key) => KEY_LABELS[key] ?? key).join(' '),
+    caption: step.caption,
+  }));
+  const recordedEvents = [...recorded.events, ...presses].sort(
+    (a, b) => a.time - b.time,
+  );
   let previous = 0;
   let loading = true;
-  for (const {content, time: at} of recorded) {
+  for (const {time: at, ...event} of recordedEvents) {
     let gap = at - previous;
     previous = at;
     if (loading) {
       gap /= LOADING_SPEEDUP;
     }
     // the screen opens by switching to the alternate screen buffer
-    if (content.includes('\x1b[?1049h')) {
+    if (event.content?.includes('\x1b[?1049h')) {
       loading = false;
     }
     time += Math.min(Math.round(gap), MAX_PAUSE_MS);
     const last = events[events.length - 1];
-    if (time - last.time < FRAME_MS && last.content !== '\r\n') {
-      last.content += content;
+    if (
+      event.content != null &&
+      last.content != null &&
+      last.content !== '\r\n' &&
+      time - last.time < FRAME_MS
+    ) {
+      last.content += event.content;
     } else {
-      events.push({time, content});
+      events.push({time, ...event});
     }
   }
   return {
     columns: size.columns,
     rows: size.rows,
-    events: events.map((e) => ({
-      time: e.time,
-      content: replaceLocalDetails(e.content, url),
-    })),
+    events: events.map((e) =>
+      e.content == null
+        ? e
+        : {time: e.time, content: replaceLocalDetails(e.content, url)},
+    ),
   };
 }
 
@@ -595,7 +623,7 @@ async function main() {
       }
       // the examples share one tmux server and later ones read earlier output
       // eslint-disable-next-line no-await-in-loop
-      const {recording, screen} = await runInTerminal(
+      const {keyPresses, recording, screen} = await runInTerminal(
         example,
         memlabCommand([...args, ...browserArgs]),
         env,
@@ -616,12 +644,13 @@ async function main() {
       if (recording != null) {
         const replay = buildReplay(
           JSON.parse(fs.readFileSync(recording, 'utf8')),
+          keyPresses,
           shownCommand,
           url,
           example.tui.size,
         );
         const played = stripEscapes(
-          replay.events.map((e) => e.content).join(''),
+          replay.events.map((e) => e.content ?? e.caption ?? '').join(''),
         );
         const leaked = findForbidden(played);
         if (played.includes(baseDir)) {

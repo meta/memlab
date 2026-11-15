@@ -369,21 +369,50 @@ html[data-theme='dark'] .terminal-output {
   width: max-content;
 }
 
+.terminal-output-replay-screen {
+  width: max-content;
+}
+
+/* the last key pressed in the replay, and the Replay button once it ends */
+.terminal-output-replay-keys {
+  align-items: center;
+  display: flex;
+  font-size: 0.9rem;
+  gap: 12px;
+  min-height: 2.5rem;
+  padding: 6px 2px 0;
+}
+
+.terminal-output-replay-key {
+  animation: terminal-output-key-press 0.3s ease-out;
+}
+
+.terminal-output-replay-key kbd {
+  margin-right: 4px;
+}
+
+@keyframes terminal-output-key-press {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .terminal-output-replay-button {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--ifm-color-emphasis-100);
+  border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 6px;
-  bottom: 12px;
-  color: #f0f0f0;
+  color: var(--ifm-font-color-base);
   cursor: pointer;
   font-size: 0.85rem;
+  margin-left: auto;
   padding: 4px 12px;
-  position: absolute;
-  right: 12px;
 }
 
 .terminal-output-replay-button:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--ifm-color-emphasis-200);
 }
 
 .terminal-black {

@@ -28,7 +28,8 @@
 // command and waiting `afterInputMs`), then `quitKeys` are sent. A `tui` entry
 // with a `size` runs in a terminal of that size. With `replay` steps, the
 // session is also recorded for the replay on the doc page: each step presses
-// `keys` and waits `waitMs`.
+// `keys` and waits `waitMs`, and the doc page shows the keys with the step's
+// `caption`.
 
 const examples = [
   // runs whose snapshots the other examples read
@@ -234,13 +235,45 @@ const examples = [
     tui: {
       size: {columns: 100, rows: 30},
       waitMs: 15000,
-      // starts on the detached dialog, then walks its retainer trace up to
-      // the `openedDialogs` Set that keeps it alive and selects the Set
+      // starts on the detached dialog, browses its referrers (full screen
+      // too), then walks its retainer trace up to the `openedDialogs` Set that
+      // keeps it alive and inspects the Set
       replay: [
-        {keys: ['6'], waitMs: 1500},
-        {keys: ['Down'], waitMs: 900},
-        {keys: ['Down'], waitMs: 1800},
-        {keys: ['Enter'], waitMs: 3500},
+        {
+          keys: ['1'],
+          waitMs: 1500,
+          caption: 'Referrers: the objects that point to the detached dialog',
+        },
+        {
+          keys: ['Down'],
+          waitMs: 1000,
+          caption: 'select a referrer, and the other panels show it',
+        },
+        {keys: ['Down'], waitMs: 1200, caption: 'the next referrer'},
+        {keys: ['f'], waitMs: 2500, caption: 'show the panel full screen'},
+        {keys: ['q'], waitMs: 1200, caption: 'leave full screen'},
+        {
+          keys: ['3'],
+          waitMs: 1500,
+          caption: 'Clustered Objects: back to the detached dialog',
+        },
+        {
+          keys: ['6'],
+          waitMs: 1800,
+          caption: 'Retainer Trace: the path that keeps the dialog alive',
+        },
+        {keys: ['Down'], waitMs: 1000, caption: 'move along the trace'},
+        {
+          keys: ['Down'],
+          waitMs: 1800,
+          caption: 'to the openedDialogs Set that holds the dialog',
+        },
+        {
+          keys: ['Enter'],
+          waitMs: 1800,
+          caption: 'add the Set to the Objects panel',
+        },
+        {keys: ['2'], waitMs: 3500, caption: 'Objects: inspect the Set'},
       ],
       quitKeys: ['C-c'],
     },

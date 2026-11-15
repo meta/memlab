@@ -12,7 +12,8 @@
 // terminal replays on the CLI doc pages. `capture.js` starts it with
 // `tmux pipe-pane`, which sends the pane's output to stdin, and stops it by
 // closing the pipe; the recording is then written to the file in argv[2] as
-// JSON: `[{time, content}]`, with `time` in milliseconds since the start.
+// JSON: `{start, events: [{time, content}]}`, with `start` the epoch time the
+// recorder started and `time` in milliseconds since then.
 
 'use strict';
 
@@ -36,6 +37,6 @@ process.stdin.on('end', () => {
   if (rest !== '') {
     events.push({time: Date.now() - start, content: rest});
   }
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(events));
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify({start, events}));
   fs.renameSync(`${file}.tmp`, file);
 });
