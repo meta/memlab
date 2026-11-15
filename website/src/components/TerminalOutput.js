@@ -8,7 +8,9 @@
  * @oncall memory_lab
  */
 
+import TerminalReplay from './TerminalReplay';
 import * as React from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 
 const ESCAPE = String.fromCharCode(27);
 const COLOR_CODE = new RegExp(`${ESCAPE}\\[([0-9;]*)m`);
@@ -60,8 +62,10 @@ function parseColors(output) {
   return runs;
 }
 
-// terminal output with its colors, as `memlab` prints it in a terminal
-export default function TerminalOutput({output}) {
+// the replay needs a doc column at least this wide to stay readable
+const MIN_REPLAY_WIDTH = 640;
+
+function StaticOutput({output}) {
   return (
     <pre className="terminal-output">
       <code>
@@ -81,5 +85,90 @@ export default function TerminalOutput({output}) {
         })}
       </code>
     </pre>
+  );
+}
+
+// plays a recorded terminal session, scaled down to fit the doc column
+function ReplayOutput({replay}) {
+  const outerRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  const [run, setRun] = useState(0);
+  const [ended, setEnded] = useState(false);
+  const onEnd = useCallback(() => setEnded(true), []);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    const terminal = outer.querySelector('.terminal-inner');
+    // the terminal's own width, measured once before it is scaled
+    const width = terminal.offsetWidth;
+    let columnWidth = null;
+    let frame = null;
+    // scaling changes the column's height, so only width changes rescale it,
+    // in the next frame rather than inside the observer's callback
+    const observer = new ResizeObserver(() => {
+      if (outer.clientWidth === columnWidth) {
+        return;
+      }
+      columnWidth = outer.clientWidth;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() =>
+        setScale(Math.min(1, columnWidth / width)),
+      );
+    });
+    observer.observe(outer);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <div className="terminal-output-replay" ref={outerRef}>
+      <div style={{zoom: scale}}>
+        <TerminalReplay
+          cols={replay.columns}
+          introLines={0}
+          key={run}
+          onEnd={onEnd}
+          rows={replay.rows}
+          scrollbackOnEnd={false}
+          stdouts={replay.events}
+        />
+      </div>
+      {ended ? (
+        <button
+          className="terminal-output-replay-button"
+          onClick={() => {
+            setEnded(false);
+            setRun(run + 1);
+          }}
+          type="button">
+          Replay
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// Terminal output with its colors, as `memlab` prints it in a terminal. With
+// a `replay` (a recorded session: `{columns, rows, events}`), the session is
+// played instead where the doc column is wide enough; the server-rendered
+// page and narrow screens show `output`.
+export default function TerminalOutput({output, replay}) {
+  const containerRef = useRef(null);
+  const [canReplay, setCanReplay] = useState(false);
+  useEffect(() => {
+    if (replay != null) {
+      setCanReplay(containerRef.current.clientWidth >= MIN_REPLAY_WIDTH);
+    }
+  }, [replay]);
+  return (
+    <div ref={containerRef}>
+      {canReplay ? (
+        <ReplayOutput replay={replay} />
+      ) : (
+        <StaticOutput output={output} />
+      )}
+    </div>
   );
 }

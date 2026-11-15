@@ -18,10 +18,10 @@ import {useEffect, useRef, useState} from 'react';
 const INTRO_LINES = 2;
 const REVEAL_RATIO = 0.3;
 
-function initializeTerminal(id) {
+function initializeTerminal(id, cols, rows) {
   const terminal = new Terminal({
-    cols: 90,
-    rows: 28,
+    cols,
+    rows,
     screenKeys: true,
   });
 
@@ -29,11 +29,14 @@ function initializeTerminal(id) {
   return terminal;
 }
 
-function getIntroEndTime(stdouts) {
+function getIntroEndTime(stdouts, introLines) {
+  if (introLines === 0) {
+    return -1;
+  }
   let lines = 0;
   for (const {content, time} of stdouts) {
     lines += content.split('\r\n').length - 1;
-    if (lines >= INTRO_LINES) {
+    if (lines >= introLines) {
       return time;
     }
   }
@@ -59,14 +62,26 @@ function renderScrollback(terminal) {
 
 let gid = 0;
 
-const TerminalDemo = ({stdouts}) => {
+// Replays `stdouts` (`[{time, content}]`, raw terminal output with the time
+// it was printed) in a `cols` x `rows` terminal. The first `introLines` lines
+// play right away; the rest plays once the terminal scrolls into view. With
+// `scrollbackOnEnd`, the whole output becomes scrollable when the replay ends.
+// `onEnd` is called when the replay ends; a new `onEnd` restarts the replay.
+const TerminalDemo = ({
+  stdouts,
+  cols = 90,
+  rows = 28,
+  introLines = INTRO_LINES,
+  scrollbackOnEnd = true,
+  onEnd,
+}) => {
   const [id] = useState(`terminal-${gid++}`);
   const innerRef = useRef(null);
   useEffect(() => {
     const inner = innerRef.current;
-    const terminal = initializeTerminal(id);
+    const terminal = initializeTerminal(id, cols, rows);
     const timeline = createTimeline(terminal, stdouts);
-    const introEndTime = getIntroEndTime(stdouts);
+    const introEndTime = getIntroEndTime(stdouts, introLines);
     let revealed = false;
     let inView = false;
     let ended = false;
@@ -83,10 +98,13 @@ const TerminalDemo = ({stdouts}) => {
     timeline.on('tick', sync);
     timeline.on('end', () => {
       ended = true;
-      inner.style.height = `${inner.offsetHeight}px`;
-      renderScrollback(terminal);
-      inner.classList.add('terminal-scrollable');
-      inner.scrollTop = inner.scrollHeight;
+      if (scrollbackOnEnd) {
+        inner.style.height = `${inner.offsetHeight}px`;
+        renderScrollback(terminal);
+        inner.classList.add('terminal-scrollable');
+        inner.scrollTop = inner.scrollHeight;
+      }
+      onEnd?.();
     });
 
     const observer = new IntersectionObserver(
@@ -108,7 +126,7 @@ const TerminalDemo = ({stdouts}) => {
       clearInterval(terminal._blink);
       terminal.element.remove();
     };
-  }, [id, stdouts]);
+  }, [id, stdouts, cols, rows, introLines, scrollbackOnEnd, onEnd]);
 
   return (
     <div className="terminal-content">

@@ -30,6 +30,8 @@ const path = require('path');
 
 const memlabDir = path.join(__dirname, '..', '..');
 const outputDir = path.join(__dirname, '..', 'docs', '_cli', 'output');
+const replayDir = path.join(__dirname, '..', 'docs', '_cli', 'replay');
+const recorder = path.join(__dirname, 'record-pane.js');
 const baseDir = path.join(os.tmpdir(), 'memlab-cli-examples');
 const packagesCopyDir = path.join(baseDir, '.memlab');
 const shownBaseDir = '/tmp/memlab-example';
@@ -219,9 +221,13 @@ function createContext(env) {
   };
 }
 
-// runs one example in a new tmux window and returns the rendered terminal
+// Runs one example in a new tmux window and returns the rendered terminal as
+// `screen`. A `tui` example with a `size` gets a session of that size. With
+// `replay` steps, the pane is also recorded while the steps run, and the
+// recording is returned as `recording`.
 async function runInTerminal(example, command, env) {
-  const script = path.join(baseDir, 'tmp', `${example.id}.sh`);
+  const {id, tui} = example;
+  const script = path.join(baseDir, 'tmp', `${id}.sh`);
   const envExports = ['NODE_PATH', 'MEMLAB_EXAMPLE_URL']
     .map((key) => `export ${key}=${shellQuote(env[key])}`)
     .join('\n');
@@ -231,22 +237,72 @@ async function runInTerminal(example, command, env) {
       'export LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=xterm-256color\n' +
       // draw boxes with Unicode characters, which the capture keeps
       'export NCURSES_NO_UTF8_ACS=1\n' +
+      // print for a plain terminal: blessed wraps some sequences for tmux
+      'unset TMUX TMUX_PANE\n' +
+      // a recorded example starts once the recorder is attached
+      (tui?.replay != null
+        ? `tmux -L ${tmuxSocket} wait-for ${id}-start\n`
+        : '') +
       `${command.map(shellQuote).join(' ')}\n` +
-      `tmux -L ${tmuxSocket} wait-for -S ${example.id}\n`,
+      `tmux -L ${tmuxSocket} wait-for -S ${id}\n`,
   );
-  const done = waitForSignal(example.id);
-  tmux(['new-window', '-d', '-n', example.id, `bash ${shellQuote(script)}`]);
-  const target = `main:${example.id}`;
+  const done = waitForSignal(id);
+  const run = `bash ${shellQuote(script)}`;
+  let target = `main:${id}`;
+  if (tui?.size != null) {
+    target = `${id}:${id}`;
+    tmux([
+      'new-session',
+      '-d',
+      '-s',
+      id,
+      '-n',
+      id,
+      '-x',
+      String(tui.size.columns),
+      '-y',
+      String(tui.size.rows),
+      run,
+    ]);
+  } else {
+    tmux(['new-window', '-d', '-n', id, run]);
+  }
+  let recording = null;
   let screen;
-  if (example.tui != null) {
-    await sleep(example.tui.waitMs);
-    if (example.tui.input != null) {
-      tmux(['send-keys', '-t', target, '-l', example.tui.input]);
+  if (tui != null) {
+    if (tui.replay != null) {
+      recording = path.join(baseDir, 'tmp', `${id}.replay.json`);
+      tmux([
+        'pipe-pane',
+        '-o',
+        '-t',
+        target,
+        [process.execPath, recorder, recording].map(shellQuote).join(' '),
+      ]);
+      tmux(['wait-for', '-S', `${id}-start`]);
+    }
+    await sleep(tui.waitMs);
+    if (tui.input != null) {
+      tmux(['send-keys', '-t', target, '-l', tui.input]);
       tmux(['send-keys', '-t', target, 'Enter']);
-      await sleep(example.tui.afterInputMs);
+      await sleep(tui.afterInputMs);
     }
     screen = keepColors(tmux(['capture-pane', '-p', '-e', '-t', target]));
-    tmux(['send-keys', '-t', target, ...example.tui.quitKeys]);
+    // each step waits like a person reading the screen before the next one
+    await (tui.replay ?? []).reduce(
+      (previous, step) =>
+        previous.then(() => {
+          tmux(['send-keys', '-t', target, ...step.keys]);
+          return sleep(step.waitMs);
+        }),
+      Promise.resolve(),
+    );
+    if (recording != null) {
+      // closing the pipe makes the recorder write the recording
+      tmux(['pipe-pane', '-t', target]);
+      await waitForFile(recording);
+    }
+    tmux(['send-keys', '-t', target, ...tui.quitKeys]);
   }
   await done;
   if (screen == null) {
@@ -267,7 +323,17 @@ async function runInTerminal(example, command, env) {
     );
   }
   tmux(['kill-window', '-t', target]);
-  return screen;
+  return {screen, recording};
+}
+
+function waitForFile(file, deadline = Date.now() + 10000) {
+  if (fs.existsSync(file)) {
+    return Promise.resolve();
+  }
+  if (Date.now() > deadline) {
+    return Promise.reject(new Error(`the recorder did not write ${file}`));
+  }
+  return sleep(100).then(() => waitForFile(file, deadline));
 }
 
 const COLOR_CODE = /\x1b\[([0-9;]*)m/;
@@ -372,10 +438,10 @@ function keepColors(text, {chart = false} = {}) {
     .join('\n');
 }
 
-function normalize(text, url) {
-  const realBaseDir = fs.realpathSync(baseDir);
-  let result = text
-    .split(realBaseDir)
+// replaces the paths and the port that differ between machines and runs
+function replaceLocalDetails(text, url) {
+  return text
+    .split(fs.realpathSync(baseDir))
     .join(shownBaseDir)
     .split(baseDir)
     .join(shownBaseDir)
@@ -383,13 +449,85 @@ function normalize(text, url) {
     .join(shownUrl)
     .split(os.homedir())
     .join('~');
-  result = result
+}
+
+function normalize(text, url) {
+  const result = replaceLocalDetails(text, url)
     .split('\n')
     .filter((line) => !/^Pane is dead \(/.test(stripColors(line)))
     .map((line) => line.replace(/\s+$/, ''))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n');
   return result.trim() + '\n';
+}
+
+// escape sequences: CSI (cursor moves, colors, modes), OSC (window title),
+// character set selection, and single-character controls
+const ESCAPE_SEQUENCE =
+  /\x1b\[[0-9;?>=!]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>78DEHMc]/g;
+
+function stripEscapes(text) {
+  return text.replace(ESCAPE_SEQUENCE, '');
+}
+
+const TYPING_MS = 45;
+const ENTER_MS = 600;
+// writes closer together than this are played as one
+const FRAME_MS = 30;
+// the snapshot loads before the screen opens; that part plays this much faster
+const LOADING_SPEEDUP = 4;
+const MAX_PAUSE_MS = 2000;
+
+// Turns a pane recording into the replay played on the doc page: the command
+// is typed after a `$ ` prompt, then the command's output plays with its own
+// timing, except that loading plays faster and long pauses are shortened.
+function buildReplay(recorded, shownCommand, url, size) {
+  const events = [{time: 300, content: '$ '}];
+  let time = 300;
+  const typed = replaceLocalDetails(shownCommand, url).replace(/^\$ /, '');
+  for (const char of typed) {
+    time += TYPING_MS;
+    events.push({time, content: char});
+  }
+  time += ENTER_MS;
+  events.push({time, content: '\r\n'});
+  let previous = 0;
+  let loading = true;
+  for (const {content, time: at} of recorded) {
+    let gap = at - previous;
+    previous = at;
+    if (loading) {
+      gap /= LOADING_SPEEDUP;
+    }
+    // the screen opens by switching to the alternate screen buffer
+    if (content.includes('\x1b[?1049h')) {
+      loading = false;
+    }
+    time += Math.min(Math.round(gap), MAX_PAUSE_MS);
+    const last = events[events.length - 1];
+    if (time - last.time < FRAME_MS && last.content !== '\r\n') {
+      last.content += content;
+    } else {
+      events.push({time, content});
+    }
+  }
+  return {
+    columns: size.columns,
+    rows: size.rows,
+    events: events.map((e) => ({
+      time: e.time,
+      content: replaceLocalDetails(e.content, url),
+    })),
+  };
+}
+
+// one event per line, so that a recapture shows up as a readable diff
+function formatReplay(replay) {
+  const events = replay.events.map((e) => `    ${JSON.stringify(e)}`);
+  return (
+    `{\n  "columns": ${replay.columns},\n  "rows": ${replay.rows},\n` +
+    `  "events": [\n${events.join(',\n')}\n  ]\n}\n`
+  );
 }
 
 function findForbidden(text) {
@@ -457,7 +595,7 @@ async function main() {
       }
       // the examples share one tmux server and later ones read earlier output
       // eslint-disable-next-line no-await-in-loop
-      const screen = await runInTerminal(
+      const {recording, screen} = await runInTerminal(
         example,
         memlabCommand([...args, ...browserArgs]),
         env,
@@ -475,6 +613,32 @@ async function main() {
         continue;
       }
       fs.writeFileSync(path.join(outputDir, `${example.id}.txt`), output);
+      if (recording != null) {
+        const replay = buildReplay(
+          JSON.parse(fs.readFileSync(recording, 'utf8')),
+          shownCommand,
+          url,
+          example.tui.size,
+        );
+        const played = stripEscapes(
+          replay.events.map((e) => e.content).join(''),
+        );
+        const leaked = findForbidden(played);
+        if (played.includes(baseDir)) {
+          leaked.push(baseDir);
+        }
+        if (leaked.length > 0) {
+          failures.push(
+            `${example.id}: internal details in the replay:\n  ${leaked.join('\n  ')}`,
+          );
+          continue;
+        }
+        fs.mkdirSync(replayDir, {recursive: true});
+        fs.writeFileSync(
+          path.join(replayDir, `${example.id}.json`),
+          formatReplay(replay),
+        );
+      }
     }
   } finally {
     tmux(['kill-server']);

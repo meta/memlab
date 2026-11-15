@@ -352,6 +352,40 @@ html[data-theme='dark'] .terminal-output {
   background-color: #0e1117;
 }
 
+.terminal-output-replay {
+  margin-bottom: var(--ifm-leading);
+  position: relative;
+}
+
+/* size the replay to its own columns and rows, not the home page's */
+.terminal-output-replay .terminal-content {
+  margin: 0;
+  width: max-content;
+}
+
+.terminal-output-replay .terminal-inner {
+  border-radius: var(--ifm-pre-border-radius);
+  min-height: 0;
+  width: max-content;
+}
+
+.terminal-output-replay-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  bottom: 12px;
+  color: #f0f0f0;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 4px 12px;
+  position: absolute;
+  right: 12px;
+}
+
+.terminal-output-replay-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 .terminal-black {
   color: var(--terminal-black);
 }

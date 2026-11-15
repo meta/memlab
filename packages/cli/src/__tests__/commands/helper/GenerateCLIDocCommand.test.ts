@@ -100,6 +100,11 @@ beforeEach(() => {
     path.join(examplesDir, 'output', 'parent-sub.txt'),
     '$ memlab parent sub\n',
   );
+  fs.mkdirSync(path.join(examplesDir, 'replay'), {recursive: true});
+  fs.writeFileSync(
+    path.join(examplesDir, 'replay', 'parent-sub.json'),
+    '{"columns": 80, "rows": 24, "events": []}\n',
+  );
   const generator = new GenerateCLIDocCommand();
   generator.setModulesMap(modules);
   generator.generateDocs(path.join(docDir, 'cli'), examplesDir);
@@ -167,9 +172,15 @@ test('a command page shows its example output and how to read it', () => {
   expect(page).toContain(
     "import parent_sub_output from '!!raw-loader!../_cli/output/parent-sub.txt';",
   );
+  // a recorded session is imported and passed as the replay
   expect(page).toContain(
-    '### Example output\n\n<TerminalOutput output={parent_sub_output} />',
+    "import parent_sub_replay from '../_cli/replay/parent-sub.json';",
   );
+  expect(page).toContain(
+    '### Example output\n\n' +
+      '<TerminalOutput output={parent_sub_output} replay={parent_sub_replay} />',
+  );
+  expect(page).not.toContain('parent_replay');
   expect(page.split('import TerminalOutput').length).toBe(2);
   // sections appear only when their file exists
   expect(read('misc.md')).not.toContain('Example output');

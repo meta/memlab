@@ -36,7 +36,7 @@ export default class GenerateCLIDocCommand extends BaseCommand {
   private examplesDir = '';
   // the example output files the current page imports
   private outputImports: string[] = [];
-  private outputImportDir = '';
+  private examplesImportDir = '';
 
   getCommandName(): string {
     return 'gen-cli-doc';
@@ -62,13 +62,14 @@ export default class GenerateCLIDocCommand extends BaseCommand {
 
   // writes an index page, one page per top-level command, and the sidebar
   // items listing those pages (required by website/sidebars.js); a command
-  // page also shows `<examplesDir>/output/<id>.txt` as its example output and
-  // `<examplesDir>/<id>.md` as the guide to that output, where `<id>` is the
-  // full command with dashes (e.g. `analyze-detached-DOM`)
+  // page also shows `<examplesDir>/output/<id>.txt` as its example output,
+  // played from the recording in `<examplesDir>/replay/<id>.json` if there is
+  // one, and `<examplesDir>/<id>.md` as the guide to that output, where `<id>`
+  // is the full command with dashes (e.g. `analyze-detached-DOM`)
   generateDocs(cliDocsDir: string, examplesDir: string): void {
     this.examplesDir = examplesDir;
-    this.outputImportDir = path
-      .relative(cliDocsDir, path.join(examplesDir, 'output'))
+    this.examplesImportDir = path
+      .relative(cliDocsDir, examplesDir)
       .split(path.sep)
       .join('/');
     fs.removeSync(cliDocsDir);
@@ -233,10 +234,23 @@ export default class GenerateCLIDocCommand extends BaseCommand {
       // changes only the output files
       const variable = `${exampleId.replace(/\W/g, '_')}_output`;
       this.outputImports.push(
-        `import ${variable} from '!!raw-loader!${this.outputImportDir}/${outputFile}';`,
+        `import ${variable} from '!!raw-loader!${this.examplesImportDir}/output/${outputFile}';`,
       );
+      // a recorded terminal session plays as a replay where there is room
+      let replayProp = '';
+      const replayFile = `${exampleId}.json`;
+      if (fs.existsSync(path.join(this.examplesDir, 'replay', replayFile))) {
+        const replayVariable = `${exampleId.replace(/\W/g, '_')}_replay`;
+        this.outputImports.push(
+          `import ${replayVariable} from '${this.examplesImportDir}/replay/${replayFile}';`,
+        );
+        replayProp = ` replay={${replayVariable}}`;
+      }
       lines.push(`${headingLevel} Example output`, '');
-      lines.push(`<${TERMINAL_OUTPUT} output={${variable}} />`, '');
+      lines.push(
+        `<${TERMINAL_OUTPUT} output={${variable}}${replayProp} />`,
+        '',
+      );
     }
     const guide = this.readExample(`${exampleId}.md`);
     if (guide != null) {
