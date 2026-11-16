@@ -1,0 +1,12 @@
+[33mMemLab found 1 leak(s)[0m
+[90mNumber of clusters loaded: 0[0m
+
+--Similar leaks in this run: 386--
+--Retained size of leaked objects: 45.3KB--
+[32m[Window / http://localhost:3000][0m [90m(native)[0m [90m@33471[0m [90m[[0m[1;34m7.6KB[0m[90m][0m
+  [90m--[0m[37mglobal_object[0m [90m(shortcut)---[0m>  [32m[Window [JSGlobalObject] / http://localhost:3000][0m [90m(object)[0m [90m@33803[0m [90m[[0m[1;34m46.1KB[0m[90m][0m
+  [90m--[0m[37mopenedDialogs[0m [90m(property)---[0m>  [32m[Set][0m [90m(object)[0m [90m@47967[0m [90m[[0m[1;34m76 bytes[0m[90m][0m
+  [90m--[0m[37mtable[0m [90m(internal)---[0m>  [32m[<array>][0m [90m(array)[0m [90m@50805[0m [90m[[0m[1;34m60 bytes[0m[90m][0m
+  [90m--[0m[37m5[0m [90m(internal)---[0m>  [32m[Detached <div class="settings">[0m [90m(native)[0m [90m@65915[0m [90m[[0m[1;34m45.3KB[0m[90m][0m
+  [90m--[0m[37m5[0m [90m(element)---[0m>  [32m[Detached <div>[0m [90m(native)[0m [90m@71885[0m [90m[[0m[1;34m45KB[0m[90m][0m
+  ...

@@ -1,0 +1,3 @@
+[0] traces from control group
+[386] traces from treatment group
+[33mMemLab found 1 new leak(s) in the treatment group[0m

@@ -2,6 +2,10 @@
 id: 'guides-check-a-leak-fix'
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import run_output from '!!raw-loader!./_output/07-run.txt';
+import diff_leaks_output from '!!raw-loader!./_output/07-diff-leaks.txt';
+
 # Check Whether a Leak Fix Works
 
 After you fix a memory leak, you want proof that the fix works and that it
@@ -76,20 +80,7 @@ memlab run --scenario ~/memlab/scenarios/leak.js --work-dir ~/memlab/leak
 memlab opens the page, takes a heap snapshot after each step, and reports
 one leak:
 
-```
-MemLab found 1 leak(s)
-Number of clusters loaded: 0
-
---Similar leaks in this run: 386--
---Retained size of leaked objects: 45.3KB--
-[Window / http://localhost:3000] (native) @33471 [7.6KB]
-  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
-  --openedDialogs (property)--->  [Set] (object) @47967 [76 bytes]
-  --table (internal)--->  [<array>] (array) @50805 [60 bytes]
-  --5 (internal)--->  [Detached <div class="settings"> (native) @65915 [45.3KB]
-  --5 (element)--->  [Detached <div> (native) @71885 [45KB]
-  ...
-```
+<TerminalOutput output={run_output} />
 
 Read the trace from the top: the global `openedDialogs` `Set` still holds
 the closed dialog's `<div class="settings">`, so the detached element and its
@@ -116,11 +107,7 @@ is the baseline, and the treatment run is the one under test:
 memlab diff-leaks --control-work-dir ~/memlab/fixed --treatment-work-dir ~/memlab/leak
 ```
 
-```
-[0] traces from control group
-[386] traces from treatment group
-MemLab found 1 new leak(s) in the treatment group
-```
+<TerminalOutput output={diff_leaks_output} />
 
 - `[0] traces from control group`: the fixed version has no leaked objects,
   so the fix works.

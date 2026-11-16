@@ -1,0 +1,4 @@
+[90m· @71395[0m [1;34mArray[0m[90m:[0m 3 edges[90m,[0m 800KB[90m,[0m refs: [90m[[0mhistory[90m][0m
+[90m· @32151[0m [1;34mWindow (prototype) / http://localhost:3000[0m[90m:[0m 535 edges[90m,[0m 26.7KB[90m,[0m refs: [90m[[0m__proto__[90m, [0mprototype[90m][0m
+[90m· @46239[0m [1;34mWindow (prototype) / http://localhost:3000[0m[90m:[0m 535 edges[90m,[0m 26.7KB[90m,[0m refs: [90m[[0mprototype[90m, [0m__proto__[90m][0m
+...

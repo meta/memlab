@@ -1,0 +1,18 @@
+Snapshot  ~/memlab/leak/data/cur/s3.heapsnapshot
+[1mstatistics[0m            [1msize[0m   [1mshare[0m
+[90m----------------  --------  ------[0m
+total               [34m2.0 MB[0m  100.0%
+V8 heap             [34m1.3 MB[0m   62.9%
+  code             [34m45.4 KB[0m    2.2%
+  strings          [34m54.3 KB[0m    2.6%
+  JS arrays       [34m783.0 KB[0m   37.3%
+  system objects       [34m0 B[0m    0.0%
+  other           [34m437.3 KB[0m   20.8%
+native            [34m779.1 KB[0m   37.1%
+  typed arrays         [34m0 B[0m    0.0%
+
+[1mwhy the memory exists[0m                   [1msize[0m  [1mshare[0m
+[90m-----------------------------------  -------  -----[0m
+script source text                   [34m14.0 KB[0m   0.7%
+compiled code and function metadata  [34m45.4 KB[0m   2.2%
+allocated by the program              [34m2.0 MB[0m  97.2%

@@ -2,6 +2,11 @@
 id: 'guides-find-memory-that-keeps-growing'
 ---
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import class_trend_output from '!!raw-loader!./_output/08-class-trend.txt';
+import unbound_collection_output from '!!raw-loader!./_output/08-unbound-collection.txt';
+import trace_output from '!!raw-loader!./_output/08-trace.txt';
+
 # Find Memory That Keeps Growing
 
 Some leaks only show up when an action repeats: each time a user opens and
@@ -50,19 +55,7 @@ lists the classes that changed the most:
 memlab class-trend --snapshot-dir ~/memlab/series/data/cur --top 15
 ```
 
-```
-9 snapshots, in order: s1.heapsnapshot, s2.heapsnapshot, s3.heapsnapshot, s4.heapsnapshot, s5.heapsnapshot, s6.heapsnapshot, s7.heapsnapshot, s8.heapsnapshot, s9.heapsnapshot
-  0 classes grew at every step; 249 appeared after the first snapshot; 693 classes changed overall
-class                                                         type           trend     counts                     delta  self size delta
-------------------------------------------------------------  -------------  --------  -------------------------  -----  ---------------
-Detached <div>                                                native         appeared  0 > 0 > ... > 720 > 960     +960         +97.5 KB
-Detached Text                                                 native         appeared  0 > 0 > ... > 723 > 963     +963         +75.2 KB
-(sliced string)                                               sliced string  appeared  0 > 240 > ... > 960 > 960   +960         +18.8 KB
-...
-Detached <button id="close-settings">                         native         appeared  0 > 0 > ... > 3 > 4           +4           +704 B
-...
-Detached <div class="settings">                               native         appeared  0 > 0 > ... > 3 > 4           +4           +416 B
-```
+<TerminalOutput output={class_trend_output} />
 
 `counts` shows the first two and the last two snapshots. After 4 rounds there
 are 960 detached `<div>` elements (4 dialogs of 240 rows each) and 4 detached
@@ -81,12 +74,7 @@ entries keeps growing:
 memlab analyze unbound-collection --snapshot-dir ~/memlab/series/data/cur
 ```
 
-```
-Top growing objects in sizes:
- (Use `memlab trace --node-id=@ID` to get trace)
-
-· Set [object](@47967):  1 > 2 > 2 > 3 > 3 > 4 > 4 > 5 > 5
-```
+<TerminalOutput output={unbound_collection_output} />
 
 The `Set` gains one entry each time the dialog opens (snapshots 2, 4, 6,
 and 8) and never loses one when it closes.
@@ -99,11 +87,7 @@ Pass the `Set`'s id to `memlab trace`, with the last snapshot:
 memlab trace --snapshot ~/memlab/series/data/cur/s9.heapsnapshot --node-id @47967
 ```
 
-```
-[Window / http://localhost:3000] (native) @33471 [7.6KB]
-  --global_object (shortcut)--->  [Window [JSGlobalObject] / http://localhost:3000] (object) @33803 [46.1KB]
-  --openedDialogs (property)--->  [Set] (object) @47967 [76 bytes]
-```
+<TerminalOutput output={trace_output} />
 
 It's the global `openedDialogs`. The fix is to delete each dialog from the
 `Set` when the dialog closes.

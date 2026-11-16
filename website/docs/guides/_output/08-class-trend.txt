@@ -1,0 +1,11 @@
+9 snapshots, in order: s1.heapsnapshot, s2.heapsnapshot, s3.heapsnapshot, s4.heapsnapshot, s5.heapsnapshot, s6.heapsnapshot, s7.heapsnapshot, s8.heapsnapshot, s9.heapsnapshot
+[90m  0 classes grew at every step; 249 appeared after the first snapshot; 693 classes changed overall[0m
+[1mclass[0m                                                         [1mtype[0m           [1mtrend[0m     [1mcounts[0m                     [1mdelta[0m  [1mself size delta[0m
+[90m------------------------------------------------------------  -------------  --------  -------------------------  -----  ---------------[0m
+[32mDetached <div>[0m                                                [90mnative[0m         appeared  0 > 0 > ... > 720 > 960     [31m+960[0m         [31m+97.5 KB[0m
+[32mDetached Text[0m                                                 [90mnative[0m         appeared  0 > 0 > ... > 723 > 963     [31m+963[0m         [31m+75.2 KB[0m
+[32m(sliced string)[0m                                               [90msliced string[0m  appeared  0 > 240 > ... > 960 > 960   [31m+960[0m         [31m+18.8 KB[0m
+...
+[32mDetached <button id="close-settings">[0m                         [90mnative[0m         appeared  0 > 0 > ... > 3 > 4           [31m+4[0m           [31m+704 B[0m
+...
+[32mDetached <div class="settings">[0m                               [90mnative[0m         appeared  0 > 0 > ... > 3 > 4           [31m+4[0m           [31m+416 B[0m

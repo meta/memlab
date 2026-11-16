@@ -1,0 +1,4 @@
+Top growing objects in sizes:
+[90m (Use `memlab trace --node-id=@ID` to get trace)[0m
+
+[90m· [0m[1;34mSet[0m [object]([90m@47967[0m):  1[90m > [0m2[90m > [0m2[90m > [0m3[90m > [0m3[90m > [0m4[90m > [0m4[90m > [0m5[90m > [0m5
