@@ -50,6 +50,8 @@ class StringLoader {
     const _endSig = options.endSignature;
     const _errHandler = this.processErrorIfNotNull;
     const inclusive = !!options.inclusive;
+    // keeps a UTF-8 character split between two chunks in one piece
+    const _decoder = new TextDecoder();
 
     let _resolve: (result: string) => void;
     let _result = '';
@@ -60,7 +62,9 @@ class StringLoader {
     const readCallback = function (err: NodeFSError, bytes: number) {
       _errHandler(err);
 
-      const str = _buffer.slice(0, bytes).toString('utf8');
+      const str = _decoder.decode(_buffer.slice(0, bytes), {
+        stream: bytes === _buffer.length,
+      });
 
       if (!_begin && !_startSig) {
         // start reserving content if no start signature is specified
@@ -138,6 +142,9 @@ class StringLoader {
       Infinity,
     );
 
+    // keeps a UTF-8 character split between two chunks in one piece
+    const _decoder = new TextDecoder();
+
     let _resolve: (result: string) => void;
     let _result = '';
     let _curFieldToIgnore: string | null = null;
@@ -146,7 +153,9 @@ class StringLoader {
     const readCallback = function (err: NodeFSError, bytes: number) {
       _errHandler(err);
 
-      let str = _buffer.slice(0, bytes).toString('utf8');
+      let str = _decoder.decode(_buffer.slice(0, bytes), {
+        stream: bytes === _buffer.length,
+      });
 
       // look for end of field
       if (_curFieldToIgnore) {
