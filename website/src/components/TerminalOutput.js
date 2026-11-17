@@ -88,8 +88,10 @@ function StaticOutput({output}) {
   );
 }
 
-// plays a recorded terminal session, scaled down to fit the doc column, and
-// shows the last key pressed in it below
+// Plays a recorded terminal session, scaled down to fit the doc column, and
+// shows the last key pressed in it below. Once a session that stays on the
+// main screen ends, its whole output can be scrolled; a full-screen UI (on the
+// alternate screen) has no output above its screen.
 function ReplayOutput({replay}) {
   const outerRef = useRef(null);
   const [scale, setScale] = useState(1);
@@ -135,7 +137,11 @@ function ReplayOutput({replay}) {
           onEnd={onEnd}
           onKey={onKey}
           rows={replay.rows}
-          scrollbackOnEnd={false}
+          scrollbackOnEnd={
+            !replay.events.some((event) =>
+              event.content?.includes('\x1b[?1049h'),
+            )
+          }
           stdouts={replay.events}
         />
         <div className="terminal-output-replay-keys">

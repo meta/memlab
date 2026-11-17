@@ -39,7 +39,8 @@ references that keep the closed dialogs alive, and measures how much memory
 a fix would free, before it writes its answer.
 
 The session was recorded from a real run. As in Claude Code, each tool
-result shows only its first lines.
+result shows only its first lines. When the replay ends, scroll up in it to
+read the whole session.
 
 <TerminalOutput output={mcp_server_output} replay={mcp_server_replay} />
 
