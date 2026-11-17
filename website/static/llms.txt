@@ -34,7 +34,8 @@ Main entry points:
 
 ## AI coding agents
 
-- [MCP Server for AI Assistants](https://meta.github.io/memlab/docs/mcp-server): setup, getting a heap snapshot, a typical investigation, and tool safety
+- [MCP Server for AI Assistants](https://meta.github.io/memlab/docs/mcp-server): overview, with pages on setup, getting a heap snapshot, a typical investigation, snapshot ladders, reading the numbers, `memlab-cli`, and tool safety
+- [MCP tool reference](https://meta.github.io/memlab/docs/mcp-server/tools): every tool, one page per group of the question it answers
 - [MCP server README](https://github.com/meta/memlab/blob/main/packages/mcp-server/README.md): full tool reference, `memlab-cli`, environment variables
 - [MCP investigation method](https://github.com/meta/memlab/blob/main/packages/mcp-server/MCP_SKILL.md): triage and investigation paths by symptom
 - [Agent Skills](https://github.com/meta/memlab/tree/main/plugins/memlab/skills): analyze a heap snapshot, find leaks in a web app, capture heap snapshots, write memory leak tests

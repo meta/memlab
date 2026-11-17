@@ -59,7 +59,7 @@ references keeps an object alive.
 - One snapshot shows what is in memory. To show what **grows**, you need two
   or more snapshots taken from the same page or process while an interaction
   repeats. If the user has none, see the `memlab-capture-heap-snapshots` skill
-  or the [memlab docs](https://meta.github.io/memlab/docs/mcp-server#getting-a-heap-snapshot).
+  or the [memlab docs](https://meta.github.io/memlab/docs/mcp-server/heap-snapshots).
 
 ## 3. Triage
 

@@ -4,7 +4,7 @@ description: Capture JavaScript heap snapshots (.heapsnapshot files) for memory 
 license: MIT
 compatibility: Browser capture needs a Chromium-based browser (Chrome, Edge, or the Chromium that Puppeteer or Playwright launches). Node.js capture needs Node.js 12+ (v8.writeHeapSnapshot and --heapsnapshot-signal).
 metadata:
-  homepage: https://meta.github.io/memlab/docs/mcp-server#getting-a-heap-snapshot
+  homepage: https://meta.github.io/memlab/docs/mcp-server/heap-snapshots
   repository: https://github.com/meta/memlab
 ---
 
