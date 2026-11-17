@@ -1,5 +1,9 @@
 # MCP Server for AI Assistants
 
+import TerminalOutput from '@site/src/components/TerminalOutput';
+import mcp_server_output from '!!raw-loader!./_cli/output/mcp-server.txt';
+import mcp_server_replay from './_cli/replay/mcp-server.json';
+
 The [`@memlab/mcp-server`](https://www.npmjs.com/package/@memlab/mcp-server)
 package lets an AI coding assistant investigate JavaScript memory for you. It
 is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server:
@@ -25,6 +29,19 @@ The assistant picks the tools, runs them, and explains what it finds.
   it alive, and which reference to break.
 - **Is the number real?** Whether memory is held only by DevTools, a browser
   extension or a development build, rather than by your app.
+
+## See It in Action
+
+Below, Claude Code answers a question about the snapshots of a small demo
+app, taken while a settings dialog opened and closed four times. Its only
+tools are memlab's. It checks the snapshots, finds what grows, follows the
+references that keep the closed dialogs alive, and measures how much memory
+a fix would free, before it writes its answer.
+
+The session was recorded from a real run. As in Claude Code, each tool
+result shows only its first lines.
+
+<TerminalOutput output={mcp_server_output} replay={mcp_server_replay} />
 
 ## Quick Start
 

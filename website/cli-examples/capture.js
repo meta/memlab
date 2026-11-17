@@ -18,6 +18,10 @@
 // The commands run in a real terminal (a private tmux server) against the
 // example app in `app/`, using a copy of the compiled packages without any
 // `fb-internal` directory, so the output is what an npm user sees.
+//
+// `--only mcp-server` records Claude Code answering a question with the MCP
+// server's tools instead. It runs `claude --bare`, which needs `claude` on the
+// PATH and an API key (`ANTHROPIC_API_KEY`).
 
 'use strict';
 
@@ -36,6 +40,7 @@ const baseDir = path.join(os.tmpdir(), 'memlab-cli-examples');
 const packagesCopyDir = path.join(baseDir, '.memlab');
 const shownBaseDir = '/tmp/memlab-example';
 const shownUrl = 'http://localhost:3000';
+const shownPort = new URL(shownUrl).port;
 const tmuxSocket = `memlab-cli-examples-${process.pid}`;
 const columns = 120;
 const rows = 45;
@@ -103,8 +108,20 @@ function copyPackages() {
             ),
       });
     }
-    const packageName = JSON.parse(fs.readFileSync(packageJson, 'utf8')).name;
-    fs.symlinkSync(to, path.join(modulesDir, packageName));
+    const manifest = JSON.parse(fs.readFileSync(packageJson, 'utf8'));
+    fs.symlinkSync(to, path.join(modulesDir, manifest.name));
+    // ES modules (the MCP server) ignore NODE_PATH, so their dependencies
+    // have to be in a node_modules directory above the copy
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      const link = path.join(modulesDir, dependency);
+      const target = path.join(memlabDir, 'node_modules', dependency);
+      if (!dependency.startsWith('@memlab/') && fs.existsSync(target)) {
+        fs.mkdirSync(path.dirname(link), {recursive: true});
+        if (!fs.existsSync(link)) {
+          fs.symlinkSync(target, link);
+        }
+      }
+    }
   }
   // the npm package depends on `puppeteer`; a checkout may only have
   // `puppeteer-core`, which works the same with --chromium-binary
@@ -329,6 +346,369 @@ async function runInTerminal(example, command, env) {
   return {screen, recording, keyPresses};
 }
 
+// replay timing of an assistant session: the prompt is typed, the answer
+// appears a line at a time, and every wait for the model or a tool is capped
+const PROMPT_TYPING_MS = 15;
+const ANSWER_MS_PER_CHAR = 4;
+const MODEL_WAIT_MS = 1200;
+const TOOL_WAIT_MS = 2000;
+// lines of a tool result shown under its call
+const RESULT_LINES = 4;
+
+// Runs `claude` on the example's prompt with only the MCP server's tools and
+// returns each message it prints, with the time it was printed. `--bare`
+// leaves out the user's hooks, plugins and CLAUDE.md files.
+function runClaude(example, ctx) {
+  const {assistant, id} = example;
+  assistant.prepare?.(ctx);
+  // the server keeps its state files here instead of in the home directory
+  const home = path.join(baseDir, 'tmp', `${id}-home`);
+  fs.mkdirSync(home, {recursive: true});
+  const server = path.join(
+    packagesCopyDir,
+    'packages',
+    'mcp-server',
+    'dist',
+    'index.js',
+  );
+  const mcpConfig = path.join(baseDir, 'tmp', `${id}-mcp.json`);
+  fs.writeFileSync(
+    mcpConfig,
+    JSON.stringify({
+      mcpServers: {
+        memlab: {
+          type: 'stdio',
+          command: process.execPath,
+          args: ['--max-old-space-size=8192', server],
+          env: {HOME: home, MEMLAB_STATE_DIR: home},
+        },
+      },
+    }),
+  );
+  const style =
+    `Your answer is shown in a ${assistant.size.columns - 2}-column ` +
+    'terminal: use short paragraphs and lists, no tables or headings, and ' +
+    'keep it under 25 lines. Show a retainer trace in a code block, one ' +
+    'reference per line, with every step and edge name exactly as a tool ' +
+    'printed it, from the root to the leaked object. Pass file paths ' +
+    'relative to the current directory.';
+  const args = [
+    '-p',
+    '--bare',
+    '--strict-mcp-config',
+    '--mcp-config',
+    mcpConfig,
+    '--tools',
+    '',
+    '--allowedTools',
+    'mcp__memlab',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--append-system-prompt',
+    style,
+    assistant.prompt,
+  ];
+  return new Promise((resolve, reject) => {
+    const child = childProcess.spawn('claude', args, {
+      cwd: assistant.cwd(ctx),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: timeoutMs,
+    });
+    const messages = [];
+    let pending = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      const lines = (pending + chunk).split('\n');
+      pending = lines.pop();
+      for (const line of lines.filter((l) => l.trim() !== '')) {
+        messages.push({time: Date.now(), message: JSON.parse(line)});
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(messages);
+      } else {
+        reject(new Error(`claude exited with ${code}:\n${stderr}`));
+      }
+    });
+  });
+}
+
+// the terminal on the doc page has no emoji, and draws each one as a box
+const EMOJI = /\p{Extended_Pictographic}\uFE0F?\s?/gu;
+
+function styled(runs) {
+  return runs
+    .map(({codes, text}) =>
+      codes === '' ? text : `\x1b[${codes}m${text}\x1b[0m`,
+    )
+    .join('');
+}
+
+// splits a line of Markdown into runs of text with their color codes: bold
+// for **bold** and cyan for `code`
+function markdownRuns(line) {
+  const runs = [];
+  const pattern = /\*\*(.+?)\*\*|`([^`]+)`/g;
+  let last = 0;
+  for (const match of line.matchAll(pattern)) {
+    runs.push({text: line.slice(last, match.index), codes: ''});
+    runs.push(
+      match[1] != null
+        ? {text: match[1].replace(/`/g, ''), codes: '1'}
+        : {text: match[2], codes: '36'},
+    );
+    last = match.index + match[0].length;
+  }
+  runs.push({text: line.slice(last), codes: ''});
+  return runs.filter((run) => run.text !== '');
+}
+
+// wraps runs of text at spaces into lines of at most `width` characters; the
+// lines after the first start with `indent` spaces
+function wrapRuns(runs, width, indent) {
+  const lines = [[]];
+  let length = 0;
+  let lineStart = 0;
+  const push = (run) => {
+    lines[lines.length - 1].push(run);
+    length += run.text.length;
+  };
+  const newLine = () => {
+    const line = lines[lines.length - 1];
+    while (line.length > 0 && /^ +$/.test(line[line.length - 1].text)) {
+      line.pop();
+    }
+    lines.push([{text: ' '.repeat(indent), codes: ''}]);
+    length = indent;
+    lineStart = indent;
+  };
+  const tokens = runs.flatMap((run) =>
+    run.text
+      .split(/( +)/)
+      .filter((text) => text !== '')
+      .map((text) => ({text, codes: run.codes})),
+  );
+  for (const token of tokens) {
+    if (/^ +$/.test(token.text)) {
+      if (length > lineStart) {
+        push({text: token.text, codes: ''});
+      }
+      continue;
+    }
+    let {text} = token;
+    if (length + text.length > width && length > lineStart) {
+      newLine();
+    }
+    while (length + text.length > width) {
+      const room = width - length;
+      push({text: text.slice(0, room), codes: token.codes});
+      text = text.slice(room);
+      newLine();
+    }
+    push({text, codes: token.codes});
+  }
+  return lines.map(styled);
+}
+
+// the lines of an assistant message, after a `● ` marker
+function textLines(text, width) {
+  const lines = [];
+  let inCode = false;
+  for (const line of text.replace(EMOJI, '').trim().split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) {
+      lines.push(styled([{text: truncate(line, width - 2), codes: '36'}]));
+      continue;
+    }
+    const heading = /^#+\s+/.exec(line);
+    if (heading != null) {
+      lines.push(styled([{text: line.slice(heading[0].length), codes: '1'}]));
+      continue;
+    }
+    const lead = /^\s*/.exec(line)[0].length;
+    const item = /^(?:[-*]|\d+\.)\s+/.exec(line.slice(lead));
+    const wrapped = wrapRuns(
+      markdownRuns(line.slice(lead)),
+      width - 2 - lead,
+      item?.[0].length ?? 0,
+    );
+    lines.push(...wrapped.map((wrappedLine) => ' '.repeat(lead) + wrappedLine));
+  }
+  return lines.map((line, i) => (i === 0 ? `● ${line}` : `  ${line}`));
+}
+
+function truncate(text, width) {
+  return text.length > width ? `${text.slice(0, width - 1)}…` : text;
+}
+
+// a tool call, as Claude Code shows it, with paths relative to `cwd`
+function toolCallLine(block, width, cwd) {
+  const name = block.name.replace(/^mcp__memlab__/, '');
+  const args = Object.entries(block.input)
+    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+    .join(', ')
+    .split(`${cwd}/`)
+    .join('')
+    .split(JSON.stringify(cwd))
+    .join('"."');
+  const call = truncate(`${name} (MCP)(${args})`, width - 11);
+  return `${styled([{text: '●', codes: '32'}])} memlab - ${styled([
+    {text: call.slice(0, name.length), codes: '1'},
+  ])}${call.slice(name.length)}`;
+}
+
+// the retainer path in a tool result's JSON, if it has one
+function retainerPath(text) {
+  try {
+    const {path: steps} = JSON.parse(text);
+    return Array.isArray(steps) && steps.every((step) => step.name != null)
+      ? steps
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+// a retainer path one reference per line, the way memlab prints a trace
+function retainerPathLines(steps, width) {
+  return steps.map((step, i) => {
+    const node = truncate(`${step.name} (${step.type})`, width - 7);
+    if (i === 0) {
+      return `  ⎿  ${node}`;
+    }
+    const edge = styled([{text: `--${steps[i - 1].edge}-->`, codes: '2'}]);
+    return `       ${edge} ${node}`;
+  });
+}
+
+// the first lines of a tool result, leaving out rules, tables and blank lines
+// (tables are too wide to show cut, and their emoji don't render)
+function toolResultLines(block, width) {
+  const text = Array.isArray(block.content)
+    ? block.content.map((part) => part.text ?? '').join('\n')
+    : String(block.content);
+  const steps = retainerPath(text);
+  if (steps != null) {
+    return retainerPathLines(steps, width);
+  }
+  const lines = text
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(EMOJI, '')
+        .replace(/\*\*/g, '')
+        .replace(/^#+\s+/, '')
+        .replace(/^_(.*)_$/, '$1')
+        .trimEnd(),
+    )
+    .filter(
+      (line) =>
+        line.trim() !== '' && !/^(=+ .* =+|-{3,}|> Snapshots?: .*)$/.test(line),
+    );
+  const shown = lines
+    .filter((line) => !line.startsWith('|'))
+    .slice(0, RESULT_LINES)
+    .map((line) => truncate(line, width - 5));
+  const hidden = lines.length - shown.length;
+  if (hidden > 0) {
+    shown.push(`… +${hidden} lines`);
+  }
+  const codes = block.is_error ? '31' : '2';
+  return shown.map(
+    (line, i) =>
+      `${i === 0 ? '  ⎿  ' : '     '}${styled([{text: line, codes}])}`,
+  );
+}
+
+// Turns the messages of a `claude` run into the screen it would leave and a
+// recording of it appearing: the prompt is typed, then each answer, tool
+// call and tool result appears after the time it took, capped.
+function renderAssistant(prompt, messages, size, cwd) {
+  const width = size.columns;
+  const screen = [];
+  const events = [];
+  let time = 0;
+  const write = (content) => events.push({time, content});
+  const promptLines = wrapRuns([{text: prompt, codes: ''}], width - 2, 0);
+  promptLines.forEach((line, i) => {
+    write(i === 0 ? `${styled([{text: '>', codes: '2'}])} ` : '  ');
+    for (const char of line) {
+      time += PROMPT_TYPING_MS;
+      write(char);
+    }
+    write('\r\n');
+  });
+  screen.push(
+    ...promptLines.map((line, i) =>
+      i === 0 ? `${styled([{text: '>', codes: '2'}])} ${line}` : `  ${line}`,
+    ),
+  );
+  const addLines = (lines, msPerChar = 0) => {
+    screen.push(...lines);
+    for (const line of lines) {
+      time += stripColors(line).length * msPerChar;
+      write(`${line}\r\n`);
+    }
+  };
+  // a blank line goes before each answer and tool call, not before a result
+  const addBlock = (lines, msPerChar) => {
+    screen.push('');
+    write('\r\n');
+    addLines(lines, msPerChar);
+  };
+  let previous = messages[0]?.time ?? 0;
+  for (const {message, time: at} of messages) {
+    const content = message.message?.content;
+    if (
+      !['assistant', 'user'].includes(message.type) ||
+      !Array.isArray(content)
+    ) {
+      continue;
+    }
+    const cap = message.type === 'user' ? TOOL_WAIT_MS : MODEL_WAIT_MS;
+    time += Math.min(at - previous, cap);
+    previous = at;
+    for (const block of content) {
+      if (block.type === 'text' && block.text.trim() !== '') {
+        addBlock(textLines(block.text, width), ANSWER_MS_PER_CHAR);
+      } else if (block.type === 'tool_use') {
+        addBlock([toolCallLine(block, width, cwd)]);
+      } else if (block.type === 'tool_result') {
+        addLines(toolResultLines(block, width));
+      }
+    }
+  }
+  return {screen: screen.join('\n'), recording: {start: 0, events}};
+}
+
+async function runAssistant(example, ctx) {
+  const {assistant} = example;
+  const messages = await runClaude(example, ctx);
+  const {recording, screen} = renderAssistant(
+    assistant.prompt,
+    messages,
+    assistant.size,
+    assistant.cwd(ctx),
+  );
+  fs.writeFileSync(
+    path.join(baseDir, 'tmp', `${example.id}.messages.json`),
+    JSON.stringify(messages),
+  );
+  const file = path.join(baseDir, 'tmp', `${example.id}.replay.json`);
+  fs.writeFileSync(file, JSON.stringify(recording));
+  return {screen, recording: file};
+}
+
 function waitForFile(file, deadline = Date.now() + 10000) {
   if (fs.existsSync(file)) {
     return Promise.resolve();
@@ -452,10 +832,16 @@ function replaceLocalDetails(text, url) {
       .join(shownBaseDir)
       .split(url)
       .join(shownUrl)
-      // a panel too narrow for the whole URL shows only the start of the port
-      .replace(/http:\/\/localhost:(\d+)(?!\d)/g, (match, digits) =>
-        port.startsWith(digits) ? shownUrl.slice(0, match.length) : match,
-      )
+      // the port also shows without the URL around it, and a panel too narrow
+      // for the whole URL shows only its start
+      .replace(/localhost:(\d+)(?!\d)/g, (match, digits) => {
+        if (digits === port) {
+          return `localhost:${shownPort}`;
+        }
+        return port.startsWith(digits)
+          ? `localhost:${shownPort.slice(0, digits.length)}`
+          : match;
+      })
       .split(os.homedir())
       .join('~')
   );
@@ -494,17 +880,22 @@ const KEY_LABELS = {Down: '↓', Up: '↑', Left: '←', Right: '→', Escape: '
 // Turns a pane recording into the replay played on the doc page: the command
 // is typed after a `$ ` prompt, then the command's output plays with its own
 // timing, except that loading plays faster and long pauses are shortened.
-// Each key press is a `{time, key, caption}` event in the replay.
+// Each key press is a `{time, key, caption}` event in the replay. A recording
+// without a `shownCommand` (an assistant session) shows its own prompt, and
+// has no loading to speed up.
 function buildReplay(recorded, keyPresses, shownCommand, url, size) {
-  const events = [{time: 300, content: '$ '}];
+  const events = [];
   let time = 300;
-  const typed = replaceLocalDetails(shownCommand, url).replace(/^\$ /, '');
-  for (const char of typed) {
-    time += TYPING_MS;
-    events.push({time, content: char});
+  if (shownCommand != null) {
+    events.push({time, content: '$ '});
+    const typed = replaceLocalDetails(shownCommand, url).replace(/^\$ /, '');
+    for (const char of typed) {
+      time += TYPING_MS;
+      events.push({time, content: char});
+    }
+    time += ENTER_MS;
+    events.push({time, content: '\r\n'});
   }
-  time += ENTER_MS;
-  events.push({time, content: '\r\n'});
   const presses = keyPresses.map(({step, time: pressedAt}) => ({
     time: pressedAt - recorded.start,
     key: step.keys.map((key) => KEY_LABELS[key] ?? key).join(' '),
@@ -514,7 +905,7 @@ function buildReplay(recorded, keyPresses, shownCommand, url, size) {
     (a, b) => a.time - b.time,
   );
   let previous = 0;
-  let loading = true;
+  let loading = shownCommand != null;
   for (const {time: at, ...event} of recordedEvents) {
     let gap = at - previous;
     previous = at;
@@ -529,7 +920,7 @@ function buildReplay(recorded, keyPresses, shownCommand, url, size) {
     const last = events[events.length - 1];
     if (
       event.content != null &&
-      last.content != null &&
+      last?.content != null &&
       last.content !== '\r\n' &&
       time - last.time < FRAME_MS
     ) {
@@ -569,6 +960,55 @@ function findForbidden(text) {
   return stripColors(text)
     .split('\n')
     .filter((line) => patterns.some((pattern) => pattern.test(line)));
+}
+
+// Writes an example's output and, if it was recorded, its replay, after
+// checking that neither shows internal details. A command example's output
+// starts with its `shownCommand`; an assistant session's starts with its
+// prompt.
+function writeExample(example, result, url, failures) {
+  const {keyPresses = [], recording, screen, shownCommand = null} = result;
+  const output = normalize(
+    shownCommand == null ? screen : `${shownCommand}\n${screen}`,
+    url,
+  );
+  const forbidden = findForbidden(output);
+  if (forbidden.length > 0) {
+    failures.push(
+      `${example.id}: internal details in the output:\n  ${forbidden.join('\n  ')}`,
+    );
+    return;
+  }
+  fs.writeFileSync(path.join(outputDir, `${example.id}.txt`), output);
+  if (recording == null) {
+    return;
+  }
+  const size = example.assistant?.size ?? example.tui.size;
+  const replay = buildReplay(
+    JSON.parse(fs.readFileSync(recording, 'utf8')),
+    keyPresses,
+    shownCommand,
+    url,
+    size,
+  );
+  const played = stripEscapes(
+    replay.events.map((e) => e.content ?? e.caption ?? '').join(''),
+  );
+  const leaked = findForbidden(played);
+  if (played.includes(baseDir)) {
+    leaked.push(baseDir);
+  }
+  if (leaked.length > 0) {
+    failures.push(
+      `${example.id}: internal details in the replay:\n  ${leaked.join('\n  ')}`,
+    );
+    return;
+  }
+  fs.mkdirSync(replayDir, {recursive: true});
+  fs.writeFileSync(
+    path.join(replayDir, `${example.id}.json`),
+    formatReplay(replay),
+  );
 }
 
 async function main() {
@@ -611,7 +1051,11 @@ async function main() {
       if (!selected && !example.setup && !example.required) {
         continue;
       }
-      const args = example.args(ctx);
+      // an assistant session runs `claude`, so it has to be asked for
+      if (example.assistant != null && options.only?.has(example.id) !== true) {
+        continue;
+      }
+      const args = example.assistant == null ? example.args(ctx) : null;
       const browserArgs = example.browser
         ? ['--chromium-binary', options.chromiumBinary]
         : [];
@@ -623,51 +1067,24 @@ async function main() {
       }
       // the examples share one tmux server and later ones read earlier output
       // eslint-disable-next-line no-await-in-loop
-      const {keyPresses, recording, screen} = await runInTerminal(
-        example,
-        memlabCommand([...args, ...browserArgs]),
-        env,
-      );
+      const {keyPresses, recording, screen} = await (args == null
+        ? runAssistant(example, ctx)
+        : runInTerminal(
+            example,
+            memlabCommand([...args, ...browserArgs]),
+            env,
+          ));
       if (example.setup || !selected) {
         continue;
       }
-      const shownCommand = `$ memlab ${args.map(shellQuote).join(' ')}`;
-      const output = normalize(`${shownCommand}\n${screen}`, url);
-      const forbidden = findForbidden(output);
-      if (forbidden.length > 0) {
-        failures.push(
-          `${example.id}: internal details in the output:\n  ${forbidden.join('\n  ')}`,
-        );
-        continue;
-      }
-      fs.writeFileSync(path.join(outputDir, `${example.id}.txt`), output);
-      if (recording != null) {
-        const replay = buildReplay(
-          JSON.parse(fs.readFileSync(recording, 'utf8')),
-          keyPresses,
-          shownCommand,
-          url,
-          example.tui.size,
-        );
-        const played = stripEscapes(
-          replay.events.map((e) => e.content ?? e.caption ?? '').join(''),
-        );
-        const leaked = findForbidden(played);
-        if (played.includes(baseDir)) {
-          leaked.push(baseDir);
-        }
-        if (leaked.length > 0) {
-          failures.push(
-            `${example.id}: internal details in the replay:\n  ${leaked.join('\n  ')}`,
-          );
-          continue;
-        }
-        fs.mkdirSync(replayDir, {recursive: true});
-        fs.writeFileSync(
-          path.join(replayDir, `${example.id}.json`),
-          formatReplay(replay),
-        );
-      }
+      const shownCommand =
+        args == null ? null : `$ memlab ${args.map(shellQuote).join(' ')}`;
+      writeExample(
+        example,
+        {screen, recording, keyPresses, shownCommand},
+        url,
+        failures,
+      );
     }
   } finally {
     tmux(['kill-server']);

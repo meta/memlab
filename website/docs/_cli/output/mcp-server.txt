@@ -1,0 +1,93 @@
+[2m>[0m These heap snapshots were taken while I opened and closed the settings dialog of my app four times
+  (run.json lists them in order). Is something leaking? If so, show me the retainer trace that keeps
+  it alive, and how much memory a fix would save.
+
+[32m●[0m memlab - [1mmemlab_round_audit[0m (MCP)(run_dir: ".")
+  ⎿  [2mRound audit — `.`[0m
+     [2mVerdict: CAVEATED[0m
+     [2mUsable, but the caveats above have to travel with any number taken from it. A caveat dropped b…[0m
+     [2m… +9 lines[0m
+
+[32m●[0m memlab - [1mmemlab_leak_report[0m (MCP)(run_dir: ".")
+  ⎿  [2mLeak report (5 snapshots)[0m
+     [2mHeap self-size grew by 3.5 MB across the ladder (32,187 → 38,703 nodes).[0m
+     [2m5 of 5 rung(s) were answered from a sidecar index (`<snapshot>.memlab-index.json`) instead of …[0m
+     [2m> UNSETTLED — this round captured no settle rung, so nothing below distinguishes a leak from i…[0m
+     [2m… +20 lines[0m
+
+[32m●[0m memlab - [1mmemlab_batch[0m (MCP)(load: "s9.heapsnapshot", steps: [{"tool":"memlab_retainer_trace","arg…
+  ⎿  [2mBatch: 4 of 4 step(s) run[0m
+     [2mStep 1/4: `memlab_load_snapshot`[0m
+     [2mLoaded s9.heapsnapshot (3.7 MB on disk): 38,703 nodes, 182,152 edges, 4.5 MB heap size (Browse…[0m
+     [2mMemory: ~8,165 MB of the ~8,240 MB old-space limit still free after this load.[0m
+     [2m… +59 lines[0m
+
+[32m●[0m memlab - [1mmemlab_batch[0m (MCP)(steps: [{"tool":"memlab_retainer_trace","args":{"node_id":104585,"exp…
+  ⎿  [2mBatch: 5 of 5 step(s) run[0m
+     [2mStep 1/5: `memlab_retainer_trace`[0m
+     [2mRetainer trace for @104585 (6 nodes):[0m
+     [2m(top = GC root; each node is retained by the one above it)[0m
+     [2m… +67 lines[0m
+
+[32m●[0m memlab - [1mmemlab_batch[0m (MCP)(steps: [{"tool":"memlab_island_doors","args":{"seed_class":"Detached …
+  ⎿  [2mBatch: 3 of 3 step(s) run[0m
+     [2mStep 1/3: `memlab_island_doors`[0m
+     [2mIsland doors[0m
+     [2mIsland (`detached`): 1,992 nodes / 176.6 KB self, seeded from 4 detached node(s). Live graph w…[0m
+     [2m… +31 lines[0m
+
+[32m●[0m memlab - [1mmemlab_batch[0m (MCP)(steps: [{"tool":"memlab_retainer_trace","args":{"node_id":120393}},{"…
+  ⎿  [2mBatch: 3 of 3 step(s) run[0m
+     [2mStep 1/3: `memlab_retainer_trace`[0m
+     [2mRetainer trace for @120393 (8 nodes):[0m
+     [2m(top = GC root; each node is retained by the one above it)[0m
+     [2m… +32 lines[0m
+
+● Found it: each closed dialog is kept alive by an [36meventBus[0m listener (~790 KB per dialog), plus a
+  global [36mopenedDialogs[0m Set that holds its DOM. Checking what that 787 KB is made of.
+
+[32m●[0m memlab - [1mmemlab_batch[0m (MCP)(steps: [{"tool":"memlab_drill_to_heavy_leaf","args":{"node_id":120393…
+  ⎿  [2mBatch: 3 of 3 step(s) run[0m
+     [2mStep 1/3: `memlab_drill_to_heavy_leaf`[0m
+     [2mDrill from @120393 — 2 hop(s) followed[0m
+     [2mStopped because this node dominates nothing — it is a leaf.[0m
+     [2m… +24 lines[0m
+
+[32m●[0m memlab - [1mmemlab_get_references[0m (MCP)(node_id: 120393, limit: 10)
+  ⎿  [2m{"snapshot":"s9","node_id":120393,"references":[{"edge":"history","edge_type":"property","node…[0m
+
+● Yes. Each open/close of the settings dialog leaks the whole [36mSettingsDialog[0m. The last snapshot
+  holds 4 closed instances, one per cycle, and the count rose at every step: 240 detached [36m<div>[0ms and
+  about 875 KB of heap per cycle.
+
+  What keeps each dialog alive is its [36mhandleThemeChange[0m listener, which is still registered on
+  [36mwindow.eventBus[0m. Its closure captures the dialog as [36mthis[0m/[36mdialog[0m:
+
+  [36m@33471 Window / http://localhost:3000 (native)  ← GC root[0m
+  [36m  .global_object → @33803 Window [JSGlobalObject] / http://localhost:3000 (object)[0m
+  [36m  .eventBus → @47965 Object (object)[0m
+  [36m  .listeners → @50799 Array (object)[0m
+  [36m  [3] → @119723 Object (object)[0m
+  [36m  .listener → @121371 handleThemeChange (closure)[0m
+  [36m  .context → @120401 system / Context / scope @65769 (object)[0m
+  [36m  .this → @120393 SettingsDialog (object)  ← leaked, 787.5 KB[0m
+
+  There is a second reference you have to remove too. The global [36mopenedDialogs[0m Set ([36m.table[0m → [36m[i][0m)
+  still holds each dialog's [36mDetached[0m [36m<div[0m [36mclass="settings">[0m. A scan of every reference into the
+  detached DOM found exactly these two app-side holders: that Set and [36mSettingsDialog.container[0m.
+
+  Each dialog still has an [36munsubscribe[0m closure stored on it, so the close path apparently never
+  calls it. The fix: call [36munsubscribe()[0m on close and [36mopenedDialogs.delete(container)[0m.
+
+  What a fix saves, measured on the last snapshot:
+  - Removing the dialogs frees 3.1 MB (68% of a 4.5 MB heap), about 787 KB per open/close. 99% of
+    that is each dialog's [36mhistory[0m array (781 KB).
+  - Clearing the Set frees another ~177 KB of detached DOM (1,992 nodes).
+  - Together that's ~3.3 MB, which covers almost all of the 3.5 MB the heap grew.
+
+  Caveats:
+  - There is no settle rung (idle + GC), so this can't yet be told apart from in-flight work. A
+    dialog that is closed and still on the bus is very unlikely to be that, though.
+  - Only 4 cycles were driven.
+  - Both roots are page globals ([36meventBus[0m, [36mopenedDialogs[0m). Confirm they're your app's and not a test
+    harness's.

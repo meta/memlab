@@ -30,6 +30,14 @@
 // session is also recorded for the replay on the doc page: each step presses
 // `keys` and waits `waitMs`, and the doc page shows the keys with the step's
 // `caption`.
+//
+// An `assistant` entry records Claude Code answering `prompt` with the MCP
+// server's tools, for a replay outside the CLI pages: in `cwd(ctx)`, after
+// `prepare(ctx)`, shown in a terminal of `size`. It runs `claude`, so it is
+// only recorded when named with `--only`.
+
+const fs = require('fs');
+const path = require('path');
 
 const examples = [
   // runs whose snapshots the other examples read
@@ -389,6 +397,35 @@ const examples = [
   {id: 'list', args: () => ['list']},
   {id: 'get-default-work-dir', args: () => ['get-default-work-dir']},
   {id: 'reset', args: (ctx) => ['reset', '--work-dir', ctx.workDir('reset')]},
+
+  // the MCP server's tools, run with `memlab-cli` on the snapshots of the
+  // setup-series run, for the MCP server doc page
+  {
+    id: 'mcp-server',
+    assistant: {
+      size: {columns: 100, rows: 32},
+      cwd: (ctx) => ctx.snapshotDir('series'),
+      // the snapshots after the page loaded and after each time the dialog
+      // closed, as a ladder for the tools that measure growth per cycle
+      prepare(ctx) {
+        const rungs = [1, 3, 5, 7, 9].map((n, cycles) => ({
+          path: `s${n}.heapsnapshot`,
+          cycles,
+        }));
+        const lines = rungs.map((rung) => `    ${JSON.stringify(rung)}`);
+        fs.writeFileSync(
+          path.join(ctx.snapshotDir('series'), 'run.json'),
+          `{\n  "rungs": [\n${lines.join(',\n')}\n  ],\n` +
+            '  "totals": {"cycles": 4, "ok": 4}\n}\n',
+        );
+      },
+      prompt:
+        'These heap snapshots were taken while I opened and closed the ' +
+        'settings dialog of my app four times (run.json lists them in ' +
+        'order). Is something leaking? If so, show me the retainer trace ' +
+        'that keeps it alive, and how much memory a fix would save.',
+    },
+  },
 ];
 
 module.exports = examples;
