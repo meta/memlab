@@ -13,7 +13,9 @@ import Timeline from './Timeline';
 // `stdouts` are `{time, content}` writes to the terminal; an event without
 // `content` is a key press, which is passed to `onKey` when it plays
 export default function createTimeline(term, stdouts, onKey) {
-  const totalTime = stdouts[stdouts.length - 1].time;
+  // a marker plays once the position passes its time, so the timeline has to
+  // run past the last event for that event to play
+  const totalTime = stdouts[stdouts.length - 1].time + 1;
   const timeline = new Timeline({length: totalTime, frequency: 10});
 
   class Marker {
