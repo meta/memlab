@@ -784,7 +784,7 @@ export function registerDetachedDom(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'With `group_by`: an earlier snapshot of the same page session, e.g. the first rung. Each group then shows how many of its nodes were already detached there ("At baseline") and how many are new, and groups are sorted by new nodes: a group that was all there at baseline is a standing population, not what the round grew. Node ids are compared, so there must be no reload between the two.',
+          'With `group_by`: an earlier snapshot of the same page session, e.g. the first rung: a resident handle or a snapshot path. Each group then shows how many of its nodes were already detached there ("At baseline") and how many are new, and groups are sorted by new nodes: a group that was all there at baseline is a standing population, not what the round grew. Node ids are compared, so there must be no reload between the two.',
         ),
       island_doors: z
         .boolean()

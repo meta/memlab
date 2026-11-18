@@ -22,6 +22,7 @@ import {
   findResidentByPath,
   pinHandle,
   getMetadataByHandle,
+  resolveHandle,
   getSnapshotByHandle,
   removeSnapshot,
   getSessionHandle,
@@ -307,6 +308,25 @@ export function resolveRungs(
   const rungs: ResolvedRung[] = [];
   let largestMB = 0;
   for (const p of paths) {
+    // A resident HANDLE is accepted wherever a rung path is: the borrow below
+    // then reuses the resident graph by its file path instead of failing with
+    // "File not found: <cwd>/<handle>". Only a reference that is not itself a
+    // readable file is looked up, so a path always means that file.
+    if (!fs.existsSync(p)) {
+      let handle: string | null = null;
+      try {
+        handle = resolveHandle(p);
+      } catch {
+        // Ambiguous basename: fall through to the path error below.
+      }
+      const meta = handle != null ? getMetadataByHandle(handle) : null;
+      if (meta != null && fs.existsSync(meta.filePath)) {
+        const sizeMB = fs.statSync(meta.filePath).size / (1024 * 1024);
+        largestMB = Math.max(largestMB, sizeMB);
+        rungs.push({label: meta.fileName, localPath: meta.filePath, sizeMB});
+        continue;
+      }
+    }
     const {localPath, fetchedFrom} = resolveSnapshotPath(p);
     if (!fs.existsSync(localPath)) {
       throw new Error(`File not found: ${localPath}`);

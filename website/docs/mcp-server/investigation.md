@@ -56,6 +56,9 @@ snapshots that are loaded after it. A load without `keep_previous` that
 unloads a snapshot loaded in the last two minutes says so, because that is
 usually a comparison that needed `keep_previous: true`.
 
+A parameter that takes a snapshot path, such as `baseline` or `paths`, also
+takes a loaded snapshot's handle, and then reuses the loaded graph.
+
 `memlab_snapshots` lists the loaded snapshots, switches the *active* one that
 tools read by default, and unloads the ones you are done with. Every loaded
 snapshot holds its whole graph in memory, so unload what you don't need.
