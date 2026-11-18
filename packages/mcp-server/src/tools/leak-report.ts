@@ -269,6 +269,12 @@ interface ExternalStrings {
   scriptBytes: number;
   /** The newest script sources: [script name, bytes], highest id first. */
   newestScripts: Array<{id: number; name: string; bytes: number}>;
+  /**
+   * Script name -> the Script nodes whose source is one of these external
+   * strings. Two of them is the bundle's source held twice; two Script nodes
+   * of one name that share a source (V8 bookkeeping) are not.
+   */
+  sourceScripts: Map<string, Set<number>>;
 }
 
 function noteExternalString(acc: ExternalStrings, node: IHeapNode): void {
@@ -277,6 +283,9 @@ function noteExternalString(acc: ExternalStrings, node: IHeapNode): void {
   if (script == null) return;
   acc.scriptBytes += node.self_size;
   const name = scriptName(script) ?? `@${script.id}`;
+  const ids = acc.sourceScripts.get(name) ?? new Set<number>();
+  ids.add(script.id);
+  acc.sourceScripts.set(name, ids);
   acc.newestScripts.push({id: node.id, name, bytes: node.self_size});
   acc.newestScripts.sort((a, b) => b.id - a.id);
   if (acc.newestScripts.length > 3) acc.newestScripts.pop();
@@ -288,12 +297,11 @@ function noteExternalString(acc: ExternalStrings, node: IHeapNode): void {
  * name is loaded more than once (the same bundle twice). Null when script
  * source is under 80% of the class's bytes.
  */
-function codeLoaded(
-  acc: ExternalStrings,
-  scriptsByName: ReadonlyMap<string, number>,
-): string | null {
+function codeLoaded(acc: ExternalStrings): string | null {
   if (acc.bytes === 0 || acc.scriptBytes < 0.8 * acc.bytes) return null;
-  const dup = [...scriptsByName].find(([, count]) => count > 1);
+  const dup = [...acc.sourceScripts]
+    .map(([name, ids]): [string, number] => [name, ids.size])
+    .find(([, count]) => count > 1);
   // A bundle URL's query (`?…&sourcemaps=1`) is the same on every script;
   // its path's last segment is what tells them apart.
   const short = (n: string) => {
@@ -831,13 +839,11 @@ export function registerLeakReport(server: McpServer): void {
           shapeRows.map(r => [r.key, []]),
         );
         const snapshot = await getFullHeapFromFile(steps[n - 1].localPath);
-        // Script name -> how many `system / Script` nodes carry it, for the
-        // CODE LOADED verdict's duplication check.
-        const scriptsByName = new Map<string, number>();
         const externalStrings: ExternalStrings = {
           bytes: 0,
           scriptBytes: 0,
           newestScripts: [],
+          sourceScripts: new Map(),
         };
         const devRoots = collectDevRoots(snapshot);
         const reached =
@@ -871,12 +877,6 @@ export function registerLeakReport(server: McpServer): void {
           );
           if (node.name === 'system / ExternalStringData') {
             noteExternalString(externalStrings, node);
-          }
-          if (node.type === 'code' && isScript(node)) {
-            const name = scriptName(node);
-            if (name != null) {
-              scriptsByName.set(name, (scriptsByName.get(name) ?? 0) + 1);
-            }
           }
           if (
             shapeNewest.size > 0 &&
@@ -1298,9 +1298,9 @@ export function registerLeakReport(server: McpServer): void {
                 : `🛠 flag-gated MODULE (${ev.gatedWhy ?? 'off in production'})`;
           } else if (
             r.key === EXTERNAL_STRING_KEY &&
-            codeLoaded(externalStrings, scriptsByName) != null
+            codeLoaded(externalStrings) != null
           ) {
-            verdict = codeLoaded(externalStrings, scriptsByName) as string;
+            verdict = codeLoaded(externalStrings) as string;
           } else if (drained && settle != null && !settle.present) {
             // Absent from the settle histogram is still a drain — nothing of
             // the class survived — but it is a drain measured by ABSENCE,
