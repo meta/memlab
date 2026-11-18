@@ -688,6 +688,10 @@ const GROUPS: Group[] = [
         'One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new. A `positive_control.json` from the sweep runner heads it with PASS, or SWEEP VOID when the control did not reproduce.',
       ],
       [
+        'memlab_activity_report',
+        'Work without retention: per combo, request rate, resource errors, rejections, long-task time and error-screen time from the samples taken between rungs, ranked against the idle control round, with the most-requested paths and their HTTP statuses. Finds request loops and stuck error screens that leave the heap flat.',
+      ],
+      [
         'memlab_round_audit',
         'Read a round’s run.json BEFORE analysing it, so a broken bring-up is caught before its numbers travel into a write-up. Flags rungs taken while the app’s error fallback was on screen. Also names recorded fixes whose `fixed_behind` prop the build does not serve (absent from the registry, or read by no served code).',
       ],

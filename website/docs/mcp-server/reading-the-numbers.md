@@ -157,6 +157,20 @@ heap after garbage collection, detached DOM nodes, leak candidates, a
 comparison with the previous round, and TODO lines for your reading and the
 next step.
 
+### Work Without Retention
+
+Some problems leave the heap flat: a request loop, a retry storm, an error
+screen that never goes away. A leak report cannot see them. When a round
+samples the page between rungs (`samples.jsonl`), `memlab_activity_report({run_dir})`
+credits each sample's counters to the combo that was driving. It reports per
+combo the requests per minute, resource errors, unhandled rejections,
+long-task time and time on an error screen. Rows are ranked against the idle
+control round (`baseline_run_dir`, or a sibling directory named `*idle*`), or
+against the round as a whole when there is none. Below the table it lists the
+most-requested paths with their HTTP statuses, from the per-rung request
+windows in run.json. A combo making ten times the requests of the control is
+flagged.
+
 ### Rounds From Another Machine
 
 A round's directory stays on the machine that ran it. When the home directory

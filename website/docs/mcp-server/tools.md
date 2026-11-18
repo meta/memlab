@@ -22,7 +22,7 @@ prints with `memlab_tools`.
 | [Inspect objects](./tools/inspect.md) | Inspect or find specific objects | 17 |
 | [Custom queries](./tools/ask.md) | None of the above — ask the heap directly | 4 |
 | [Sharing a capture](./tools/sharing.md) | Sharing a capture outside its trust boundary | 1 |
-| [Session and batching](./tools/session.md) | Session, batching and write-ups | 13 |
+| [Session and batching](./tools/session.md) | Session, batching and write-ups | 14 |
 
 <!-- end of tool groups -->
 
