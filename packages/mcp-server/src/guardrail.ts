@@ -442,15 +442,27 @@ function terseOutput(name: string, result: unknown): unknown {
   return result;
 }
 
-/** A per-call `format: "json"` on the tools in `JSON_FORMAT_TOOLS`. */
-function jsonOutput(name: string, params: unknown, result: unknown): unknown {
-  const r = result as TextResult;
-  const wantsJson =
+function wantsJson(name: string, params: unknown): boolean {
+  return (
     JSON_FORMAT_TOOLS.has(name) &&
     params != null &&
     typeof params === 'object' &&
-    (params as {format?: unknown}).format === 'json';
-  if (!wantsJson || !Array.isArray(r?.content) || r.isError === true) {
+    (params as {format?: unknown}).format === 'json'
+  );
+}
+
+/**
+ * A per-call `format: "json"` on the tools in `JSON_FORMAT_TOOLS`. Parsed
+ * from the untrimmed markdown: the session's terse mode and standing-note
+ * trimming are for a reader, and must not change a machine-read report.
+ */
+function jsonOutput(name: string, params: unknown, result: unknown): unknown {
+  const r = result as TextResult;
+  if (
+    !wantsJson(name, params) ||
+    !Array.isArray(r?.content) ||
+    r.isError === true
+  ) {
     return result;
   }
   const markdown = r.content
@@ -534,11 +546,9 @@ export function installAnalysisGuardrail(server: McpServer): void {
                   : inner(...hArgs),
               ),
           );
-          return jsonOutput(
-            name,
-            params,
-            trimStandingNotes(terseOutput(name, result)),
-          );
+          return wantsJson(name, params)
+            ? jsonOutput(name, params, result)
+            : trimStandingNotes(terseOutput(name, result));
         } catch (e) {
           if (e instanceof ScanTimeoutError) {
             const ran = Math.round(activeElapsedMs() / 1000);

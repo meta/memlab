@@ -95,6 +95,18 @@ function cutVerdictTail(line: string): string {
   if (first != null && first.length <= VERDICT_TAIL_MAX) {
     return `${m[1]} ${first}`;
   }
+  if (first == null) {
+    // No sentence to keep: keep the start of the tail, cut at a word, rather
+    // than dropping numbers the verdict may carry there.
+    const tail = rest.trim();
+    if (tail.length <= VERDICT_TAIL_MAX) return `${m[1]} ${tail}`;
+    const cut = tail.slice(0, VERDICT_TAIL_MAX);
+    // Drop the last word only when the cut split it.
+    const word = /\S/.test(tail[VERDICT_TAIL_MAX])
+      ? cut.replace(/\s+\S*$/, '')
+      : cut.trimEnd();
+    return `${m[1]} ${word.length > 0 ? word : cut}…`;
+  }
   return /[.!?:]\*\*$/.test(m[1]) ? m[1] : `${m[1]}${colon}`;
 }
 
@@ -304,7 +316,13 @@ export function markdownToJson(tool: string, markdown: string): JsonReport {
     if (/^`{3,}csv$/.test(t)) {
       const fence = t.replace(/csv$/, '');
       const body: string[] = [];
-      for (i++; i < lines.length && lines[i].trim() !== fence; i++) {
+      // Closed by a fence at least as long as the opening one, as above.
+      for (
+        i++;
+        i < lines.length &&
+        !(lines[i].trim().startsWith(fence) && /^`+$/.test(lines[i].trim()));
+        i++
+      ) {
         body.push(lines[i]);
       }
       if (body.length > 0) {
@@ -339,15 +357,38 @@ export function markdownToJson(tool: string, markdown: string): JsonReport {
 }
 
 /** Unpadded markdown: the alignment padding is most of a wide table's tokens. */
+/** `|` outside a code span, escaped so it stays inside its cell. */
+function escapeCell(cell: string): string {
+  let out = '';
+  let code = false;
+  for (let i = 0; i < cell.length; i++) {
+    const ch = cell[i];
+    if (ch === '\\' && cell[i + 1] === '|') {
+      out += '\\|';
+      i++;
+    } else if (ch === '`') {
+      code = !code;
+      out += ch;
+    } else {
+      out += ch === '|' && !code ? '\\|' : ch;
+    }
+  }
+  // A cell ending in a backslash would escape the next column's `|`; the
+  // space is trimmed away when the row is read back.
+  return /(^|[^\\])(\\\\)*\\$/.test(out) ? `${out} ` : out;
+}
+
 export function compactMarkdownTable(
   headers: string[],
   rows: string[][],
   alignRight?: Set<number>,
 ): string {
   return [
-    `|${headers.join('|')}|`,
+    `|${headers.map(escapeCell).join('|')}|`,
     `|${headers.map((_, i) => (alignRight?.has(i) ? '--:' : '---')).join('|')}|`,
-    ...rows.map(r => `|${headers.map((_, i) => r[i] ?? '').join('|')}|`),
+    ...rows.map(
+      r => `|${headers.map((_, i) => escapeCell(r[i] ?? '')).join('|')}|`,
+    ),
   ].join('\n');
 }
 

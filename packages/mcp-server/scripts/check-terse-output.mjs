@@ -132,3 +132,49 @@ test('compactMarkdownTable drops the padding', () => {
     '|a|n|\n|---|--:|\n|x|1|',
   );
 });
+
+test('a long verdict tail with no sentence end keeps its start', () => {
+  const tail = `${'held 1,234 of 5,678 objects across rungs '.repeat(5)}`;
+  const out = terseText(`## R\n\n**Settle:** ${tail}`);
+  assert.match(out, /\*\*Settle:\*\* held 1,234 of 5,678 objects .*…$/m);
+});
+
+test('a CSV block closed by a longer fence ends there', () => {
+  const j = markdownToJson(
+    't',
+    '```csv\nA,B\n1,2\n````\n\n| X |\n|---|\n| 3 |',
+  );
+  assert.equal(j.sections[0].tables.length, 2);
+  assert.deepEqual(j.sections[0].tables[1].rows[0], {X: 3});
+});
+
+test('compactMarkdownTable escapes a pipe outside code, and it round-trips', () => {
+  const table = compactMarkdownTable(['a|b', 'c'], [['x|y', '`p|q`']]);
+  assert.equal(table, '|a\\|b|c|\n|---|---|\n|x\\|y|`p|q`|');
+  assert.deepEqual(markdownToJson('t', table).sections[0].tables[0].rows[0], {
+    'a|b': 'x|y',
+    c: 'p|q',
+  });
+});
+
+test('a tail that fits, or is cut at a space, keeps its last word', () => {
+  const head = '**Settle:** ';
+  const fits = `${'x'.repeat(115)} 1234`;
+  assert.equal(
+    terseText(`## R\n\n${head}${fits}`).split('\n').pop(),
+    `${head}${fits}`,
+  );
+  const atSpace = `${'y'.repeat(115)} 1234 more words follow here`;
+  assert.match(
+    terseText(`## R\n\n${head}${atSpace}`),
+    new RegExp(`${'y'.repeat(115)} 1234…$`, 'm'),
+  );
+});
+
+test('a cell ending in a backslash keeps its column', () => {
+  const table = compactMarkdownTable(['p', 'n'], [['C:\\', '1']]);
+  assert.deepEqual(markdownToJson('t', table).sections[0].tables[0].rows[0], {
+    p: 'C:\\',
+    n: 1,
+  });
+});
