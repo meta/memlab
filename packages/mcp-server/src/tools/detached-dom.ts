@@ -14,6 +14,7 @@ import {ladderShape} from '../ladder-shape.js';
 import {normalizeClassName} from '../snapshot-index.js';
 import {z} from 'zod';
 import {jsonFormatParam} from '../terse-output.js';
+import {isDetachedElementName} from '../dom-names.js';
 import {getFilePath, getSnapshot, getSnapshotEnv} from '../heap-state.js';
 import {noteSnapshotRead} from '../read-scope.js';
 import type {IHeapNode, IHeapEdge, IHeapSnapshot} from '@memlab/core';
@@ -169,23 +170,6 @@ async function detachedGroupCountsAt(
     });
     return counts;
   });
-}
-
-/**
- * A DOM node (`Detached <div …>`, `Detached Text`) rather than one of the
- * Blink records that hang off it (`Detached blink::NodeRareData`,
- * `Detached SVGAnimatedLength`, …). The records move with their element, so
- * counting them as stranded nodes overstates what a leak left behind.
- */
-export function isDetachedElementName(name: string): boolean {
-  const n = name.replace(/^Detached\s+/, '');
-  return (
-    n.startsWith('<') ||
-    /^(Text|Comment|CDATASection|DocumentFragment|ShadowRoot|Attr|(HTML|XML)?Document)\b/.test(
-      n,
-    ) ||
-    /^(HTML|SVG|MathML)\w*Element\b/.test(n)
-  );
 }
 
 async function detachedLadder(args: {

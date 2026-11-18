@@ -25,6 +25,7 @@ import {sizeInput, withSizeHint} from '../byte-size.js';
 import {minifiedSignal} from '../minified.js';
 import {promiseReactions} from '../promise-chains.js';
 import {readProbeSets} from '../probe-sets.js';
+import {isDetachedElementName} from '../dom-names.js';
 import {
   buildPathTree,
   cachedFamilyResolver,
@@ -1112,10 +1113,13 @@ const HELPER_NAMES = [
   'componentName',
   'contextOf',
   'contextSlotCensus',
+  'countShapes',
+  'countStrings',
   'countUniqueTargets',
   'ctxVars',
   'defineFn',
   'derefPath',
+  'detachedElements',
   'detachedNamed',
   'dominates',
   'edgeTarget',
@@ -1611,7 +1615,7 @@ export function registerEval(server: McpServer): void {
             'iterByClass(name, {type?, instancesOnly?})->nodes[] & iterByType(type)->nodes[] (INDEXED iteration — no full scan; instancesOnly defaults TRUE and drops the constructor closure, the `Foo (prototype)` object and `system/SharedFunctionInfo/Foo`, which otherwise come back as class members whose only "properties" are length/map and make a per-instance loop produce garbage), ' +
             'classCounts({pattern?, type?, minCount?, baseline?, minDelta?})->[{name,type,count,selfSize, baselineCount?, delta?}] (one-pass histogram, cached; with `baseline` (a resident handle) only classes that grew by ≥minDelta, largest delta first), ' +
             "entries(nodeOrId, {limit?, keyPattern?})->[{key,value}] (generic Map/Set/WeakMap/Array/object walk, holes filtered; keyPattern is a case-insensitive regex on the key or the key node's name), " +
-            'edgeTarget(nodeOrId, edgeName)->node|null, walkChain(startOrNode, edgeName, {maxHops?, collectIds?})->{length, terminated:"cycle"|"end"|"cap", truncated} (USE THIS instead of a hand-written `while` over `.next` — a hand-rolled loop cannot tell a circular list from its own hop cap, and reports the cap as if it were the length), isRealDetached(node)->boolean (same filtering the tools apply internally), ' +
+            'edgeTarget(nodeOrId, edgeName)->node|null, walkChain(startOrNode, edgeName, {maxHops?, collectIds?})->{length, terminated:"cycle"|"end"|"cap", truncated} (USE THIS instead of a hand-written `while` over `.next` — a hand-rolled loop cannot tell a circular list from its own hop cap, and reports the cap as if it were the length), isRealDetached(node)->boolean (same filtering the tools apply internally), detachedElements()->ids[] (detached DOM elements only, not the Blink records attached to them), countShapes({name: [props]})->{name: count} (plain objects having every listed property, through the property index), countStrings(regex, {prefix?})->number (string nodes matching; `prefix` narrows through the prefix buckets), ' +
             'dominates(id, {population?, limit?})->{count,selfSize,ids,truncated}, ' +
             'remember(name, value)/recall(name?) (persist ACROSS sessions), ' +
             'sample(items, n) (deterministic, evenly spaced), ' +
@@ -3517,6 +3521,71 @@ export async function runEval({
     };
 
     /**
+     * Detached DOM elements (`Detached <div …>`, `Detached Text`), not the
+     * Blink records attached to them. A per-rung count of these is the number
+     * of nodes a leak strands; counting every detached node mostly counts
+     * `blink::NodeRareData` and the like.
+     */
+    const detachedElements = (): number[] => {
+      const out: number[] = [];
+      snapshot.nodes.forEach((node: IHeapNode) => {
+        if (isRealDetached(node) && isDetachedElementName(node.name)) {
+          out.push(node.id);
+        }
+      });
+      return out;
+    };
+
+    /**
+     * Plain objects per named shape: `{name: [props]}` -> `{name: count}`. An
+     * object counts for a name when it has every listed property. Each name is
+     * narrowed through the property index on its least common property, so a
+     * census of several shapes is not one heap walk per name.
+     */
+    const countShapes = (
+      shapes: Record<string, readonly string[]>,
+    ): Record<string, number> => {
+      const out: Record<string, number> = {};
+      for (const [name, props] of Object.entries(shapes)) {
+        let narrowest: number[] | null = null;
+        for (const p of props) {
+          const ids = withProp(p, {edgeTypes: ['property']});
+          if (narrowest == null || ids.length < narrowest.length)
+            narrowest = ids;
+        }
+        out[name] = (narrowest ?? []).filter(id => hasShape(id, props)).length;
+      }
+      return out;
+    };
+
+    /**
+     * String nodes whose value matches `pattern`. `prefix` narrows the scan to
+     * the strings starting with it, through the same buckets as
+     * `stringsWithPrefix`; without it every string is tested.
+     */
+    const countStrings = (
+      pattern: RegExp | string,
+      opts?: {prefix?: string},
+    ): number => {
+      const source = typeof pattern === 'string' ? pattern : pattern.source;
+      const flags =
+        typeof pattern === 'string' ? '' : pattern.flags.replace(/[gy]/g, '');
+      const re = new RegExp(source, flags);
+      let n = 0;
+      if (opts?.prefix != null) {
+        for (const id of stringsWithPrefix(opts.prefix)) {
+          const node = snapshot.getNodeById(id);
+          if (node != null && re.test(node.name)) n++;
+        }
+        return n;
+      }
+      snapshot.nodes.forEach((node: IHeapNode) => {
+        if (node.isString && re.test(node.name)) n++;
+      });
+      return n;
+    };
+
+    /**
      * The scope object a closure captured, or null if it captured nothing.
      *
      * Exists because the hand-written version is wrong in a way that returns a
@@ -5005,6 +5074,9 @@ export async function runEval({
       listenerRecords,
       detachedNamed,
       isRealDetached,
+      detachedElements,
+      countShapes,
+      countStrings,
       iterByClass,
       nodesByClass,
       iterByType,
@@ -5884,6 +5956,9 @@ function describeEnvLines(): string[] {
     '- `helpers.edgeTarget(nodeOrId, edgeName) -> node | null` — the node behind a named edge, when you need the node and not the `{ref,name,type}` wrapper `props()` returns.',
     '- `helpers.walkChain(startOrNode, edgeName, {maxHops?, collectIds?}) -> {length, terminated: "cycle" | "end" | "cap", truncated}` — walk a linked structure (`.next` update queues, `.prev` closure chains, LRU lists) and report HOW it ended. Use this rather than a hand-written loop: React update queues are CIRCULAR, and a hand-rolled `while (next && next.id !== start)` with a hop guard reports the guard as the length. A measured case printed 800 for a chain of 2,066. `terminated: "cap"` means the length is a floor. For the full per-link report (what each link captures, distinct vs repeated) use the `memlab_chain_walk` tool.',
     '- `helpers.isRealDetached(node) -> boolean` — the oddball/root filtering the detached-DOM tools apply internally, so hand-written eval counts the same set they do.',
+    '- `helpers.detachedElements() -> ids[]` — detached DOM elements (`Detached <div …>`, `Detached Text`), without the Blink records attached to them.',
+    '- `helpers.countShapes({name: [props]}) -> {name: count}` — plain objects having every listed property, per name, through the property index.',
+    '- `helpers.countStrings(regex, {prefix?}) -> number` — string nodes whose value matches; `prefix` limits the scan to strings starting with it.',
     '- `helpers.dominates(id, {population?, limit?}) -> {count, selfSize, ids, truncated}` — what this node actually owns (bounded 500-hop dominator walk). `population` is a predicate over nodes.',
     '- `helpers.pathTree() -> {subtreeBytes(id), parent(id), children(id, {minBytes?, limit?}), roots()}` — the shortest-path tree with app bytes per subtree (loaded code and bundle text count 0). It PARTITIONS the heap, so a shared cache keeps its size. Built once per snapshot and kept across eval calls; `memlab_path_tree` prints it.',
     "- `helpers.familyOf(nodeOrId)`, `helpers.pathLabel(nodeOrId)`, `helpers.shapeFamily(nodeOrId)` — the memoized attribution `memlab_memory_partition` uses: nearest framework family on the dominator chain; first `module:<Name>.<export>` / `global:<name>` owner on the shortest path; the node's own record family. Per-snapshot memos persist across calls, so a whole-heap attribution walk costs one pass the first time and almost nothing after.",

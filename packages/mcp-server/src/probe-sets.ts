@@ -37,6 +37,8 @@ export interface ProbeSet {
   match?: string;
   /** Source run before every probe of the set. */
   prelude?: string;
+  /** The round `memlab_eval_across({use: [set]})` runs on when given none. */
+  run_dir?: string;
   probes: Record<string, SavedProbe>;
 }
 

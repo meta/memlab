@@ -159,6 +159,9 @@ Both eval tools also take:
 - `code_file`, a `.js` file to run instead of inline `code`.
 - `use`, a list of probe sets whose `prelude` runs first. Save setup that
   every probe repeats once, with `memlab_probes({mode: "save", set, prelude})`.
+  With `use` and no `code`, `memlab_eval_across` runs the sets' probes
+  themselves, one row per probe. It uses the set's saved `run_dir` when you
+  pass no `run_dir`, `paths` or `handles`.
 
 See [Advanced Analysis](./advanced-analysis.md#custom-queries) for what eval
 programs can do.

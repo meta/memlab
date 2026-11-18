@@ -21,7 +21,7 @@ import {
 export function registerProbes(server: McpServer): void {
   server.tool(
     'memlab_probes',
-    "Save named probes for an app once, and have the ladder tools run them by themselves. A probe is `memlab_eval` code assigning a number to `result`, with an optional `cap` and `expect` (`flat` / `bounded`). Probes live in named sets on disk (`~/.memlab/probes.json`, or `MEMLAB_STATE_DIR`). A set with `match` is picked up automatically by `memlab_ladder_probe`, `memlab_ab_compare` and `memlab_analysis_battery` when the round's URL filter contains it; any of them also takes `probes: <set>`. Modes: `save` (one probe, or the set's `match` / `prelude`), `list`, `show` (a set's code), `forget` (a probe, or a whole set).",
+    "Save named probes for an app once, and have the ladder tools run them by themselves. A probe is `memlab_eval` code assigning a number to `result`, with an optional `cap` and `expect` (`flat` / `bounded`). Probes live in named sets on disk (`~/.memlab/probes.json`, or `MEMLAB_STATE_DIR`). A set with `match` is picked up automatically by `memlab_ladder_probe`, `memlab_ab_compare` and `memlab_analysis_battery` when the round's URL filter contains it; any of them also takes `probes: <set>`. `memlab_eval_across({use: [set]})` with no `code` runs every probe of the set on every rung as one probe × rung table, on the set's saved `run_dir` when none is passed. Modes: `save` (one probe, or the set's `match` / `prelude` / `run_dir`), `list`, `show` (a set's code), `forget` (a probe, or a whole set).",
     {
       mode: z
         .enum(['save', 'list', 'show', 'forget'])
@@ -62,8 +62,25 @@ export function registerProbes(server: McpServer): void {
         .string()
         .optional()
         .describe('With `save`: source run before every probe of the set.'),
+      run_dir: z
+        .string()
+        .optional()
+        .describe(
+          'With `save`: the round `memlab_eval_across({use: [set]})` runs on when it is given no `run_dir`, `paths` or `handles`.',
+        ),
     },
-    async ({mode, set, name, code, cap, expect, note, match, prelude}) => {
+    async ({
+      mode,
+      set,
+      name,
+      code,
+      cap,
+      expect,
+      note,
+      match,
+      prelude,
+      run_dir,
+    }) => {
       try {
         const sets = readProbeSets();
         if (mode === 'list') {
@@ -106,6 +123,9 @@ export function registerProbes(server: McpServer): void {
               s.match != null
                 ? `Match: \`${s.match}\``
                 : 'No `match`: pass `probes: "' + set + '"` to use it.',
+              ...(s.run_dir != null
+                ? ['', `Default run_dir: \`${s.run_dir}\``]
+                : []),
               ...(s.prelude != null
                 ? ['', 'Prelude:', '```js', s.prelude, '```']
                 : []),
@@ -142,6 +162,7 @@ export function registerProbes(server: McpServer): void {
         const s = sets[set] ?? {probes: {}};
         if (match != null) s.match = match;
         if (prelude != null) s.prelude = prelude;
+        if (run_dir != null) s.run_dir = run_dir;
         if (name != null && name !== '') {
           if (code == null || code.trim() === '') {
             return errorResult(
@@ -156,10 +177,10 @@ export function registerProbes(server: McpServer): void {
             ...(expect != null ? {expect} : {}),
             ...(note != null ? {note} : {}),
           };
-        } else if (match == null && prelude == null) {
+        } else if (match == null && prelude == null && run_dir == null) {
           return errorResult(
             new Error(
-              '`save` needs `name` + `code`, or a set-level `match` / `prelude`.',
+              '`save` needs `name` + `code`, or a set-level `match` / `prelude` / `run_dir`.',
             ),
           );
         }

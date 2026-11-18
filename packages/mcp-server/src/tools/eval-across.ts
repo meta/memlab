@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import {withProbeSetCode} from '../probe-set-code.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {
@@ -167,7 +168,7 @@ export function registerEvalAcross(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe(
-          'Saved libraries (probe-set preludes) to run before `prelude`, as in `memlab_eval`.',
+          "Saved libraries (probe-set preludes) to run before `prelude`, as in `memlab_eval`. With no `code`, the probes of these sets are the code: each probe runs on every rung and the result is one probe × rung table, on the first set's saved `run_dir` when no `run_dir`, `paths` or `handles` is passed.",
         ),
       handles: z
         .array(z.string())
@@ -238,7 +239,7 @@ export function registerEvalAcross(server: McpServer): void {
     async raw => {
       let args: Omit<typeof raw, 'use' | 'code_file'>;
       try {
-        args = resolveEvalSource(raw);
+        args = resolveEvalSource(withProbeSetCode(raw));
       } catch (err) {
         return errorResult(err);
       }

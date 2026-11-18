@@ -118,7 +118,19 @@ memlab_probes({mode: 'save', set: 'myapp', match: 'myapp.example.com',
 Probes are saved in named sets in `~/.memlab/probes.json`. When a set's
 `match` is part of the round's URL filter, `memlab_ladder_probe`,
 `memlab_ab_compare` and `memlab_analysis_battery` run it without being asked,
-and print OK or VIOLATED for every probe with an `expect`. You can also pass
+and print OK or VIOLATED for every probe with an `expect`. A set can also save
+a `run_dir`. `memlab_eval_across({use: ['myapp']})`, with no `code`, then runs
+every probe of the set on every rung of that round and returns one table with a
+row per probe and a column per rung. With several sets, rows are named
+`<set>/<probe>`, so probes of the same name in two sets both show. A probe that
+throws or does not parse gets an `error: …` cell, and the other probes on that
+rung still run. An unknown set name is an error.
+
+Three helpers cover the counts such probes usually need:
+`helpers.countShapes({name: [props]})` counts plain objects that have every
+listed property, per name. `helpers.countStrings(regex, {prefix})` counts
+matching strings. `helpers.detachedElements()` returns detached DOM elements
+without the Blink records attached to them. You can also pass
 `probes: "<set>"` to choose a set, or `probes: "none"` for none. On
 `memlab_ladder_probe` and `memlab_ab_compare`, passing your own `metrics` also
 turns the automatic choice off.
