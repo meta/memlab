@@ -208,6 +208,9 @@ function readRungs(dir: string): RungRequests {
 const RATIO_FLOOR = 0.5;
 const LOOP_RATIO = 10;
 const MAX_LOOP_WARNINGS = 3;
+// Labels for samples taken before any combo was driven: page load and
+// bring-up, which request far more than an idle page by nature.
+const NOT_DRIVEN = new Set(['setup', '(untagged)']);
 
 export function registerActivityReport(server: McpServer): void {
   server.tool(
@@ -339,10 +342,11 @@ export function registerActivityReport(server: McpServer): void {
           '',
         ];
         // Every looping label, not only the top row: an error ratio can
-        // outrank a request loop. The worst loops first, so the cap below
-        // never hides one behind milder ones.
+        // outrank a request loop. Not the page's own load before driving.
+        // The worst loops first, so the cap below never hides one behind
+        // milder ones.
         const loops = ranked
-          .filter(a => load(a) >= LOOP_RATIO)
+          .filter(a => load(a) >= LOOP_RATIO && !NOT_DRIVEN.has(a.label))
           .sort((a, b) => load(b) - load(a));
         for (const a of loops.slice(0, MAX_LOOP_WARNINGS)) {
           const rate = Math.max(perMin(a, 'requests'), perMin(a, 'resources'));
