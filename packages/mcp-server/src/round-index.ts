@@ -45,10 +45,13 @@ export interface IndexedRound {
 /** Files at most this large are copied into the index. */
 export const INDEX_MAX_FILE_BYTES = 5 * 1024 * 1024;
 const COPIED = /\.(json|jsonl|txt|md)$|^round\.done$/i;
+// Copied whatever their size: without run.json a round is not found at all.
+const ALWAYS_COPIED = new Set(['run.json', 'round.done']);
 
 export function roundIndexRoot(): string {
+  // `||`, not `??`: an empty value means the default, as in the publisher.
   return (
-    process.env.MEMLAB_ROUND_INDEX ??
+    process.env.MEMLAB_ROUND_INDEX ||
     path.join(os.homedir(), '.memlab-mcp', 'rounds')
   );
 }
@@ -65,10 +68,13 @@ function readSummary(dir: string): RoundSummary | null {
 
 function listDirs(dir: string): string[] {
   try {
-    return fs
-      .readdirSync(dir, {withFileTypes: true})
-      .filter(d => d.isDirectory())
-      .map(d => d.name);
+    return (
+      fs
+        .readdirSync(dir, {withFileTypes: true})
+        // A dot entry is a publish still being staged.
+        .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+        .map(d => d.name)
+    );
   } catch {
     return [];
   }
@@ -83,7 +89,9 @@ export function indexedRounds(name?: string): IndexedRound[] {
   for (const a of app != null ? [app] : listDirs(root)) {
     for (const r of round != null ? [round] : listDirs(path.join(root, a))) {
       const dir = path.join(root, a, r);
-      if (!fs.existsSync(path.join(dir, 'run.json'))) continue;
+      if (r.startsWith('.') || !fs.existsSync(path.join(dir, 'run.json'))) {
+        continue;
+      }
       out.push({app: a, round: r, dir, summary: readSummary(dir)});
     }
   }
@@ -146,7 +154,12 @@ function copySmallFiles(from: string, to: string): number {
   for (const e of entries) {
     if (!e.isFile() || !COPIED.test(e.name)) continue;
     const src = path.join(from, e.name);
-    if (fs.statSync(src).size > INDEX_MAX_FILE_BYTES) continue;
+    if (
+      fs.statSync(src).size > INDEX_MAX_FILE_BYTES &&
+      !ALWAYS_COPIED.has(e.name)
+    ) {
+      continue;
+    }
     fs.mkdirSync(to, {recursive: true});
     fs.copyFileSync(src, path.join(to, e.name));
     copied++;

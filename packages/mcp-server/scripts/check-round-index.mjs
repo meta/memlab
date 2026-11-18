@@ -33,8 +33,13 @@ if (!fs.existsSync(built)) {
 }
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memlab-round-index-'));
 process.env.MEMLAB_ROUND_INDEX = path.join(tmp, 'index');
-const {resolveRoundDir, refreshIndexedRound, indexProvenance, publishedFrom} =
-  await import(pathToFileURL(built).href);
+const {
+  resolveRoundDir,
+  refreshIndexedRound,
+  indexProvenance,
+  publishedFrom,
+  roundIndexRoot,
+} = await import(pathToFileURL(built).href);
 
 function write(file, text) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
@@ -89,4 +94,26 @@ test('refresh copies analysis output, not snapshots', () => {
   );
   assert.ok(!fs.existsSync(path.join(entry, 'snapshots')));
   assert.equal(refreshIndexedRound(path.join(tmp, 'host-a', 'r9')), null);
+});
+
+test('a staging entry is not a round', () => {
+  write(path.join(tmp, 'index', 'web', '.r9.tmp123', 'run.json'), '{}');
+  assert.throws(
+    () => resolveRoundDir('.r9.tmp123'),
+    /no round of that name|not/,
+  );
+  assert.throws(() => resolveRoundDir('r9'), /no round of that name/);
+});
+
+test('an empty MEMLAB_ROUND_INDEX means the default root', () => {
+  const saved = process.env.MEMLAB_ROUND_INDEX;
+  process.env.MEMLAB_ROUND_INDEX = '';
+  try {
+    assert.equal(
+      roundIndexRoot(),
+      path.join(os.homedir(), '.memlab-mcp', 'rounds'),
+    );
+  } finally {
+    process.env.MEMLAB_ROUND_INDEX = saved;
+  }
 });
