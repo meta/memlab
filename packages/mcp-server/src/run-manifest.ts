@@ -45,6 +45,41 @@ export type CycleAxisSource =
   | 'assumed-even' // no better information; evenly spaced
   | 'none'; // no cycle information at all; x-axis is rung index
 
+export interface SettleIdle {
+  mode: 'auto' | 'fixed' | null;
+  idleMinutes: number | null;
+  stoppedQuiet: boolean;
+  /** Post-GC heap readings, seconds into the idle. */
+  curve: Array<{tS: number; heapMB: number}>;
+}
+
+function parseSettleIdle(
+  settle: Record<string, unknown> | null | undefined,
+  curveRaw: unknown,
+): SettleIdle | null {
+  if (settle == null) {
+    return null;
+  }
+  const curve = Array.isArray(curveRaw)
+    ? curveRaw.flatMap((p: unknown) => {
+        const point = p as {t_s?: unknown; heap_mb?: unknown} | null;
+        return point != null &&
+          typeof point.t_s === 'number' &&
+          typeof point.heap_mb === 'number'
+          ? [{tS: point.t_s, heapMB: point.heap_mb}]
+          : [];
+      })
+    : [];
+  return {
+    mode:
+      settle.mode === 'auto' || settle.mode === 'fixed' ? settle.mode : null,
+    idleMinutes:
+      typeof settle.idle_minutes === 'number' ? settle.idle_minutes : null,
+    stoppedQuiet: settle.stopped_quiet === true,
+    curve,
+  };
+}
+
 export interface RunManifest {
   /** Ordered rung snapshot paths, oldest first. */
   paths: string[];
@@ -93,6 +128,12 @@ export interface RunManifest {
    * should say UNSETTLED rather than quietly analysing the ladder alone.
    */
   settleRungPath: string | null;
+  /**
+   * How the settle idle ran: its length, whether `auto` stopped early because
+   * post-GC heap went quiet, and the post-GC readings taken during it. Null
+   * when the round has no settle rung or predates these fields.
+   */
+  settleIdle: SettleIdle | null;
   /**
    * Milliseconds since navigation at the moment the BASELINE rung was taken.
    *
@@ -448,6 +489,10 @@ export function loadRunManifest(runDir: string): RunManifest {
       (raw.config as Record<string, unknown> | undefined)?.combos,
     ),
     settleRungPath,
+    settleIdle: parseSettleIdle(
+      settleRaw as Record<string, unknown> | null | undefined,
+      raw.settle_curve,
+    ),
     isolateAgeMsAtBaseline: isolateAgeMs,
     positiveControls,
     droppedPositiveControls: Array.isArray(raw.positive_controls)

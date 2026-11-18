@@ -335,7 +335,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_settle_check',
-        'Backlog or leak? Compares a busy rung against one captured after idle + GC — growth that comes back was work in flight.',
+        'Backlog or leak? Compares a busy rung against one captured after idle + GC — growth that comes back was work in flight. With `run_dir`, also prints how long the idle ran and whether it stopped early once post-GC heap went quiet.',
       ],
       [
         'memlab_growth_signals',

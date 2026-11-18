@@ -25,7 +25,7 @@ import {
   clipTableColumn,
 } from '../utils.js';
 import {normalizeClassName, splitClassKey} from './sequence-analysis.js';
-import {loadRunManifest} from '../run-manifest.js';
+import {loadRunManifest, type SettleIdle} from '../run-manifest.js';
 
 interface ClassStats {
   count: number;
@@ -347,6 +347,27 @@ function heldPerCycleLine(
   ];
 }
 
+/** `idle   : auto, 2.0 min, stopped when post-GC heap went quiet (…)`. */
+function describeSettleIdle(idle: SettleIdle | null): string {
+  if (idle == null || idle.idleMinutes == null) {
+    return '';
+  }
+  const how =
+    idle.mode === 'auto'
+      ? idle.stoppedQuiet
+        ? 'stopped when post-GC heap went quiet'
+        : 'heap still moving, so the full window'
+      : 'fixed length';
+  const tail = idle.curve
+    .slice(-3)
+    .map(p => `${p.heapMB.toFixed(1)} MB at ${p.tS}s`)
+    .join(' → ');
+  return (
+    `\nidle   : ${idle.mode ?? 'fixed'}, ${idle.idleMinutes.toFixed(1)} min, ${how}` +
+    (tail !== '' ? ` (${tail})` : '')
+  );
+}
+
 export function registerSettleCheck(server: McpServer): void {
   server.tool(
     'memlab_settle_check',
@@ -463,9 +484,12 @@ export function registerSettleCheck(server: McpServer): void {
           }
           settledPathForTrace = pair.settledPath;
           let cyclesNote = '';
+          let idleNote = '';
           try {
-            const driven = loadRunManifest(run_dir).cycles;
+            const manifest = loadRunManifest(run_dir);
+            const driven = manifest.cycles;
             cycles = driven > 0 ? driven : null;
+            idleNote = describeSettleIdle(manifest.settleIdle);
           } catch (err: unknown) {
             cycles = null;
             cyclesNote = `\ncycles : unknown (${err instanceof Error ? err.message : String(err)}), so survivors are not ranked per cycle`;
@@ -477,6 +501,7 @@ export function registerSettleCheck(server: McpServer): void {
             (pair.baselinePath != null
               ? `\nbaseline: ${path.basename(pair.baselinePath)}`
               : '') +
+            idleNote +
             cyclesNote;
         } else {
           if (busy_handle == null || settled_handle == null) {
