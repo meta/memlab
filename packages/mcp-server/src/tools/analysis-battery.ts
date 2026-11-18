@@ -32,6 +32,7 @@
  * still there when a specific question needs it.
  */
 
+import {refreshIndexedRound} from '../round-index.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -2204,6 +2205,13 @@ export function registerAnalysisBattery(server: McpServer): void {
               writeError = `could not write ${reportFile}: ${String(err)}`;
             }
             mark('done', writeError);
+            try {
+              refreshIndexedRound(run_dir);
+            } catch (err: unknown) {
+              process.stderr.write(
+                `[battery ${tracked.id}] could not refresh the round index: ${String(err)}\n`,
+              );
+            }
             return text;
           } catch (err: unknown) {
             mark('failed', err instanceof Error ? err.message : String(err));

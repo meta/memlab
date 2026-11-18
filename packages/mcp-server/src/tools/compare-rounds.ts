@@ -30,6 +30,7 @@
  * on disk as text.
  */
 
+import {publishedFrom, resolveRoundDir} from '../round-index.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import path from 'path';
@@ -441,7 +442,7 @@ export function registerCompareRounds(server: McpServer): void {
         .array(z.string())
         .min(2)
         .describe(
-          'Two or more leak-hunt round directories, each holding run.json and an analysis/ directory written by memlab_analysis_battery.',
+          'Two or more leak-hunt round directories, each holding run.json and an analysis/ directory written by memlab_analysis_battery. A bare round name (`r425`, or `<app>/r425`) is read from the shared round index (`~/.memlab-mcp/rounds`), so rounds run on another host compare too.',
         ),
       metric: z
         .enum(['classes', 'chains', 'both'])
@@ -466,7 +467,7 @@ export function registerCompareRounds(server: McpServer): void {
         const failed: string[] = [];
         for (const dir of run_dirs) {
           try {
-            rounds.push(readRound(dir));
+            rounds.push(readRound(resolveRoundDir(dir)));
           } catch (e: unknown) {
             failed.push(
               `${dir}: ${e instanceof Error ? e.message : String(e)}`,
@@ -819,7 +820,14 @@ export function registerCompareRounds(server: McpServer): void {
         );
         if (noAnalysis.length > 0) {
           const battery = noAnalysis
-            .map(r => `memlab_analysis_battery({run_dir: "${r.dir}"})`)
+            .map(r => {
+              // An index entry has no snapshots: the battery runs on the
+              // round's own directory, on the host that has it.
+              const from = publishedFrom(r.dir);
+              return from == null
+                ? `memlab_analysis_battery({run_dir: "${r.dir}"})`
+                : `memlab_analysis_battery({run_dir: "${from.runDir}"})${from.host != null ? `  # on ${from.host}` : ''}`;
+            })
             .join('\n');
           // When EVERY round is unanalysed the tables above are empty, and a
           // trailing italic note reads as a footnote to a result rather than

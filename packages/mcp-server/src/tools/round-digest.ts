@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import {indexProvenance, resolveRoundDir} from '../round-index.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import fs from 'fs';
@@ -295,8 +296,15 @@ export function registerRoundDigest(server: McpServer): void {
     {
       run_dir: z
         .string()
+        .optional()
         .describe(
-          'Path to a leak-hunt run directory, or directly to its run.json.',
+          'Path to a leak-hunt run directory, or directly to its run.json. A bare round name is looked up in the round index, as `round` is.',
+        ),
+      round: z
+        .string()
+        .optional()
+        .describe(
+          'A round name (`r425`, or `<app>/r425` when two apps share it) from the shared round index (`~/.memlab-mcp/rounds`, or `MEMLAB_ROUND_INDEX`), which the leak-hunt runner publishes to when a round ends. Works from any host that shares the home directory, where the run directory itself does not exist.',
         ),
       include_analysis: z
         .boolean()
@@ -321,11 +329,23 @@ export function registerRoundDigest(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'With "doc_markdown": the previous round directory, for a "vs <round>" line (candidates, post-GC change, app_delta, detached DOM change).',
+          'With "doc_markdown": the previous round directory or indexed round name, for a "vs <round>" line (candidates, post-GC change, app_delta, detached DOM change).',
         ),
     },
-    async ({run_dir, include_analysis, max_metrics, format, compare_to}) => {
+    async ({
+      run_dir: runDirArg,
+      round,
+      include_analysis,
+      max_metrics,
+      format,
+      compare_to,
+    }) => {
       try {
+        const ref = runDirArg ?? round;
+        if (ref == null) {
+          return errorResult('Pass `run_dir` or `round`.');
+        }
+        const run_dir = resolveRoundDir(ref);
         const manifestPath = resolveManifestPath(run_dir);
         if (manifestPath == null) {
           return errorResult(
@@ -340,7 +360,7 @@ export function registerRoundDigest(server: McpServer): void {
         if (format === 'doc_markdown') {
           let prev: RoundFacts | null = null;
           if (compare_to != null) {
-            const prevPath = resolveManifestPath(compare_to);
+            const prevPath = resolveManifestPath(resolveRoundDir(compare_to));
             if (prevPath == null) {
               return errorResult(`No run.json at ${compare_to}.`);
             }
@@ -356,9 +376,11 @@ export function registerRoundDigest(server: McpServer): void {
         const rungs = manifest.rungs ?? [];
         const splits = manifest.ladder_splits_after_rung ?? [];
 
+        const provenance = indexProvenance(dir);
         const lines: string[] = [
           `# Round digest — ${manifest.run_id ?? path.basename(dir)}`,
           '',
+          ...(provenance != null ? [provenance, ''] : []),
           `**Audit verdict: ${audit.verdict}**`,
           '',
         ];

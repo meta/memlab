@@ -156,3 +156,17 @@ short Markdown section for a team document: the run, the audit verdict, the
 heap after garbage collection, detached DOM nodes, leak candidates, a
 comparison with the previous round, and TODO lines for your reading and the
 next step.
+
+### Rounds From Another Machine
+
+A round's directory stays on the machine that ran it. When the home directory
+is shared between machines, the round index makes finished rounds readable
+from all of them: `~/.memlab-mcp/rounds/<app>/<round>/` (or the directory in
+`MEMLAB_ROUND_INDEX`) holds each round's `summary.json` and copies of its small
+files (run.json, samples, analysis output), but no snapshots. A runner
+publishes a round there when it ends, and `memlab_analysis_battery` refreshes
+the copy of an indexed round's analysis. Pass the round's name where a run
+directory is expected: `memlab_round_digest({round: "r425"})`, its
+`compare_to`, and `memlab_compare_rounds({run_dirs: ["r424", "r425"]})`. Add
+the app (`"whatsapp-web/r425"`) when two apps share the name. A digest read
+from the index says so and names the machine and directory the round ran in.

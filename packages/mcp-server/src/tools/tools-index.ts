@@ -227,7 +227,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_compare_rounds',
-        'Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder).',
+        'Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder). Takes round names from the shared round index too.',
       ],
       [
         'memlab_field_release_impact',
@@ -681,7 +681,7 @@ const GROUPS: Group[] = [
     tools: [
       [
         'memlab_round_digest',
-        'The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round.',
+        'The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round. `round: "r425"` reads a round from the shared round index, so it works from another host.',
       ],
       [
         'memlab_sweep_digest',

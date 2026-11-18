@@ -13,7 +13,7 @@ in a session. Try them in the order listed.
 
 | Tool | Use it when |
 | --- | --- |
-| `memlab_round_digest` | The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round. |
+| `memlab_round_digest` | The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round. `round: "r425"` reads a round from the shared round index, so it works from another host. |
 | `memlab_sweep_digest` | One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new. A `positive_control.json` from the sweep runner heads it with PASS, or SWEEP VOID when the control did not reproduce. |
 | `memlab_round_audit` | Read a round’s run.json BEFORE analysing it, so a broken bring-up is caught before its numbers travel into a write-up. Flags rungs taken while the app’s error fallback was on screen. Also names recorded fixes whose `fixed_behind` prop the build does not serve (absent from the registry, or read by no served code). |
 | `memlab_load_snapshot` | Load a local path, a manifold:// URL, or a bare Nest filename. |

@@ -352,7 +352,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_ladder_probe` | ONE numeric probe across an ordered ladder, with the per-cycle rate and a linear fit — the cheapest way to test a metric, since each rung loads once for all probes. |
 | `memlab_rate_model` | Unbounded leak, or a working set whose size is just rate x window? Fits a line AND a saturating curve to one series and reports which the data supports, plus the implied plateau. |
 | `memlab_build_pair_compare` | A dev-build round and a production-build round of the same combo, lined up per population by property set and unmangled class: dev-only, production-real, production-saturating or production-only, and how much of the dev heap growth a production build keeps. |
-| `memlab_compare_rounds` | Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder). |
+| `memlab_compare_rounds` | Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder). Takes round names from the shared round index too. |
 | `memlab_field_release_impact` | If a fix nulls this property, how many bytes come back — and is it the only reference? The question every memory fix asks, in the form fixes actually take. |
 | `memlab_analysis_battery` | Run a whole round's analysis in one call, write per-tool detail to disk, return only a digest — the way to read a multi-round sweep without spending a context window on it. With `async: true` it runs in a child server process, so the server stays responsive. |
 | `memlab_retention_windows` | What windows could BOUND this population — timeouts, TTLs, cleanup intervals? Run it before calling any growth unbounded: a ladder shorter than the app's window cannot tell a leak from a working set. |
@@ -512,7 +512,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 
 | Tool | Use it when |
 | --- | --- |
-| `memlab_round_digest` | The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round. |
+| `memlab_round_digest` | The verdict table for a finished round and nothing else — the audit verdict, the ladder shape, and the per-metric rate/fit/verdict rows, without the ~30 KB of prose. `format: "doc_markdown"` gives a short write-up section instead, with `compare_to` for the previous round. `round: "r425"` reads a round from the shared round index, so it works from another host. |
 | `memlab_sweep_digest` | One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new. A `positive_control.json` from the sweep runner heads it with PASS, or SWEEP VOID when the control did not reproduce. |
 | `memlab_round_audit` | Read a round’s run.json BEFORE analysing it, so a broken bring-up is caught before its numbers travel into a write-up. Flags rungs taken while the app’s error fallback was on screen. Also names recorded fixes whose `fixed_behind` prop the build does not serve (absent from the registry, or read by no served code). |
 | `memlab_load_snapshot` | Load a local path, a manifold:// URL, or a bare Nest filename. |
@@ -636,6 +636,7 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_CLI_VERBOSE` | `1` prints full tool output, with suggestions, from `memlab-cli script` |
 | `MEMLAB_REPEAT_NOTES` | `1` prints standing explanatory notes on every call instead of once per session |
 | `MEMLAB_TERSE` | `1` starts the session terse, as `memlab_snapshots({terse: true})` does |
+| `MEMLAB_ROUND_INDEX` | Root of the shared round index (default `~/.memlab-mcp/rounds`): `<app>/<round>/` holds a round's `summary.json` and copies of its small files, so `memlab_round_digest({round})` and `memlab_compare_rounds` can read rounds whose run directory is on another host |
 | `MEMLAB_PREWARM_CONCURRENCY` | Number of workers that build sidecar indexes for a ladder in parallel |
 | `MEMLAB_IDLE_UNLOAD_MIN` | Minutes a resident snapshot other than the current one may go untouched before the server unloads it (default 30, `0` off). Sidecar indexes stay on disk, so a reload is cheap |
 | `MEMLAB_RSS_SOFT_CAP_MB` | When set, the server evicts the least-recently-used snapshot (never the current one) once a minute while its RSS is above this. `memlab_server_status` reports both settings and what they unloaded; `memlab_server_status({all: true})` lists every memlab server process on the host |
