@@ -68,8 +68,17 @@ These conventions hold across the tools:
   so a given offset always shows the same rows.
 - **Shorter output.** `memlab_snapshots` with `max_name_length` clips node
   names in every tool for the rest of the session, and
-  `table_format: "csv"` prints tables as compact CSV. With `terse: true`,
-  `memlab_retainer_trace` leaves out sizes unless `show_sizes` is passed.
+  `table_format: "csv"` prints tables as compact CSV.
+- **Terse mode.** `memlab_snapshots({terse: true})`, or `MEMLAB_TERSE=1` at
+  startup, makes every tool keep only headings, tables, verdict and warning
+  lines, finding bullets and code. It drops explanatory notes, long prose,
+  suggested next steps and the orientation menu, and prints tables without
+  alignment padding. On one round this cut the leak report, detached DOM and
+  listener reports together from about 15.5 KB to 6.6 KB.
+- **JSON reports.** `memlab_leak_report`, `memlab_detached_dom`,
+  `memlab_event_listener_leaks` and `memlab_react_update_queues` take
+  `format: "json"`: the report as sections of tables (numeric cells parsed),
+  verdicts, bullets and text, ready to pass to a script.
 - **Structured results.** The main list and lookup tools also return
   `structuredContent`: the same rows as JSON, with raw byte counts, the
   filters that applied and a `pagination` object, so a client can use the

@@ -31,6 +31,7 @@ import {
 } from './analysis-budget.js';
 import {memoryPressureNotice} from './memory-pressure.js';
 import {snapshotsReadInScope} from './read-scope.js';
+import {compactMarkdownTable} from './terse-output.js';
 export {ScanTimeoutError, makeScanBudget};
 
 export interface NodeSummary {
@@ -1615,6 +1616,9 @@ export function markdownTable(
   alignRight?: Set<number>,
 ): string {
   if (getSessionConfig().tableFormat === 'csv') return csvTable(headers, rows);
+  if (getSessionConfig().terse) {
+    return compactMarkdownTable(headers, rows, alignRight);
+  }
   // Compute column widths
   const widths = headers.map((h, i) =>
     Math.max(h.length, ...rows.map(r => (r[i] ?? '').length)),
@@ -2228,7 +2232,8 @@ const perToolTrailersEmitted = new Map<string, number>();
  * which is the pre-existing behaviour and gets no per-tool allowance.
  */
 export function suggestionsSuppressed(toolKey?: string): boolean {
-  if (getSessionConfig().suppressSuggestions) return true;
+  const cfg = getSessionConfig();
+  if (cfg.suppressSuggestions || cfg.terse) return true;
   if (suggestionTrailersEmitted >= SUGGESTION_TRAILER_BUDGET) return true;
   if (toolKey != null) {
     const emitted = perToolTrailersEmitted.get(toolKey) ?? 0;

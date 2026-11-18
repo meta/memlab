@@ -21,6 +21,7 @@ import {sourceOfNode} from './module-attribution.js';
 import {findModuleSpans} from './module-source.js';
 import fs from 'fs';
 import {z} from 'zod';
+import {jsonFormatParam} from '../terse-output.js';
 import {getSnapshot} from '../heap-state.js';
 import {
   resolveRungs,
@@ -963,6 +964,7 @@ export function registerReactUpdateQueues(server: McpServer): void {
         ),
       segment: segmentArg(),
       snapshot: snapshotParam(),
+      format: jsonFormatParam,
     },
     async ({
       max_chain,

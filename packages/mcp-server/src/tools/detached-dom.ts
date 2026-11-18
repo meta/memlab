@@ -13,6 +13,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {ladderShape} from '../ladder-shape.js';
 import {normalizeClassName} from '../snapshot-index.js';
 import {z} from 'zod';
+import {jsonFormatParam} from '../terse-output.js';
 import {getFilePath, getSnapshot, getSnapshotEnv} from '../heap-state.js';
 import {noteSnapshotRead} from '../read-scope.js';
 import type {IHeapNode, IHeapEdge, IHeapSnapshot} from '@memlab/core';
@@ -795,6 +796,7 @@ export function registerDetachedDom(server: McpServer): void {
         .describe(
           `With \`group_by: "dominator"\`: when the top owner's group has at least ${ISLAND_DOORS_MIN_NODES.toLocaleString('en-US')} detached nodes, also list every application-side reference into it (\`memlab_island_doors\`), so a fix is sized against all of them (default true). It costs one walk of the heap.`,
         ),
+      format: jsonFormatParam,
     },
     async ({
       output_mode,

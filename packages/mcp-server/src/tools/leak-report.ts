@@ -36,6 +36,7 @@ import type {IHeapNode} from '@memlab/core';
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
+import {jsonFormatParam} from '../terse-output.js';
 import memlabHeapAnalysis from '@memlab/heap-analysis';
 const {getFullHeapFromFile} = memlabHeapAnalysis;
 import {
@@ -655,6 +656,7 @@ export function registerLeakReport(server: McpServer): void {
         .describe(
           'Per-file size ceiling in MB, matching memlab_load_snapshot / memlab_sequence_analysis defaults. Snapshots are loaded one at a time and dropped before the next.',
         ),
+      format: jsonFormatParam,
     },
     async (
       {

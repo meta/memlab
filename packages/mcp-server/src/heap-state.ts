@@ -316,7 +316,7 @@ export interface SessionConfig {
 const sessionConfig: SessionConfig = {
   quietHeader: true,
   suppressSuggestions: false,
-  terse: false,
+  terse: process.env.MEMLAB_TERSE === '1',
   suppressOrientation: false,
   maxNameLength: null,
   tableFormat: 'markdown',

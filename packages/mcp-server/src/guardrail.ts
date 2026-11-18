@@ -30,6 +30,7 @@ import {
   ScanTimeoutError,
 } from './analysis-budget.js';
 import {toolResult} from './utils.js';
+import {markdownToJson, terseText} from './terse-output.js';
 import {getRegisteredTool, recordToolHandler} from './tool-registry.js';
 import {loadRunManifest} from './run-manifest.js';
 
@@ -407,6 +408,61 @@ function trimStandingNotes(result: unknown): unknown {
   return result;
 }
 
+/** Tools whose `format: "json"` returns `markdownToJson` of their report. */
+export const JSON_FORMAT_TOOLS = new Set([
+  'memlab_leak_report',
+  'memlab_detached_dom',
+  'memlab_event_listener_leaks',
+  'memlab_react_update_queues',
+]);
+
+// Their output is the session's own state or the tool catalog; trimming it
+// would hide the very switches a terse session is looking for.
+const TERSE_EXEMPT = new Set(['memlab_tools', 'memlab_snapshots']);
+
+type TextResult = {
+  content?: Array<{type: string; text?: string}>;
+  isError?: boolean;
+};
+
+/**
+ * The session `terse` flag, applied to every tool's result here so that no
+ * tool has to implement it. Runs before `trimStandingNotes`, so a note this
+ * drops is not first cut to a sentence and kept.
+ */
+function terseOutput(name: string, result: unknown): unknown {
+  const r = result as TextResult;
+  if (!isTerse() || TERSE_EXEMPT.has(name)) return result;
+  if (!Array.isArray(r?.content) || r.isError === true) return result;
+  for (const c of r.content) {
+    if (c.type === 'text' && typeof c.text === 'string') {
+      c.text = terseText(c.text);
+    }
+  }
+  return result;
+}
+
+/** A per-call `format: "json"` on the tools in `JSON_FORMAT_TOOLS`. */
+function jsonOutput(name: string, params: unknown, result: unknown): unknown {
+  const r = result as TextResult;
+  const wantsJson =
+    JSON_FORMAT_TOOLS.has(name) &&
+    params != null &&
+    typeof params === 'object' &&
+    (params as {format?: unknown}).format === 'json';
+  if (!wantsJson || !Array.isArray(r?.content) || r.isError === true) {
+    return result;
+  }
+  const markdown = r.content
+    .filter(c => c.type === 'text' && typeof c.text === 'string')
+    .map(c => c.text)
+    .join('\n\n');
+  r.content = [
+    {type: 'text', text: JSON.stringify(markdownToJson(name, markdown))},
+  ];
+  return result;
+}
+
 export function installAnalysisGuardrail(server: McpServer): void {
   installUnknownParamRejection(server);
   const origTool = (server.tool as AnyFn).bind(server) as AnyFn;
@@ -478,7 +534,11 @@ export function installAnalysisGuardrail(server: McpServer): void {
                   : inner(...hArgs),
               ),
           );
-          return trimStandingNotes(result);
+          return jsonOutput(
+            name,
+            params,
+            trimStandingNotes(terseOutput(name, result)),
+          );
         } catch (e) {
           if (e instanceof ScanTimeoutError) {
             const ran = Math.round(activeElapsedMs() / 1000);

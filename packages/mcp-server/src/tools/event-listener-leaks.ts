@@ -11,6 +11,7 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode} from '@memlab/core';
 import {z} from 'zod';
+import {jsonFormatParam} from '../terse-output.js';
 import {fixPatternPointer} from '../fix-knowledge.js';
 import {getSnapshot} from '../heap-state.js';
 import {
@@ -351,6 +352,7 @@ export function registerEventListenerLeaks(server: McpServer): void {
             'This is the key signal for identifying listener-based memory leaks where many ' +
             'orphaned objects register on the same event.',
         ),
+      format: jsonFormatParam,
     },
     async ({
       min_listeners,

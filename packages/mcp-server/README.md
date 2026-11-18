@@ -293,7 +293,11 @@ Every single-snapshot tool takes an optional `snapshot`: a resident handle, or a
 
 Every byte-size filter (`min_retained_size`, `min_self_size`, `min_bytes`, …) takes bytes or a size such as `"1MB"` or `"500KiB"` (KB = 1000 bytes, KiB = 1024). `memlab_query_objects` also takes ranges: `"1MB-"`, `"10KB-1MB"`, `"-1MB"`.
 
-Ranked lists page the same way: pass `offset` to skip rows, and every page ends with "Showing a–b of N … Next page: `offset: k`". Ties are broken by node id, so the same offset always shows the same rows. `memlab_snapshots({max_name_length: N})` clips node names in every tool for the rest of the session (including the `name` in `memlab_eval` helper results), `memlab_snapshots({terse: true})` also drops the sizes from `memlab_retainer_trace` unless `show_sizes` is passed, and `memlab_snapshots({table_format: "csv"})` renders every table as compact CSV, about half the size of the aligned markdown on a 50-row page.
+Ranked lists page the same way: pass `offset` to skip rows, and every page ends with "Showing a–b of N … Next page: `offset: k`". Ties are broken by node id, so the same offset always shows the same rows. `memlab_snapshots({max_name_length: N})` clips node names in every tool for the rest of the session (including the `name` in `memlab_eval` helper results), `memlab_snapshots({table_format: "csv"})` renders every table as compact CSV, about half the size of the aligned markdown on a 50-row page.
+
+`memlab_snapshots({terse: true})`, or `MEMLAB_TERSE=1` at startup, makes every tool print only what a decision is made from: headings, tables (without alignment padding), verdict and warning lines, finding bullets and code. Explanatory notes, long prose paragraphs, suggested next steps and the load-time orientation menu are dropped, and `memlab_retainer_trace` leaves out sizes unless `show_sizes` is passed. On one round, the `memlab_leak_report` / `memlab_detached_dom` / `memlab_event_listener_leaks` trio went from about 15.5 KB to 6.6 KB.
+
+`memlab_leak_report`, `memlab_detached_dom`, `memlab_event_listener_leaks` and `memlab_react_update_queues` take `format: "json"`, which returns the report as `{tool, source, sections: [{heading, level, tables: [{columns, rows}], verdicts, bullets, text}]}` with numeric cells parsed (`"+42,008"` is `42008`; `"1.2 MB"` stays text). Use it to chain a report into a script or another tool.
 
 The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`, `memlab_largest_objects`, `memlab_find_nodes_by_class`, `memlab_search_nodes`, `memlab_get_references`, `memlab_get_referrers`, `memlab_get_node`, `memlab_retainer_trace`, `memlab_diff_snapshots`, `memlab_shape_histogram`, `memlab_duplicated_strings`, `memlab_snapshot_summary`, `memlab_native_contexts`, `memlab_retained_by`, `memlab_dead_context_variables`) also return `structuredContent`: the same rows as JSON, with node ids scoped by a `snapshot` handle, raw byte counts, the filters that applied and a `pagination` object. A client can chain results without parsing the tables.
 
@@ -631,6 +635,7 @@ The server keeps a few small files so that work survives a restart:
 | `MEMLAB_MCP_SERVER` | Server entry point `memlab-cli` runs, instead of the bundled `dist/index.js` |
 | `MEMLAB_CLI_VERBOSE` | `1` prints full tool output, with suggestions, from `memlab-cli script` |
 | `MEMLAB_REPEAT_NOTES` | `1` prints standing explanatory notes on every call instead of once per session |
+| `MEMLAB_TERSE` | `1` starts the session terse, as `memlab_snapshots({terse: true})` does |
 | `MEMLAB_PREWARM_CONCURRENCY` | Number of workers that build sidecar indexes for a ladder in parallel |
 | `MEMLAB_IDLE_UNLOAD_MIN` | Minutes a resident snapshot other than the current one may go untouched before the server unloads it (default 30, `0` off). Sidecar indexes stay on disk, so a reload is cheap |
 | `MEMLAB_RSS_SOFT_CAP_MB` | When set, the server evicts the least-recently-used snapshot (never the current one) once a minute while its RSS is above this. `memlab_server_status` reports both settings and what they unloaded; `memlab_server_status({all: true})` lists every memlab server process on the host |

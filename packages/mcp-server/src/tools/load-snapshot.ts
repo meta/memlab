@@ -1313,7 +1313,8 @@ export function registerLoadSnapshot(server: McpServer): void {
         // optional with no default, so a load that omits it would otherwise
         // re-emit the orientation menu and the calibration note in a session
         // that already asked for quiet output.
-        const orientationSuppressed = getSessionConfig().suppressOrientation;
+        const orientationSuppressed =
+          getSessionConfig().suppressOrientation || getSessionConfig().terse;
         const previousMeta = getSnapshotMetadata();
         progress.phase(
           1,

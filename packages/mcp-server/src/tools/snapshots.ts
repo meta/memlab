@@ -60,7 +60,7 @@ export function registerSnapshots(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "When set, toggles session-wide terse output: high-volume, low-decision sections (long per-property censuses and the like) are cut to a count plus the top few rows. One switch instead of remembering each tool's own summary flag, which is spelled differently in each.",
+          'When set, toggles session-wide terse output for every tool: explanatory notes, long prose paragraphs, suggested next steps and the load orientation menu are dropped; headings, tables (unpadded), verdict and warning lines and finding bullets are kept. High-volume sections are also cut to a count plus the top rows. Also set at startup by the env var `MEMLAB_TERSE=1`.',
         ),
       max_name_length: z
         .number()
