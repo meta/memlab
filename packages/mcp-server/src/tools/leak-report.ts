@@ -15,6 +15,15 @@ import {
   loadFamilies,
   plainObjectTotals,
 } from '../known-families.js';
+import type {KnownFamily} from '../known-families.js';
+import {
+  exportsOwnerMap,
+  objectShapeKey,
+  ownerModuleOf,
+  shapeFamiliesSection,
+  topObjectShapeGrowth,
+} from '../shape-families.js';
+import type {ShapeOwner} from '../shape-families.js';
 import {
   ladderSpanSeconds,
   resolveLadderInputs,
@@ -70,6 +79,8 @@ import {makeProgressReporter} from '../progress.js';
 // question is "what shape of thing holds these", and a handful of instances
 // answers it — walking thousands would cost more than the trend pass itself.
 const MAX_SAMPLES_PER_CLASS = 8;
+// Plain-object shapes listed under the `Object` row.
+const SHAPE_FAMILY_ROWS = 5;
 
 /**
  * Instances per class the dev-MODULE provenance walk runs on.
@@ -669,13 +680,12 @@ export function registerLeakReport(server: McpServer): void {
             : null;
         if (between != null) lines.push(...between);
         const familiesFile = families ?? inputs.manifest?.familiesFile ?? null;
+        let knownFamilies: KnownFamily[] = [];
         if (familiesFile != null) {
           try {
             const rungPaths = steps.map(st => st.localPath);
-            const rows = await familyCounts(
-              rungPaths,
-              loadFamilies(familiesFile),
-            );
+            knownFamilies = loadFamilies(familiesFile);
+            const rows = await familyCounts(rungPaths, knownFamilies);
             if (rows.length > 0) {
               lines.push(
                 ...familiesSection(
@@ -720,6 +730,17 @@ export function registerLeakReport(server: McpServer): void {
         // next, so the final rung is re-opened here — one extra load, and the
         // only way to ask retention questions about the classes the trend pass
         // just identified.
+        const objectRow = candidates.find(c => c.key === 'object::Object');
+        const shapeRows =
+          objectRow != null
+            ? await topObjectShapeGrowth(
+                steps.map(st => st.localPath),
+                SHAPE_FAMILY_ROWS,
+              )
+            : [];
+        const shapeNewest = new Map<string, IHeapNode[]>(
+          shapeRows.map(r => [r.key, []]),
+        );
         const snapshot = await getFullHeapFromFile(steps[n - 1].localPath);
         const devRoots = collectDevRoots(snapshot);
         const reached =
@@ -751,6 +772,19 @@ export function registerLeakReport(server: McpServer): void {
           const ev = evidence.get(
             `${node.type}::${normalizeClassName(node.name)}`,
           );
+          if (
+            shapeNewest.size > 0 &&
+            node.name === 'Object' &&
+            node.type === 'object' &&
+            node.hasPathEdge
+          ) {
+            const newest = shapeNewest.get(objectShapeKey(node));
+            if (newest != null) {
+              newest.push(node);
+              newest.sort((a, b) => b.id - a.id);
+              if (newest.length > MAX_SAMPLES_PER_CLASS) newest.pop();
+            }
+          }
           if (!ev) return;
           ev.total++;
           if (reached != null && reached[node.nodeIndex] === 0) ev.devOnly++;
@@ -1303,6 +1337,33 @@ export function registerLeakReport(server: McpServer): void {
           ];
         });
         lines.push(markdownTable(headers, tableRows, rightCols));
+        if (shapeRows.length > 0) {
+          const exportsOwner = exportsOwnerMap(snapshot);
+          const owners = new Map<string, ShapeOwner>();
+          for (const [key, nodes] of shapeNewest) {
+            const votes = new Map<string, number>();
+            for (const node of nodes) {
+              const m = ownerModuleOf(snapshot, node, exportsOwner);
+              if (m != null) votes.set(m, (votes.get(m) ?? 0) + 1);
+            }
+            const best = [...votes].sort((a, b) => b[1] - a[1])[0];
+            owners.set(key, {
+              module: best?.[0] ?? null,
+              votes: best?.[1] ?? 0,
+              of: nodes.length,
+            });
+          }
+          lines.push(
+            '',
+            ...shapeFamiliesSection(
+              shapeRows,
+              owners,
+              knownFamilies,
+              typeof cycles === 'number' ? cycles : undefined,
+              objectRow != null ? objectRow.netCount : null,
+            ),
+          );
+        }
 
         if (devModuleClasses > 0) {
           // Branched by CATEGORY, because the two remedies are opposite.
