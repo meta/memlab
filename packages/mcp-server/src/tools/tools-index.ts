@@ -685,7 +685,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_sweep_digest',
-        'One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new.',
+        'One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new. A `positive_control.json` from the sweep runner heads it with PASS, or SWEEP VOID when the control did not reproduce.',
       ],
       [
         'memlab_round_audit',
