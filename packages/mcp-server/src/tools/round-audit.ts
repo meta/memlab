@@ -52,7 +52,13 @@ interface RunManifest {
    */
   isolate_age_at_baseline?: {ms_since_navigation?: number} | null;
   totals?: {cycles?: number; ok?: number; fail?: number};
-  rungs?: Array<{index?: number; path?: string; isolate_restarted?: boolean}>;
+  rungs?: Array<{
+    index?: number;
+    path?: string;
+    isolate_restarted?: boolean;
+    /** Elements showing the app's error fallback at this rung. */
+    error_ui?: {count?: number; where?: string[]};
+  }>;
   steps?: Record<
     string,
     {attempted?: number; landed?: number; errors?: number; rate?: number}
@@ -217,6 +223,27 @@ export function auditManifest(
           'reading anything into that step.',
       });
     }
+  }
+
+  const withErrorUi = rungs.filter(r => r.error_ui != null);
+  if (withErrorUi.length > 0) {
+    const shown = withErrorUi.filter(r => (r.error_ui?.count ?? 0) > 0);
+    checks.push(
+      shown.length === 0
+        ? {
+            name: 'error UI',
+            status: 'ok',
+            detail: `No rung showed the app's error fallback (${withErrorUi.length} checked).`,
+          }
+        : {
+            name: 'error UI',
+            status: 'caveat',
+            detail:
+              `The app's error fallback was on screen at ${shown.length} of ${withErrorUi.length} rung(s), from rung ${shown[0].index ?? '?'}` +
+              ` (in ${[...new Set(shown.flatMap(r => r.error_ui?.where ?? []))].join(', ') || '?'}). ` +
+              'Rungs after that were driven against the fallback rather than the surface, so a flat result there is a false negative. Find what broke (a failed chunk load, an exception the boundary swallowed) and re-drive.',
+          },
+    );
   }
 
   const mutators = m.mutates_content_per_cycle ?? [];
