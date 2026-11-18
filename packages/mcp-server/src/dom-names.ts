@@ -18,7 +18,7 @@ export function isDetachedElementName(name: string): boolean {
   const n = name.replace(/^Detached\s+/, '');
   return (
     n.startsWith('<') ||
-    /^(Text|Comment|CDATASection|DocumentFragment|ShadowRoot|Attr|(HTML|XML)?Document)\b/.test(
+    /^(Text|Comment|CDATASection|ProcessingInstruction|DocumentFragment|DocumentType|ShadowRoot|Attr|(HTML|XML)?Document)\b/.test(
       n,
     ) ||
     /^(HTML|SVG|MathML)\w*Element\b/.test(n)
