@@ -1295,10 +1295,10 @@ export function registerLoadSnapshot(server: McpServer): void {
       const PHASES = 6;
       const startedAt = Date.now();
       const releaseLoad = await acquireLoadLock();
-      // Read before anything unloads: replace mode frees the others ahead of
-      // the parse, not at setSnapshot.
-      const evictionNote = keep_previous ? null : recentEvictionNote(null);
       try {
+        // Read before anything unloads: replace mode frees the others ahead
+        // of the parse, not at setSnapshot.
+        const evictionNote = keep_previous ? null : recentEvictionNote(null);
         if (quiet != null || suppress_suggestions != null) {
           setSessionConfig({
             ...(quiet != null
