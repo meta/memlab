@@ -117,6 +117,36 @@ export async function familyCounts(
   }));
 }
 
+/**
+ * The plain objects matching ANY family, per rung, each counted once. A shape
+ * can match several families, so the families' own deltas cannot be summed.
+ */
+export async function explainedTotals(
+  paths: readonly string[],
+  families: readonly KnownFamily[],
+): Promise<Array<number | null>> {
+  return Promise.all(
+    paths.map(async p => {
+      const index = await readSidecarAsync(p);
+      if (index == null) {
+        return null;
+      }
+      let n = 0;
+      for (const [key, [count]] of Object.entries(index.objectShapes)) {
+        const props = new Set(splitShapeKey(key));
+        if (
+          families.some(f =>
+            f.shapes.some(want => want.every(q => props.has(q))),
+          )
+        ) {
+          n += count;
+        }
+      }
+      return n;
+    }),
+  );
+}
+
 /** The plain objects of every shape, per rung: what the families explain. */
 export async function plainObjectTotals(
   paths: readonly string[],
@@ -131,12 +161,20 @@ export async function plainObjectTotals(
   );
 }
 
+/**
+ * `explained`: the per-rung union from `explainedTotals`. Without it, the
+ * families' positive deltas are summed, which over-counts overlapping ones.
+ */
 export function familiesSection(
   file: string,
   rows: FamilyRow[],
   totals: Array<number | null>,
   cycles: number | undefined,
+  explainedPerRung?: Array<number | null>,
 ): string[] {
+  if (rows.length === 0) {
+    return [];
+  }
   const delta = (c: Array<number | null>) => {
     const first = c[0];
     const last = c[c.length - 1];
@@ -163,6 +201,10 @@ export function familiesSection(
         ` | ${d == null || cycles == null || cycles <= 0 ? '' : (d / cycles).toFixed(2)}` +
         ` | ${row.family.status ?? ''} | ${row.family.finding ?? ''} |`,
     );
+  }
+  const union = explainedPerRung != null ? delta(explainedPerRung) : null;
+  if (union != null) {
+    explained = Math.max(0, union);
   }
   const total = delta(totals);
   lines.push('');

@@ -88,3 +88,32 @@ test('a rung without an index shows ? and no rate', () => {
   );
   assert.ok(lines.includes('| A (`a`) | ? | 5 | ? |  |  |  |'));
 });
+
+test('overlapping families are not counted twice in what they explain', () => {
+  // A = {timestamp}, B = {data,timestamp}: the same 1,000 new objects match
+  // both, and 500 other new objects match neither.
+  const a = {id: 'a', label: 'A', shapes: [['timestamp']]};
+  const b = {id: 'b', label: 'B', shapes: [['data', 'timestamp']]};
+  const lines = familiesSection(
+    'f.json',
+    [
+      {family: a, counts: [0, 1000]},
+      {family: b, counts: [0, 1000]},
+    ],
+    [0, 1500],
+    10,
+    [0, 1000],
+  );
+  assert.ok(
+    lines.some(l =>
+      l.startsWith(
+        'Known families explain 1,000 of the 1,500 new plain objects (67%). **500 are NEW**',
+      ),
+    ),
+    lines.join('\n'),
+  );
+});
+
+test('no families gives no section', () => {
+  assert.deepEqual(familiesSection('f.json', [], [0, 1], 1), []);
+});

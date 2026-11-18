@@ -10,6 +10,7 @@
 
 import {samplesSection} from '../run-samples.js';
 import {
+  explainedTotals,
   familiesSection,
   familyCounts,
   loadFamilies,
@@ -769,6 +770,7 @@ export function registerLeakReport(server: McpServer): void {
                   rows,
                   await plainObjectTotals(rungPaths),
                   typeof cycles === 'number' ? cycles : undefined,
+                  await explainedTotals(rungPaths, knownFamilies),
                 ),
               );
             }
