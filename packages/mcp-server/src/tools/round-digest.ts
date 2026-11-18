@@ -759,6 +759,17 @@ function sweepPositiveControl(dirs: readonly string[]): string | null {
     } catch {
       return `> ⚠️ ${file} is unreadable, so the sweep's positive control is unknown.`;
     }
+    // A verdict needs its status and what it was judged on; anything less is
+    // not a control that failed.
+    if (
+      (pc.status !== 'PASS' && pc.status !== 'VOID') ||
+      typeof pc.match !== 'string' ||
+      typeof pc.tool !== 'string' ||
+      typeof pc.round !== 'string' ||
+      typeof pc.min_per_cycle !== 'number'
+    ) {
+      return `> ⚠️ ${file} holds no complete verdict (status, match, tool, round, min_per_cycle), so the sweep's positive control is unknown.`;
+    }
     const seen =
       pc.observed_per_cycle == null
         ? 'not found'
