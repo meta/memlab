@@ -171,6 +171,23 @@ async function detachedGroupCountsAt(
   });
 }
 
+/**
+ * A DOM node (`Detached <div …>`, `Detached Text`) rather than one of the
+ * Blink records that hang off it (`Detached blink::NodeRareData`,
+ * `Detached SVGAnimatedLength`, …). The records move with their element, so
+ * counting them as stranded nodes overstates what a leak left behind.
+ */
+export function isDetachedElementName(name: string): boolean {
+  const n = name.replace(/^Detached\s+/, '');
+  return (
+    n.startsWith('<') ||
+    /^(Text|Comment|CDATASection|DocumentFragment|ShadowRoot|Attr|(HTML|XML)?Document)\b/.test(
+      n,
+    ) ||
+    /^(HTML|SVG|MathML)\w*Element\b/.test(n)
+  );
+}
+
 async function detachedLadder(args: {
   run_dir?: string;
   paths?: string[];
@@ -199,8 +216,10 @@ async function detachedLadder(args: {
   const read: Array<{
     index: number;
     total: number;
+    elements: number;
     byClass: Map<string, number>;
   }> = [];
+  const elementKeys = new Set<string>();
   const failures: string[] = [];
   for (const [index, rung] of rungs.entries()) {
     armScanBudgetFor(scaledTimeoutMs(largestMB));
@@ -208,6 +227,7 @@ async function detachedLadder(args: {
       const counts = await withSnapshotAt(rung.localPath, snap => {
         const byClass = new Map<string, number>();
         let total = 0;
+        let elements = 0;
         snap.nodes.forEach(node => {
           if (!isDetachedDOMNode(node)) return;
           total++;
@@ -217,12 +237,16 @@ async function detachedLadder(args: {
             node.self_size,
             48,
           );
+          if (isDetachedElementName(node.name)) {
+            elements++;
+            elementKeys.add(key);
+          }
           byClass.set(key, (byClass.get(key) ?? 0) + 1);
         });
-        return {total, byClass};
+        return {total, elements, byClass};
       });
       totals.push(counts.total);
-      read.push({index, total: counts.total, byClass: counts.byClass});
+      read.push({index, ...counts});
     } catch (err) {
       totals.push(null);
       failures.push(
@@ -255,12 +279,16 @@ async function detachedLadder(args: {
 
   // Per rung, with null for a rung that could not be read, so the shape is
   // judged on the actual series rather than on its two ends.
-  const seriesOf = (name: string | null): Array<number | null> =>
+  const seriesOf = (
+    name: string | null,
+    pick: (r: (typeof read)[number]) => number = r => r.total,
+  ): Array<number | null> =>
     rungs.map((_, i) => {
       const r = read.find(x => x.index === i);
       if (r == null) return null;
-      return name == null ? r.total : (r.byClass.get(name) ?? 0);
+      return name == null ? pick(r) : (r.byClass.get(name) ?? 0);
     });
+  const internalsOf = (r: (typeof read)[number]) => r.total - r.elements;
   const shapeAxis =
     axis != null && axis.length === rungs.length ? axis : undefined;
   const first = firstRead.byClass;
@@ -277,8 +305,11 @@ async function detachedLadder(args: {
   // delta sorts every class that SHRANK to the bottom of the list, so on a
   // ladder with more changed classes than `limit` the largest decreases are
   // the first rows cut from a table headed "what changed".
+  // Element rows first: they are what a leak strands, the rest rides along.
   const rows = changed.sort(
-    (x, y) => Math.abs(y.b - y.a) - Math.abs(x.b - x.a),
+    (x, y) =>
+      Number(elementKeys.has(y.name)) - Number(elementKeys.has(x.name)) ||
+      Math.abs(y.b - y.a) - Math.abs(x.b - x.a),
   );
 
   const segmentNote = describeSegmentSelection(inputs.segment, inputs.manifest);
@@ -294,11 +325,27 @@ async function detachedLadder(args: {
           'Detached nodes',
           ...totals.map(v => (v == null ? '—' : formatNumber(v))),
         ],
+        [
+          'DOM elements',
+          ...seriesOf(null, r => r.elements).map(v =>
+            v == null ? '—' : formatNumber(v),
+          ),
+        ],
+        [
+          'Blink internals',
+          ...seriesOf(null, internalsOf).map(v =>
+            v == null ? '—' : formatNumber(v),
+          ),
+        ],
       ],
       new Set(rungs.map((_, i) => i + 1)),
     ),
     '',
-    `**${formatNumber(firstRead.total)} → ${formatNumber(lastRead.total)}** (${rate(firstRead.total, lastRead.total)}/cycle, shape **${ladderShape(seriesOf(null), shapeAxis)}**)`,
+    `**DOM elements: ${formatNumber(firstRead.elements)} → ${formatNumber(lastRead.elements)}** (${rate(firstRead.elements, lastRead.elements)}/cycle, shape **${ladderShape(
+      seriesOf(null, r => r.elements),
+      shapeAxis,
+    )}**)`,
+    `Blink internals: ${formatNumber(internalsOf(firstRead))} → ${formatNumber(internalsOf(lastRead))} (${rate(internalsOf(firstRead), internalsOf(lastRead))}/cycle, shape ${ladderShape(seriesOf(null, internalsOf), shapeAxis)}). These are the records attached to detached elements (\`blink::NodeRareData\`, SVG and CSS values, listener entries); they show the size of what is stranded, not how many nodes were.`,
     '',
   );
   if (failures.length > 0) {
@@ -313,24 +360,25 @@ async function detachedLadder(args: {
       '### What changed, by element',
       '',
       markdownTable(
-        ['Element', 'First', 'Last', 'Δ', 'Δ/cycle', 'Shape'],
+        ['Element', 'Kind', 'First', 'Last', 'Δ', 'Δ/cycle', 'Shape'],
         rows
           .slice(0, args.limit)
           .map(r => [
             r.name,
+            elementKeys.has(r.name) ? 'element' : 'internal',
             formatNumber(r.a),
             formatNumber(r.b),
             formatNumber(r.b - r.a),
             rate(r.a, r.b),
             ladderShape(seriesOf(r.name), shapeAxis),
           ]),
-        new Set([1, 2, 3, 4]),
+        new Set([2, 3, 4, 5]),
       ),
       '',
     );
     if (rows.length > args.limit) {
       lines.push(
-        `_Showing ${args.limit} of ${rows.length} changed element types, largest absolute change first — raise \`limit\` for the rest._`,
+        `_Showing ${args.limit} of ${rows.length} changed element types, DOM elements first, then largest absolute change — raise \`limit\` for the rest._`,
         '',
       );
     }
@@ -766,7 +814,7 @@ export function registerDetachedDom(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "A leak-hunt round's output directory (the one holding run.json and snapshots/). Reports the detached population PER RUNG with a per-cycle rate and the per-class breakdown of what grew, instead of a single census that cannot distinguish a leak from a working set.",
+          "A leak-hunt round's output directory (the one holding run.json and snapshots/). Reports the detached population PER RUNG with a per-cycle rate and the per-class breakdown of what grew, instead of a single census that cannot distinguish a leak from a working set. DOM elements and the Blink records attached to them are counted separately, and the rate and shape headline is the element line.",
         ),
       paths: z
         .array(z.string())

@@ -516,7 +516,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_detached_dom',
-        'Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group\'s count at an earlier rung and sorts by the change. On a minified build the top owner\'s path starts at the holding module; `raw_paths: true` keeps the registry hops.',
+        'Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group\'s count at an earlier rung and sorts by the change. On a minified build the top owner\'s path starts at the holding module; `raw_paths: true` keeps the registry hops. Over a ladder (`run_dir`), DOM elements and Blink internals are counted on separate lines.',
       ],
       ['memlab_event_listener_leaks', 'Listeners that outlived their target.'],
       [
