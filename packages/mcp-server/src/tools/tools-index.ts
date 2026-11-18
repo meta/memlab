@@ -457,11 +457,11 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_retainer_trace',
-        'The shortest retainer path for one node; `mode: "tree"` shows every owner as a bounded tree (`max_depth`, `max_nodes`, `max_siblings`) ending at a root or the page global. A repeating multi-hop chain prints once with its count.',
+        'The shortest retainer path for one node; `mode: "tree"` shows every owner as a bounded tree (`max_depth`, `max_nodes`, `max_siblings`) ending at a root or the page global. A repeating multi-hop chain prints once with its count. On a minified build the path starts at the module holding the object; `raw: true` shows the registry hops above it.',
       ],
       [
         'memlab_retainer_summary',
-        'Retainer paths across many instances, clustered by shape.',
+        'Retainer paths across many instances, clustered by shape. On a minified build each pattern starts at the holding module; `raw: true` keeps the registry hops.',
       ],
       ['memlab_referrer_summary', 'Who points at this, grouped by edge.'],
       [
@@ -516,7 +516,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_detached_dom',
-        'Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group\'s count at an earlier rung and sorts by the change.',
+        'Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group\'s count at an earlier rung and sorts by the change. On a minified build the top owner\'s path starts at the holding module; `raw_paths: true` keeps the registry hops.',
       ],
       ['memlab_event_listener_leaks', 'Listeners that outlived their target.'],
       [

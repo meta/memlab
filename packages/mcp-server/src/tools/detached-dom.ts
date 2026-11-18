@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import {moduleHeadOf, RAW_PATH_DESCRIPTION} from '../module-labels.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {ladderShape} from '../ladder-shape.js';
 import {normalizeClassName} from '../snapshot-index.js';
@@ -786,6 +787,7 @@ export function registerDetachedDom(server: McpServer): void {
         .describe(
           'With `group_by`: an earlier snapshot of the same page session, e.g. the first rung: a resident handle or a snapshot path. Each group then shows how many of its nodes were already detached there ("At baseline") and how many are new, and groups are sorted by new nodes: a group that was all there at baseline is a standing population, not what the round grew. Node ids are compared, so there must be no reload between the two.',
         ),
+      raw_paths: z.boolean().optional().describe(RAW_PATH_DESCRIPTION),
       island_doors: z
         .boolean()
         .optional()
@@ -806,6 +808,7 @@ export function registerDetachedDom(server: McpServer): void {
       segment,
       baseline,
       island_doors,
+      raw_paths,
     }) => {
       try {
         // Ladder mode. A single detached census is a population; the RATE is
@@ -1200,7 +1203,17 @@ export function registerDetachedDom(server: McpServer): void {
               const path =
                 ownerNode != null ? shortestPathSteps(ownerNode) : [];
               if (path.length > 1) {
-                const shown = formatProductionPath(path, 10);
+                const head =
+                  raw_paths === true
+                    ? null
+                    : moduleHeadOf(
+                        snapshot,
+                        path.map(st => st.node.id),
+                      );
+                const shown =
+                  head != null
+                    ? `module:${head.module}.${path[head.index]?.edgeName ?? '?'} → ${formatProductionPath(path.slice(head.index + 1), 10)}`
+                    : formatProductionPath(path, 10);
                 lines.push(
                   '',
                   `**Top row's largest owner, shortest path:** ${shown}`,

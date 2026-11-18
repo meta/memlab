@@ -1668,6 +1668,8 @@ export function formatNodeInline(
  */
 export interface RetainerTreeStep {
   id: number;
+  /** On the first step: what to call it instead of "GC root". */
+  rootLabel?: string;
   name: string;
   type: string;
   retainedSize?: number;
@@ -1876,8 +1878,12 @@ function formatEdgeLabel(name: string): string {
   return trimmed; // synthetic edge (e.g. "[entry]", "<symbol>")
 }
 
-function retainerMarker(i: number, len: number): string {
-  if (i === 0) return '   ← GC root';
+function retainerMarker(
+  i: number,
+  len: number,
+  rootLabel: string | undefined,
+): string {
+  if (i === 0) return `   ← ${rootLabel ?? 'GC root'}`;
   if (i === len - 1) return '   ← retained object';
   return '';
 }
@@ -1919,7 +1925,9 @@ function formatRetainerLadder(
       s.repeatCount && s.repeatCount > 1
         ? `  ×${s.repeatCount} (chain of identical hops)`
         : '';
-    lines.push(`${nodeStr}${repeat}${size}${retainerMarker(i, steps.length)}`);
+    lines.push(
+      `${nodeStr}${repeat}${size}${retainerMarker(i, steps.length, steps[0]?.rootLabel)}`,
+    );
   }
   return lines.join('\n');
 }
@@ -1979,7 +1987,7 @@ export function formatRetainerTree(
         ? `  ×${s.repeatCount} (chain of identical hops)`
         : '';
     lines.push(
-      `${pad}${connector}${nodeStr}${repeat}${size}${retainerMarker(i, steps.length)}`,
+      `${pad}${connector}${nodeStr}${repeat}${size}${retainerMarker(i, steps.length, steps[0]?.rootLabel)}`,
     );
   }
   return lines.join('\n');

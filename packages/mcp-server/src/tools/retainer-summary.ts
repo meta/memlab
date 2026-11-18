@@ -23,6 +23,7 @@ import {
   toolResult,
   truncateDomToTag,
 } from '../utils.js';
+import {moduleHeadOf, RAW_PATH_DESCRIPTION} from '../module-labels.js';
 import {
   shortestPathAvoidingDevEdges,
   shortestPathDevHop,
@@ -32,6 +33,33 @@ export interface TraceStep {
   name: string;
   type: string;
   edgeName?: string;
+  /** The node's id, so a step can be resolved again (module labels). */
+  id?: number;
+}
+
+/**
+ * The steps with their module-registry prefix replaced by one `module:<Name>`
+ * step (see `moduleHeadOf`). Unchanged on a non-minified build.
+ */
+export function withModuleHead(
+  snapshot: IHeapSnapshot,
+  steps: TraceStep[],
+): TraceStep[] {
+  const head = moduleHeadOf(
+    snapshot,
+    steps.map(st => st.id),
+  );
+  if (head == null) return steps;
+  const at = steps[head.index];
+  return [
+    {
+      name: `module:${head.module}`,
+      type: 'module',
+      edgeName: at.edgeName,
+      id: at.id,
+    },
+    ...steps.slice(head.index + 1),
+  ];
 }
 
 const FRAMEWORK_PATTERNS = new Set([
@@ -66,7 +94,9 @@ export function getRetainerTrace(node: IHeapNode): TraceStep[] | null {
 
   const visited = new Set<number>([node.id]);
   let curNode: IHeapNode | null = node;
-  const reverseSteps: TraceStep[] = [{name: curNode.name, type: curNode.type}];
+  const reverseSteps: TraceStep[] = [
+    {name: curNode.name, type: curNode.type, id: curNode.id},
+  ];
 
   while (curNode && curNode.hasPathEdge) {
     const edge: IHeapEdge | null = curNode.pathEdge;
@@ -78,6 +108,7 @@ export function getRetainerTrace(node: IHeapNode): TraceStep[] | null {
       name: fromNode.name,
       type: fromNode.type,
       edgeName: String(edge.name_or_index),
+      id: fromNode.id,
     });
     curNode = fromNode;
   }
@@ -122,6 +153,7 @@ export function getProductionTrace(
     steps: prod.steps.map((st, i) => ({
       name: st.node.name,
       type: st.node.type,
+      id: st.node.id,
       ...(i < prod.steps.length - 1 ? {edgeName: st.edgeName} : {}),
     })),
     route: 'production',
@@ -442,6 +474,7 @@ export function registerRetainerSummary(server: McpServer): void {
         .describe(
           'Use compact retainer path format with abbreviated names and → arrows. Reduces token usage by 50-70%.',
         ),
+      raw: z.boolean().optional().describe(RAW_PATH_DESCRIPTION),
       framework_filter: z
         .boolean()
         .optional()
@@ -475,6 +508,7 @@ export function registerRetainerSummary(server: McpServer): void {
       sample_strategy,
       max_depth,
       compact,
+      raw,
       framework_filter,
       include_properties,
       from_result,
@@ -603,9 +637,13 @@ export function registerRetainerSummary(server: McpServer): void {
 
         for (let ni = 0; ni < nodes.length; ni++) {
           const node = nodes[ni];
-          const {steps: trace, route} = exclude_dev
+          const {steps: rawTrace, route} = exclude_dev
             ? getProductionTrace(snapshot, node)
             : {steps: getRetainerTrace(node), route: 'shortest'};
+          const trace =
+            rawTrace != null && raw !== true
+              ? withModuleHead(snapshot, rawTrace)
+              : rawTrace;
           if (!trace) {
             noTrace++;
             continue;

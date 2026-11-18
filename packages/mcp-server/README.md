@@ -409,8 +409,8 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_error_callsites` | Where retained Error objects were created, from the stack frames V8 captured (survives a truncated `.stack`); groups by top frames, names the JSX site of React `_debugStack` Errors. |
 | `memlab_model_duplicates` | Records that share an identity value (`identity_path`, e.g. `__x_id._serialized`): copies of a one-per-id model, where the extras are held and what they retain; per-rung counts with `run_dir`. |
 | `memlab_scope_chains` | Chains of contexts of one function, each call pinning the previous call's scope through a captured closure: invisible to class counts. Flags the React Compiler dev hook-guard artifact (links only through `t0`..`tN`); per-rung lengths with `run_dir`. |
-| `memlab_retainer_trace` | The shortest retainer path for one node; `mode: "tree"` shows every owner as a bounded tree (`max_depth`, `max_nodes`, `max_siblings`) ending at a root or the page global. A repeating multi-hop chain prints once with its count. |
-| `memlab_retainer_summary` | Retainer paths across many instances, clustered by shape. |
+| `memlab_retainer_trace` | The shortest retainer path for one node; `mode: "tree"` shows every owner as a bounded tree (`max_depth`, `max_nodes`, `max_siblings`) ending at a root or the page global. A repeating multi-hop chain prints once with its count. On a minified build the path starts at the module holding the object; `raw: true` shows the registry hops above it. |
+| `memlab_retainer_summary` | Retainer paths across many instances, clustered by shape. On a minified build each pattern starts at the holding module; `raw: true` keeps the registry hops. |
 | `memlab_referrer_summary` | Who points at this, grouped by edge. |
 | `memlab_pinch_points` | Single objects whose release would free the most. |
 | `memlab_dominator_subtree` | What one object holds, expanded downward. |
@@ -433,7 +433,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | Tool | Use it when |
 | --- | --- |
 | `memlab_dom_audit` | Budget the ATTACHED DOM and rank surfaces worth virtualizing. An OPTIMIZATION tool — these elements are correctly retained, there are simply too many. |
-| `memlab_detached_dom` | Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group's count at an earlier rung and sorts by the change. |
+| `memlab_detached_dom` | Detached nodes, with a pinned-vs-GC-eligible split; `group_by:"dominator"` groups by what a fix would actually free (and lists every reference into a top group of 1,000+ nodes), and `baseline` adds each group's count at an earlier rung and sorts by the change. On a minified build the top owner's path starts at the holding module; `raw_paths: true` keeps the registry hops. |
 | `memlab_event_listener_leaks` | Listeners that outlived their target. |
 | `memlab_event_registry` | What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`; a growing row whose callback is a library wrapper (the Arbiter `→ r`) also names the subscriber behind it. |
 

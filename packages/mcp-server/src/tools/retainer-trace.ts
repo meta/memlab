@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import {moduleHeadOf, RAW_PATH_DESCRIPTION} from '../module-labels.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapEdge} from '@memlab/core';
 import {z} from 'zod';
@@ -249,6 +250,7 @@ export function registerRetainerTrace(server: McpServer): void {
         .describe(
           'Show retained size at each node in the trace. Makes it easy to see where memory concentrates along the path. Default true, or false when the session is terse (`memlab_snapshots({terse: true})`), for a trace read only for who holds what.',
         ),
+      raw: z.boolean().optional().describe(RAW_PATH_DESCRIPTION),
       expand: z
         .boolean()
         .optional()
@@ -272,6 +274,7 @@ export function registerRetainerTrace(server: McpServer): void {
       max_siblings,
       show_sizes: showSizesArg,
       expand,
+      raw,
       exclude_dev,
     }) => {
       const show_sizes = showSizesArg ?? !isTerse();
@@ -365,6 +368,23 @@ export function registerRetainerTrace(server: McpServer): void {
             node: st.node,
             ...(i < prod.steps.length - 1 ? {edgeName: st.edgeName} : {}),
           }));
+        }
+
+        // On a minified build, the module registry hops above the module that
+        // holds the object are one fact: "module X holds this".
+        const head =
+          raw === true
+            ? null
+            : moduleHeadOf(
+                snapshot,
+                reverseItems.map(it => it.node.id),
+              );
+        const headLine =
+          head != null
+            ? `**Held by \`module:${head.module}\`** as \`.${reverseItems[head.index]?.edgeName ?? '?'}\`. The ${head.index} hop(s) above it (the module registry, names mangled) are not shown; \`raw: true\` shows them.`
+            : null;
+        if (head != null) {
+          reverseItems = reverseItems.slice(head.index);
         }
 
         // Collapse consecutive internal/V8 nodes for readability, unless the
@@ -475,10 +495,13 @@ export function registerRetainerTrace(server: McpServer): void {
           : '';
         const lines = [
           `${rerouted ? 'Production retainer trace' : 'Retainer trace'} for @${node_id} (${fullLength} nodes${depthNote}):`,
+          ...(headLine != null ? [headLine] : []),
         ];
         if (show_sizes) {
           lines.push(
-            '(top = GC root; each node is retained by the one above it)',
+            head != null
+              ? "(top = the module's exports object; each node is retained by the one above it)"
+              : '(top = GC root; each node is retained by the one above it)',
           );
         }
         const rootNote = classifyRetainerRoot(reverseItems);
@@ -570,6 +593,9 @@ export function registerRetainerTrace(server: McpServer): void {
           // pointing INTO item is the previous item's edgeName. The helper wants
           // each node's incoming edge.
           const treeSteps: RetainerTreeStep[] = items.map((item, i) => ({
+            ...(i === 0 && head != null
+              ? {rootLabel: `module:${head.module} (exports)`}
+              : {}),
             id: item.node.id,
             name: item.node.name,
             type: item.node.type,
