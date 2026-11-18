@@ -1016,6 +1016,53 @@ function quickDiagnosis(
  */
 let menuEmitted = false;
 
+// Loads run one at a time, in the order they arrive. Two loads issued in one
+// message used to interleave: a replace-mode load that finished second evicted
+// the snapshot the other had just made resident, and both replies still said
+// "Loaded", so the next diff failed with "must be resident".
+let loadQueue: Promise<void> = Promise.resolve();
+function acquireLoadLock(): Promise<() => void> {
+  let release!: () => void;
+  const next = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const prior = loadQueue;
+  loadQueue = prior.then(() => next);
+  return prior.then(() => release);
+}
+
+// When each resident handle was loaded, so a replace-mode load can say that it
+// evicted a snapshot another call loaded moments ago.
+const loadedAtMs = new Map<string, number>();
+const RECENT_LOAD_MS = 120_000;
+
+function recentEvictionNote(keepHandle: string | null): string | null {
+  const now = Date.now();
+  const recent = listSnapshots().filter(m => {
+    const at = loadedAtMs.get(m.handle);
+    return m.handle !== keepHandle && at != null && now - at < RECENT_LOAD_MS;
+  });
+  if (recent.length === 0) return null;
+  return `⚠ This replace-mode load unloaded ${recent
+    .map(
+      m =>
+        `\`${m.handle}\` (loaded ${Math.round((now - (loadedAtMs.get(m.handle) ?? now)) / 1000)} s ago)`,
+    )
+    .join(
+      ', ',
+    )}. If a parallel call loaded it to compare against, reload it with \`keep_previous: true\`.`;
+}
+
+function residentLine(currentHandle: string): string {
+  const all = listSnapshots();
+  return `Resident now (${all.length}): ${all
+    .map(
+      m =>
+        `${m.handle === currentHandle ? '→ ' : ''}${m.handle} (${formatBytes(m.totalSize)})`,
+    )
+    .join(', ')}.`;
+}
+
 /** See `menuEmitted`; same reasoning, for the load-cost calibration note. */
 let loadCostNoteEmitted = false;
 
@@ -1247,6 +1294,10 @@ export function registerLoadSnapshot(server: McpServer): void {
       const progress = makeProgressReporter(extra, 'load_snapshot');
       const PHASES = 6;
       const startedAt = Date.now();
+      const releaseLoad = await acquireLoadLock();
+      // Read before anything unloads: replace mode frees the others ahead of
+      // the parse, not at setSnapshot.
+      const evictionNote = keep_previous ? null : recentEvictionNote(null);
       try {
         if (quiet != null || suppress_suggestions != null) {
           setSessionConfig({
@@ -1304,6 +1355,9 @@ export function registerLoadSnapshot(server: McpServer): void {
         if (!force_reload) {
           const resident = findResidentByPath(resolved);
           if (resident != null && (!resident.light || light)) {
+            const hitEvictionNote = keep_previous
+              ? null
+              : recentEvictionNote(resident.handle);
             if (keep_previous) {
               setCurrentSnapshot(resident.handle);
             } else {
@@ -1320,6 +1374,8 @@ export function registerLoadSnapshot(server: McpServer): void {
                 headroomHitMB != null
                   ? `Memory: ~${formatNumber(headroomHitMB)} MB of the ~${formatNumber(getOldSpaceLimitMB())} MB old-space limit free (unchanged — nothing was parsed).`
                   : '',
+                hitEvictionNote ?? '',
+                residentLine(resident.handle),
                 '_Pass `force_reload: true` if the file changed on disk since it was loaded._',
                 // Said out loud, because the flag otherwise reads as
                 // ignored: a cache hit runs no diagnosis, so there are no
@@ -1664,8 +1720,13 @@ export function registerLoadSnapshot(server: McpServer): void {
           {alias, replace: !keep_previous},
         );
 
+        loadedAtMs.set(meta.handle, Date.now());
+        for (const h of [...loadedAtMs.keys()]) {
+          if (!listSnapshots().some(m => m.handle === h)) loadedAtMs.delete(h);
+        }
         const envLabel = envLabelOf({env, realm});
         const lines: string[] = [];
+        if (evictionNote != null) lines.push(evictionNote);
         if (previousMeta && !keep_previous) {
           lines.push(
             `⚠ Replacing previously loaded snapshot "${previousMeta.fileName}" — pass \`keep_previous: true\` to hold BOTH resident and diff them (memlab_diff_snapshots, memlab_explain_delta, memlab_identity_diff, memlab_population_diff all need two). An A/B that evicts its own baseline pays for a second full load of it.`,
@@ -1761,19 +1822,11 @@ export function registerLoadSnapshot(server: McpServer): void {
             `Captured ${iso} (${ageDays} day(s) ago) — if you find a candidate, verify the fix wasn't already deployed since then before writing one.`,
           );
         }
-        if (keep_previous) {
-          const all = listSnapshots();
-          if (all.length > 1) {
-            lines.push(
-              `Resident snapshots (${all.length}): ${all
-                .map(
-                  m =>
-                    `${m.handle === meta.handle ? '→ ' : ''}${m.handle} (${formatBytes(m.totalSize)})`,
-                )
-                .join(', ')}. Switch with memlab_snapshots.`,
-            );
-          }
-        }
+        // Always, and read AFTER this load: the reply is the only place a
+        // caller learns which snapshots a later diff can use.
+        lines.push(
+          `${residentLine(meta.handle)}${listSnapshots().length > 1 ? ' Switch with memlab_snapshots.' : ''}`,
+        );
 
         progress.phase(6, PHASES, 'running quick diagnosis');
         const {warnings, standing, standingKinds} = quickDiagnosis(
@@ -1824,6 +1877,8 @@ export function registerLoadSnapshot(server: McpServer): void {
         return textResult(lines.join('\n'));
       } catch (err) {
         return errorResult(err);
+      } finally {
+        releaseLoad();
       }
     },
   );

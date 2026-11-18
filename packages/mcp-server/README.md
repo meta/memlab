@@ -529,6 +529,7 @@ Load and parse a `.heapsnapshot` (or `.heapsnapshot.gz`) file. Builds indexes, c
 
 - **Snapshot resolution:** `file_path` is a local absolute path. If only `<file_path>.gz` exists, it is decompressed automatically.
 - **Multiple snapshots:** pass `keep_previous: true` to keep earlier snapshots resident for diffing. Each gets a handle (`alias`, defaulting to the file name). When that handle is already taken (two rounds have a `rung_00_c0`), the new one becomes `name#2` and the reply names the resident snapshot that holds `name`.
+- **Concurrent loads:** loads run one at a time, in arrival order. Every reply ends with the snapshots resident after that load. A replace-mode load that unloads a snapshot loaded in the last two minutes warns, naming it.
 - **Size ceilings:** `max_file_size_mb`, `max_nodes` and `max_edges` override the defaults, and `force: true` bypasses the ceilings and the headroom guard (see [Prerequisites](#prerequisites)).
 - **Light loads:** `light: true` skips the dominator / retained-size / shortest-path pass.
 - **Session output controls:** `quiet` and `suppress_suggestions` trim repeated boilerplate.

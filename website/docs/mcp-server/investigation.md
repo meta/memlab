@@ -50,6 +50,12 @@ snapshot gets a *handle*, by default its file name. If that name is already
 taken, the new snapshot gets `<name>#2`; pass `alias` to choose a clearer
 name.
 
+Loads run one at a time, in the order they arrive, so two loads issued
+together cannot evict each other mid-parse. Every load reply ends with the
+snapshots that are loaded after it. A load without `keep_previous` that
+unloads a snapshot loaded in the last two minutes says so, because that is
+usually a comparison that needed `keep_previous: true`.
+
 `memlab_snapshots` lists the loaded snapshots, switches the *active* one that
 tools read by default, and unloads the ones you are done with. Every loaded
 snapshot holds its whole graph in memory, so unload what you don't need.
