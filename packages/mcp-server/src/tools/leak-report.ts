@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import {samplesSection} from '../run-samples.js';
 import {
   ladderSpanSeconds,
   resolveLadderInputs,
@@ -595,6 +596,26 @@ export function registerLeakReport(server: McpServer): void {
         });
         paths = inputs.paths;
         cycles = inputs.cycles;
+        // A round that stopped on a RUNAWAY has one rung and an early
+        // snapshot; its samples are the finding, so report them rather than
+        // refusing for want of a ladder.
+        if (run_dir != null && paths.length < 2) {
+          const between = samplesSection(
+            run_dir,
+            inputs.manifest?.runaway ?? null,
+          );
+          if (between != null) {
+            return toolResult(
+              [
+                `## Leak report (${paths.length} rung)`,
+                '',
+                'Too few rungs for a ladder. The samples taken between rungs are below. After a RUNAWAY, load the early `runaway_t<sec>.heapsnapshot` in the run directory with `memlab_load_snapshot`.',
+                '',
+                ...between,
+              ].join('\n'),
+            );
+          }
+        }
         const ladderAxis = inputs.cyclesPerRung ?? null;
         // The runner measures the account it drove; asking the caller to
         // copy those counts back in meant they were almost never passed.
@@ -629,6 +650,11 @@ export function registerLeakReport(server: McpServer): void {
           inputs.manifest,
         );
         if (segmentNote != null) lines.push(segmentNote, '');
+        const between =
+          run_dir != null
+            ? samplesSection(run_dir, inputs.manifest?.runaway ?? null)
+            : null;
+        if (between != null) lines.push(...between);
         if (n === 2) {
           lines.push(
             '> ⚠️ **Only 2 snapshots: "↑ every step" is monotonic by construction** and cannot separate a real trend from a single GC-band sample. Capture at least a third rung before treating anything here as a leak.',

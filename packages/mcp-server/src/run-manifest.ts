@@ -53,6 +53,14 @@ export interface SettleIdle {
   curve: Array<{tS: number; heapMB: number}>;
 }
 
+function parseRunaway(samples: unknown): string | null {
+  const runaway = (samples as {runaway?: {detail?: unknown} | null} | null)
+    ?.runaway;
+  return runaway != null && typeof runaway.detail === 'string'
+    ? runaway.detail
+    : null;
+}
+
 function parseSettleIdle(
   settle: Record<string, unknown> | null | undefined,
   curveRaw: unknown,
@@ -134,6 +142,11 @@ export interface RunManifest {
    * when the round has no settle rung or predates these fields.
    */
   settleIdle: SettleIdle | null;
+  /**
+   * The runner's RUNAWAY detail (`samples.runaway.detail`): the sampled heap
+   * passed `--runaway-mb` over the baseline and driving stopped. Null otherwise.
+   */
+  runaway: string | null;
   /**
    * Milliseconds since navigation at the moment the BASELINE rung was taken.
    *
@@ -489,6 +502,7 @@ export function loadRunManifest(runDir: string): RunManifest {
       (raw.config as Record<string, unknown> | undefined)?.combos,
     ),
     settleRungPath,
+    runaway: parseRunaway(raw.samples),
     settleIdle: parseSettleIdle(
       settleRaw as Record<string, unknown> | null | undefined,
       raw.settle_curve,
