@@ -57,7 +57,7 @@ interface RunManifest {
     path?: string;
     isolate_restarted?: boolean;
     /** Elements showing the app's error fallback at this rung. */
-    error_ui?: {count?: number; where?: string[]};
+    error_ui?: {count?: number; where?: string[]; error?: string} | null;
   }>;
   steps?: Record<
     string,
@@ -225,24 +225,40 @@ export function auditManifest(
     }
   }
 
-  const withErrorUi = rungs.filter(r => r.error_ui != null);
-  if (withErrorUi.length > 0) {
+  // Only a numeric count is a check. An empty record (older runs wrote one
+  // when no error texts were set) is no check, and a failed probe is unknown.
+  const withErrorUi = rungs.filter(r => typeof r.error_ui?.count === 'number');
+  const probeFailed = rungs.filter(r => r.error_ui?.error != null);
+  const failedNote =
+    probeFailed.length > 0
+      ? ` The probe failed at ${probeFailed.length} rung(s) (${probeFailed[0].error_ui?.error}), so those rungs are unknown.`
+      : '';
+  if (withErrorUi.length > 0 || probeFailed.length > 0) {
     const shown = withErrorUi.filter(r => (r.error_ui?.count ?? 0) > 0);
     checks.push(
-      shown.length === 0
+      shown.length > 0
         ? {
-            name: 'error UI',
-            status: 'ok',
-            detail: `No rung showed the app's error fallback (${withErrorUi.length} checked).`,
-          }
-        : {
             name: 'error UI',
             status: 'caveat',
             detail:
               `The app's error fallback was on screen at ${shown.length} of ${withErrorUi.length} rung(s), from rung ${shown[0].index ?? '?'}` +
               ` (in ${[...new Set(shown.flatMap(r => r.error_ui?.where ?? []))].join(', ') || '?'}). ` +
-              'Rungs after that were driven against the fallback rather than the surface, so a flat result there is a false negative. Find what broke (a failed chunk load, an exception the boundary swallowed) and re-drive.',
-          },
+              'Rungs after that were driven against the fallback rather than the surface, so a flat result there is a false negative. Find what broke (a failed chunk load, an exception the boundary swallowed) and re-drive.' +
+              failedNote,
+          }
+        : probeFailed.length > 0
+          ? {
+              name: 'error UI',
+              status: 'caveat',
+              detail:
+                `No checked rung showed the app's error fallback (${withErrorUi.length} checked).` +
+                failedNote,
+            }
+          : {
+              name: 'error UI',
+              status: 'ok',
+              detail: `No rung showed the app's error fallback (${withErrorUi.length} checked).`,
+            },
     );
   }
 
