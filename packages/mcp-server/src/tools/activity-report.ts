@@ -206,6 +206,8 @@ function readRungs(dir: string): RungRequests {
 }
 
 const RATIO_FLOOR = 0.5;
+const LOOP_RATIO = 10;
+const MAX_LOOP_WARNINGS = 3;
 
 export function registerActivityReport(server: McpServer): void {
   server.tool(
@@ -250,22 +252,41 @@ export function registerActivityReport(server: McpServer): void {
             new Error(`${file} has fewer than two usable samples.`),
           );
         }
-        const baseDir =
-          baseline_run_dir != null
-            ? resolveRoundDir(baseline_run_dir)
-            : findIdleSibling(dir);
+        const explicit = baseline_run_dir != null;
+        const baseDir = explicit
+          ? resolveRoundDir(baseline_run_dir)
+          : findIdleSibling(dir);
         const baseFile = baseDir != null ? readSamplesFile(baseDir) : null;
-        const base =
+        if (explicit && baseFile == null) {
+          return errorResult(
+            new Error(
+              `No samples.jsonl in the baseline ${baseDir}; it cannot be the idle control.`,
+            ),
+          );
+        }
+        const control =
           baseFile != null
             ? overall(
                 activityByLabel(
                   parseSamples(fs.readFileSync(baseFile, 'utf8')),
                 ),
               )
-            : overall(acts);
-        const against =
-          baseFile != null
-            ? `the idle control ${path.basename(baseDir ?? '')}`
+            : null;
+        // A control with no usable interval would put every ratio over the
+        // floor alone: refused when asked for, skipped when found.
+        if (explicit && control != null && control.seconds <= 0) {
+          return errorResult(
+            new Error(
+              `${baseFile} has fewer than two usable samples; it cannot be the idle control.`,
+            ),
+          );
+        }
+        const useControl = control != null && control.seconds > 0;
+        const base = useControl ? control : overall(acts);
+        const against = useControl
+          ? `the idle control ${path.basename(baseDir ?? '')}`
+          : control != null
+            ? `the round as a whole (the idle control ${path.basename(baseDir ?? '')} has no usable samples)`
             : 'the round as a whole (no idle control found)';
         const ratio = (a: Activity, c: Counter): number =>
           perMin(a, c) / Math.max(perMin(base, c), RATIO_FLOOR);
@@ -317,17 +338,24 @@ export function registerActivityReport(server: McpServer): void {
           ),
           '',
         ];
-        const top = ranked[0];
-        if (top != null && load(top) >= 10) {
-          const rate = Math.max(
-            perMin(top, 'requests'),
-            perMin(top, 'resources'),
-          );
+        // Every looping label, not only the top row: an error ratio can
+        // outrank a request loop. The worst loops first, so the cap below
+        // never hides one behind milder ones.
+        const loops = ranked
+          .filter(a => load(a) >= LOOP_RATIO)
+          .sort((a, b) => load(b) - load(a));
+        for (const a of loops.slice(0, MAX_LOOP_WARNINGS)) {
+          const rate = Math.max(perMin(a, 'requests'), perMin(a, 'resources'));
           lines.push(
-            `⚠ **${top.label} makes ${fmt(rate)} requests/min, ×${fmt(load(top))} ${baseFile != null ? 'the idle control' : 'the round average'}.** A loop of requests with a flat heap is work without retention.`,
-            '',
+            `⚠ **${a.label} makes ${fmt(rate)} requests/min, ×${fmt(load(a))} ${useControl ? 'the idle control' : 'the round average'}.** A loop of requests with a flat heap is work without retention.`,
           );
         }
+        if (loops.length > MAX_LOOP_WARNINGS) {
+          lines.push(
+            `…and ${loops.length - MAX_LOOP_WARNINGS} more label(s) at ×${LOOP_RATIO} or more.`,
+          );
+        }
+        if (loops.length > 0) lines.push('');
         const reqs = topRequests(readRungs(dir), limit);
         if (reqs.length > 0) {
           lines.push(
