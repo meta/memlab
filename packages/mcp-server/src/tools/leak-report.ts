@@ -10,6 +10,12 @@
 
 import {samplesSection} from '../run-samples.js';
 import {
+  familiesSection,
+  familyCounts,
+  loadFamilies,
+  plainObjectTotals,
+} from '../known-families.js';
+import {
   ladderSpanSeconds,
   resolveLadderInputs,
   describeSegmentSelection,
@@ -518,6 +524,12 @@ export function registerLeakReport(server: McpServer): void {
         .describe(
           'Only consider classes that grew at EVERY step (default false: grew-net classes are included and flagged as noisy).',
         ),
+      families: z
+        .string()
+        .optional()
+        .describe(
+          'Path to a known-families JSON file (`{"families": [{id, label, shapes: [[prop, ...]], status?, finding?, retainer?}]}`). Each family is counted per rung from the rung sidecars (plain objects having all the props of one of its shapes, so it matches on minified builds and loads no graph), and the report opens with a "Known families" table and how many new plain objects they leave unexplained. Defaults to run.json `families_file` when `run_dir` is given.',
+        ),
       include_artifacts: z
         .boolean()
         .optional()
@@ -570,6 +582,7 @@ export function registerLeakReport(server: McpServer): void {
         min_growth_count,
         monotonic_only,
         include_artifacts,
+        families,
         baseline_run_dir,
         auto_baseline,
         include_settle,
@@ -655,6 +668,31 @@ export function registerLeakReport(server: McpServer): void {
             ? samplesSection(run_dir, inputs.manifest?.runaway ?? null)
             : null;
         if (between != null) lines.push(...between);
+        const familiesFile = families ?? inputs.manifest?.familiesFile ?? null;
+        if (familiesFile != null) {
+          try {
+            const rungPaths = steps.map(st => st.localPath);
+            const rows = await familyCounts(
+              rungPaths,
+              loadFamilies(familiesFile),
+            );
+            if (rows.length > 0) {
+              lines.push(
+                ...familiesSection(
+                  familiesFile,
+                  rows,
+                  await plainObjectTotals(rungPaths),
+                  typeof cycles === 'number' ? cycles : undefined,
+                ),
+              );
+            }
+          } catch (err: unknown) {
+            lines.push(
+              `> ⚠️ Known families not read from ${familiesFile}: ${err instanceof Error ? err.message : String(err)}`,
+              '',
+            );
+          }
+        }
         if (n === 2) {
           lines.push(
             '> ⚠️ **Only 2 snapshots: "↑ every step" is monotonic by construction** and cannot separate a real trend from a single GC-band sample. Capture at least a third rung before treating anything here as a leak.',

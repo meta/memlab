@@ -147,6 +147,8 @@ export interface RunManifest {
    * passed `--runaway-mb` over the baseline and driving stopped. Null otherwise.
    */
   runaway: string | null;
+  /** run.json `families_file`: the app's known-families file, if any. */
+  familiesFile: string | null;
   /**
    * Milliseconds since navigation at the moment the BASELINE rung was taken.
    *
@@ -503,6 +505,8 @@ export function loadRunManifest(runDir: string): RunManifest {
     ),
     settleRungPath,
     runaway: parseRunaway(raw.samples),
+    familiesFile:
+      typeof raw.families_file === 'string' ? raw.families_file : null,
     settleIdle: parseSettleIdle(
       settleRaw as Record<string, unknown> | null | undefined,
       raw.settle_curve,
