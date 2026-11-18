@@ -311,7 +311,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_leak_report',
-        'The ladder verdict: per-class growth across an ordered set of snapshots; SATURATING (warm-up) and STEP+LINEAR (post-step rate) rows are told apart from linear growth, and rows that grow by one shared unit are grouped. With `run_dir`, a round that sampled between rungs gets a "Between rungs" section that flags a heap rising with no requests, a request storm, or a runaway stop. `families` (or run.json `families_file`) labels the growth an earlier round already explained and counts what is NEW. `Object` growth is split by property shape, each shape with the module holding its newest instances.',
+        'The ladder verdict: per-class growth across an ordered set of snapshots; SATURATING (warm-up) and STEP+LINEAR (post-step rate) rows are told apart from linear growth, and rows that grow by one shared unit are grouped. With `run_dir`, a round that sampled between rungs gets a "Between rungs" section that flags a heap rising with no requests, a request storm, or a runaway stop. `families` (or run.json `families_file`) labels the growth an earlier round already explained and counts what is NEW. `Object` growth is split by property shape, each shape with the module holding its newest instances. A `system / ExternalStringData` row that is mostly script source reads 📦 CODE LOADED (or bundle DUPLICATION) and is not a leak candidate.',
       ],
       [
         'memlab_growth_cohort',

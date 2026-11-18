@@ -229,6 +229,80 @@ export function findIdleSibling(runDir: string): string | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
+const EXTERNAL_STRING_KEY = 'native::system / ExternalStringData';
+
+const SCRIPT_PREFIX = 'system / Script';
+
+function isScript(node: IHeapNode): boolean {
+  return node.name.startsWith(SCRIPT_PREFIX);
+}
+
+/** A script's URL or name: V8 names the node `system / Script / <name>`. */
+function scriptName(script: IHeapNode): string | null {
+  const name = script.name.slice(SCRIPT_PREFIX.length).replace(/^ \/ /, '');
+  return name !== '' ? name : null;
+}
+
+/** The script whose source `data` (an ExternalStringData) is, if any. */
+function scriptOfSourceData(data: IHeapNode): IHeapNode | null {
+  for (const holder of data.referrers) {
+    const str = holder.fromNode;
+    if (!str.type.includes('string')) continue;
+    for (const e of str.referrers) {
+      if (isScript(e.fromNode) && String(e.name_or_index) === 'source') {
+        return e.fromNode;
+      }
+    }
+  }
+  return null;
+}
+
+/** External string bytes in the final rung, and how much is script source. */
+interface ExternalStrings {
+  bytes: number;
+  scriptBytes: number;
+  /** The newest script sources: [script name, bytes], highest id first. */
+  newestScripts: Array<{id: number; name: string; bytes: number}>;
+}
+
+function noteExternalString(acc: ExternalStrings, node: IHeapNode): void {
+  acc.bytes += node.self_size;
+  const script = scriptOfSourceData(node);
+  if (script == null) return;
+  acc.scriptBytes += node.self_size;
+  const name = scriptName(script) ?? `@${script.id}`;
+  acc.newestScripts.push({id: node.id, name, bytes: node.self_size});
+  acc.newestScripts.sort((a, b) => b.id - a.id);
+  if (acc.newestScripts.length > 3) acc.newestScripts.pop();
+}
+
+/**
+ * The verdict for ExternalStringData growth that is mostly script source:
+ * code loaded the first time a surface opened, not a leak, unless one script
+ * name is loaded more than once (the same bundle twice). Null when script
+ * source is under 80% of the class's bytes.
+ */
+function codeLoaded(
+  acc: ExternalStrings,
+  scriptsByName: ReadonlyMap<string, number>,
+): string | null {
+  if (acc.bytes === 0 || acc.scriptBytes < 0.8 * acc.bytes) return null;
+  const dup = [...scriptsByName].find(([, count]) => count > 1);
+  // A bundle URL's query (`?…&sourcemaps=1`) is the same on every script;
+  // its path's last segment is what tells them apart.
+  const short = (n: string) => {
+    const tail = n.split('?')[0].split('/').filter(Boolean).pop() ?? n;
+    return tail.length > 40 ? '…' + tail.slice(-39) : tail;
+  };
+  if (dup != null) {
+    return `📦 code loaded, but ${short(dup[0])} is loaded ${dup[1]} times — bundle DUPLICATION`;
+  }
+  return (
+    `📦 CODE LOADED — ${Math.round((100 * acc.scriptBytes) / acc.bytes)}% of its bytes are script source` +
+    ` (newest: ${[...new Set(acc.newestScripts.map(x => short(x.name)))].join(', ')}), not a leak`
+  );
+}
+
 function modalRetainer(nodes: readonly IHeapNode[]): {
   label: string;
   votes: number;
@@ -742,6 +816,14 @@ export function registerLeakReport(server: McpServer): void {
           shapeRows.map(r => [r.key, []]),
         );
         const snapshot = await getFullHeapFromFile(steps[n - 1].localPath);
+        // Script name -> how many `system / Script` nodes carry it, for the
+        // CODE LOADED verdict's duplication check.
+        const scriptsByName = new Map<string, number>();
+        const externalStrings: ExternalStrings = {
+          bytes: 0,
+          scriptBytes: 0,
+          newestScripts: [],
+        };
         const devRoots = collectDevRoots(snapshot);
         const reached =
           devRoots.byId.size > 0
@@ -772,6 +854,15 @@ export function registerLeakReport(server: McpServer): void {
           const ev = evidence.get(
             `${node.type}::${normalizeClassName(node.name)}`,
           );
+          if (node.name === 'system / ExternalStringData') {
+            noteExternalString(externalStrings, node);
+          }
+          if (node.type === 'code' && isScript(node)) {
+            const name = scriptName(node);
+            if (name != null) {
+              scriptsByName.set(name, (scriptsByName.get(name) ?? 0) + 1);
+            }
+          }
           if (
             shapeNewest.size > 0 &&
             node.name === 'Object' &&
@@ -1185,6 +1276,11 @@ export function registerLeakReport(server: McpServer): void {
               ev.devModule >= ev.gatedModule
                 ? `🛠 dev-only MODULE (${ev.devWhy ?? 'not production'})`
                 : `🛠 flag-gated MODULE (${ev.gatedWhy ?? 'off in production'})`;
+          } else if (
+            r.key === EXTERNAL_STRING_KEY &&
+            codeLoaded(externalStrings, scriptsByName) != null
+          ) {
+            verdict = codeLoaded(externalStrings, scriptsByName) as string;
           } else if (drained && settle != null && !settle.present) {
             // Absent from the settle histogram is still a drain — nothing of
             // the class survived — but it is a drain measured by ABSENCE,
