@@ -84,6 +84,10 @@ const MAX_SAMPLES_PER_CLASS = 8;
 // Plain-object shapes listed under the `Object` row.
 const SHAPE_FAMILY_ROWS = 5;
 
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Instances per class the dev-MODULE provenance walk runs on.
  *
@@ -809,13 +813,20 @@ export function registerLeakReport(server: McpServer): void {
         // only way to ask retention questions about the classes the trend pass
         // just identified.
         const objectRow = candidates.find(c => c.key === 'object::Object');
-        const shapeRows =
-          objectRow != null
-            ? await topObjectShapeGrowth(
-                steps.map(st => st.localPath),
-                SHAPE_FAMILY_ROWS,
-              )
-            : [];
+        // The shapes table is optional: a failure anywhere in it leaves a note
+        // in its place, never a failed report.
+        let shapeNote: string | null = null;
+        let shapeRows: Awaited<ReturnType<typeof topObjectShapeGrowth>> = [];
+        if (objectRow != null) {
+          try {
+            shapeRows = await topObjectShapeGrowth(
+              steps.map(st => st.localPath),
+              SHAPE_FAMILY_ROWS,
+            );
+          } catch (err: unknown) {
+            shapeNote = errorText(err);
+          }
+        }
         const shapeNewest = new Map<string, IHeapNode[]>(
           shapeRows.map(r => [r.key, []]),
         );
@@ -873,11 +884,16 @@ export function registerLeakReport(server: McpServer): void {
             node.type === 'object' &&
             node.hasPathEdge
           ) {
-            const newest = shapeNewest.get(objectShapeKey(node));
-            if (newest != null) {
-              newest.push(node);
-              newest.sort((a, b) => b.id - a.id);
-              if (newest.length > MAX_SAMPLES_PER_CLASS) newest.pop();
+            try {
+              const newest = shapeNewest.get(objectShapeKey(node));
+              if (newest != null) {
+                newest.push(node);
+                newest.sort((a, b) => b.id - a.id);
+                if (newest.length > MAX_SAMPLES_PER_CLASS) newest.pop();
+              }
+            } catch (err: unknown) {
+              shapeNote = errorText(err);
+              shapeNewest.clear();
             }
           }
           if (!ev) return;
@@ -1437,32 +1453,39 @@ export function registerLeakReport(server: McpServer): void {
           ];
         });
         lines.push(markdownTable(headers, tableRows, rightCols));
-        if (shapeRows.length > 0) {
-          const exportsOwner = exportsOwnerMap(snapshot);
-          const owners = new Map<string, ShapeOwner>();
-          for (const [key, nodes] of shapeNewest) {
-            const votes = new Map<string, number>();
-            for (const node of nodes) {
-              const m = ownerModuleOf(snapshot, node, exportsOwner);
-              if (m != null) votes.set(m, (votes.get(m) ?? 0) + 1);
+        if (shapeRows.length > 0 && shapeNote == null) {
+          try {
+            const exportsOwner = exportsOwnerMap(snapshot);
+            const owners = new Map<string, ShapeOwner>();
+            for (const [key, nodes] of shapeNewest) {
+              const votes = new Map<string, number>();
+              for (const node of nodes) {
+                const m = ownerModuleOf(snapshot, node, exportsOwner);
+                if (m != null) votes.set(m, (votes.get(m) ?? 0) + 1);
+              }
+              const best = [...votes].sort((a, b) => b[1] - a[1])[0];
+              owners.set(key, {
+                module: best?.[0] ?? null,
+                votes: best?.[1] ?? 0,
+                of: nodes.length,
+              });
             }
-            const best = [...votes].sort((a, b) => b[1] - a[1])[0];
-            owners.set(key, {
-              module: best?.[0] ?? null,
-              votes: best?.[1] ?? 0,
-              of: nodes.length,
-            });
+            lines.push(
+              '',
+              ...shapeFamiliesSection(
+                shapeRows,
+                owners,
+                knownFamilies,
+                typeof cycles === 'number' ? cycles : undefined,
+                objectRow != null ? objectRow.netCount : null,
+              ),
+            );
+          } catch (err: unknown) {
+            shapeNote = errorText(err);
           }
-          lines.push(
-            '',
-            ...shapeFamiliesSection(
-              shapeRows,
-              owners,
-              knownFamilies,
-              typeof cycles === 'number' ? cycles : undefined,
-              objectRow != null ? objectRow.netCount : null,
-            ),
-          );
+        }
+        if (shapeNote != null) {
+          lines.push('', `> ⚠️ Plain-object shapes not shown: ${shapeNote}`);
         }
 
         if (devModuleClasses > 0) {
