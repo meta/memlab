@@ -10,7 +10,6 @@
 const path = require('path');
 const {chromium, devices} = require('playwright');
 
-// eslint-disable-next-line fb-www/async-iife-termination
 (async () => {
   const args = process.argv.slice(2);
   if (args.length === 0) {
@@ -37,4 +36,7 @@ const {chromium, devices} = require('playwright');
   await page.goto('file://' + filePath);
 
   // Don’t close the browser so you can inspect
-})();
+})().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
