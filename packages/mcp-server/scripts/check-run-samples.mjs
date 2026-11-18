@@ -146,6 +146,80 @@ test('top paths are merged across reloads', () => {
   ]);
 });
 
+test('a self-reloading loop in the last minute is still a storm', () => {
+  // A self-reloading loop: 10 requests a second, the counter resetting at
+  // every reload (each 20s), a new time_origin per document.
+  const s = summarizeSamples(
+    series(120, t => ({
+      t_s: t,
+      heap_mb: 50,
+      xhr: t < 120 ? Math.floor(t / 60) : ((t - 120) % 20) * 10,
+      time_origin: t < 120 ? 1 : 2 + Math.floor((t - 120) / 20),
+    })),
+  );
+  assert.ok(
+    s.flags.some(f => /^REQUEST RATE: [5-6][0-9]{2}\/min/.test(f)),
+    s.flags,
+  );
+  assert.equal(s.reloads, 6);
+});
+
+test('a reload whose first reading is not lower is still a new document', () => {
+  const s = summarizeSamples([
+    {t_s: 0, heap_mb: 10, xhr: 4, time_origin: 1},
+    {t_s: 2, heap_mb: 10, xhr: 5, time_origin: 1},
+    {t_s: 4, error: 'reloading'},
+    {t_s: 6, heap_mb: 8, xhr: 7, time_origin: 2},
+  ]);
+  assert.equal(s.requests, 12);
+  assert.equal(s.reloads, 1);
+});
+
+test('requests between two readings are not hidden by a reload between them', () => {
+  // Equal counters at both ends, but the page reloaded and made 30 requests.
+  const s = summarizeSamples([
+    ...series(10, t => ({t_s: t, heap_mb: 50 + 2 * t, xhr: 3, time_origin: 1})),
+    ...series(20, t => ({
+      t_s: 20 + t,
+      heap_mb: 50 + 2 * t,
+      xhr: Math.min(30, t),
+      time_origin: 2,
+    })),
+  ]);
+  assert.deepEqual(s.flags, []);
+});
+
+test('the steepest rise is found in a window wider than the minimum', () => {
+  // Flat for 30s, then +3 MB/s: only windows starting before the rise and
+  // ending after it see the steepest 30s+ rise from the earliest start.
+  const s = summarizeSamples(
+    series(60, t => ({
+      t_s: t,
+      heap_mb: t < 30 ? 50 : 50 + 3 * (t - 30),
+      xhr: 1,
+    })),
+  );
+  assert.ok(s.maxRiseMBPerS >= 2.9, String(s.maxRiseMBPerS));
+  assert.match(s.flags[0], /^HEAP RISING WITH NO REQUESTS: \+3\.0 MB\/s/);
+});
+
+test('top paths keep the documents before a reload', () => {
+  const s = summarizeSamples([
+    {
+      t_s: 0,
+      heap_mb: 10,
+      xhr: 400,
+      time_origin: 1,
+      top_paths: [['/a.jpg', 400]],
+    },
+    {t_s: 2, heap_mb: 10, xhr: 2, time_origin: 2, top_paths: [['/b', 2]]},
+  ]);
+  assert.deepEqual(s.topPaths, [
+    ['/a.jpg', 400],
+    ['/b', 2],
+  ]);
+});
+
 test('samplesSection reads samples.jsonl and leads with the runaway', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-samples-'));
   assert.equal(samplesSection(dir, null), null);
