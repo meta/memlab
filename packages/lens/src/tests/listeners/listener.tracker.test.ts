@@ -276,4 +276,35 @@ test.describe('event listener tracking', () => {
       {target: 'document', type: 'keydown', leaky: true, count: 5, growth: 4},
     ]);
   });
+  test('a tracking failure never reaches the app', async ({page}) => {
+    const result = await page.evaluate(() => {
+      const w = window as AnyValue;
+      const scan = w.MemLens.createReactMemoryScan({
+        trackEventListenerLeaks: true,
+      });
+      const div = document.createElement('div');
+      document.body.appendChild(div);
+      const OriginalWeakRef = w.WeakRef;
+      // make MemLens's own bookkeeping throw
+      w.WeakRef = function () {
+        throw new Error('broken WeakRef');
+      };
+      let error = null;
+      let clicks = 0;
+      const onClick = () => ++clicks;
+      try {
+        div.addEventListener('click', onClick);
+        div.click();
+        div.removeEventListener('click', onClick);
+        div.click();
+      } catch (e) {
+        error = String(e);
+      } finally {
+        w.WeakRef = OriginalWeakRef;
+      }
+      scan.dispose();
+      return {error, clicks};
+    });
+    expect(result).toEqual({error: null, clicks: 1});
+  });
 });

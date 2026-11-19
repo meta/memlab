@@ -33,10 +33,10 @@ function getGlobalTargetName(
 }
 
 // The first stack frame outside MemLens: [0] is the message, [1] this
-// function, [2] the addEventListener wrapper, [3] its caller.
+// function, [2] #recordAdd, [3] the addEventListener wrapper, [4] its caller.
 function getCallSite(): string {
   const frames = new Error().stack?.split('\n') ?? [];
-  return frames[3]?.trim().replace(/^at /, '') ?? '<unknown>';
+  return frames[4]?.trim().replace(/^at /, '') ?? '<unknown>';
 }
 
 // The DOM identifies a listener by its type, callback and capture flag;
@@ -120,35 +120,12 @@ export class EventListenerTracker {
         options?: boolean | AddEventListenerOptions,
       ) {
         self.#originalAddEventListener.call(this, type, listener, options);
-        // a null listener is valid and the browser ignores it
-        if (!self.#isActive || listener == null || !self.#isTracked(this)) {
-          return;
+        // a MemLens failure must never break the app's call
+        try {
+          self.#recordAdd(this, type, listener, options);
+        } catch {
+          // ignore
         }
-        const capture = getCapture(options);
-        const optionsObject = typeof options === 'object' ? options : null;
-        // the browser does not add a listener whose signal is already aborted
-        if (optionsObject?.signal?.aborted) {
-          return;
-        }
-        const listeners = self.#getListeners(this) ?? [];
-        // the browser ignores a listener that is already registered
-        if (listeners.some(e => isSameListener(e, type, listener, capture))) {
-          return;
-        }
-        const entry: EventListenerEntry = {
-          type,
-          cb: new WeakRef(listener),
-          capture,
-        };
-        if (this instanceof Element) {
-          const fiber = getFiberNodeFromElement(this);
-          entry.fiber = fiber ? new WeakRef(fiber) : undefined;
-        } else {
-          entry.site = getCallSite();
-        }
-        listeners.push(entry);
-        self.#setListeners(this, listeners);
-        self.#forgetWhenBrowserRemoves(this, entry, optionsObject);
       };
 
     EventTarget.prototype.removeEventListener =
@@ -159,17 +136,67 @@ export class EventListenerTracker {
         options?: boolean | EventListenerOptions,
       ) {
         self.#originalRemoveEventListener.call(this, type, listener, options);
-        if (!self.#isActive || !self.#isTracked(this)) {
-          return;
-        }
-        const capture = getCapture(options);
-        const entry = self
-          .#getListeners(this)
-          ?.find(e => isSameListener(e, type, listener, capture));
-        if (entry != null) {
-          self.#forgetEntry(new WeakRef(this), entry);
+        try {
+          self.#recordRemove(this, type, listener, options);
+        } catch {
+          // ignore
         }
       };
+  }
+
+  #recordAdd(
+    target: EventTarget,
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ): void {
+    // a null listener is valid and the browser ignores it
+    if (!this.#isActive || listener == null || !this.#isTracked(target)) {
+      return;
+    }
+    const capture = getCapture(options);
+    const optionsObject = typeof options === 'object' ? options : null;
+    // the browser does not add a listener whose signal is already aborted
+    if (optionsObject?.signal?.aborted) {
+      return;
+    }
+    const listeners = this.#getListeners(target) ?? [];
+    // the browser ignores a listener that is already registered
+    if (listeners.some(e => isSameListener(e, type, listener, capture))) {
+      return;
+    }
+    const entry: EventListenerEntry = {
+      type,
+      cb: new WeakRef(listener),
+      capture,
+    };
+    if (target instanceof Element) {
+      const fiber = getFiberNodeFromElement(target);
+      entry.fiber = fiber ? new WeakRef(fiber) : undefined;
+    } else {
+      entry.site = getCallSite();
+    }
+    listeners.push(entry);
+    this.#setListeners(target, listeners);
+    this.#forgetWhenBrowserRemoves(target, entry, optionsObject);
+  }
+
+  #recordRemove(
+    target: EventTarget,
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions,
+  ): void {
+    if (!this.#isActive || !this.#isTracked(target)) {
+      return;
+    }
+    const capture = getCapture(options);
+    const entry = this.#getListeners(target)?.find(e =>
+      isSameListener(e, type, listener, capture),
+    );
+    if (entry != null) {
+      this.#forgetEntry(new WeakRef(target), entry);
+    }
   }
 
   // The browser removes a `once` listener after it runs and a listener whose
