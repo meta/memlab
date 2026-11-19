@@ -82,6 +82,15 @@ export default class ReactFiberAnalyzer {
       }
       analyzeFiber(fiberNode);
 
+      // the tree of a fiber that was already walked needs no root lookup,
+      // which walks up the whole ancestor chain
+      if (
+        topDownVisited.has(fiberNode) ||
+        (fiberNode.alternate != null && topDownVisited.has(fiberNode.alternate))
+      ) {
+        continue;
+      }
+
       // try to traverse each fiber node in the entire fiber tree
       const rootFiber = getCurrentHostRootFiber(fiberNode);
       if (rootFiber == null) {

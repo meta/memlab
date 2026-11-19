@@ -284,22 +284,37 @@ export default class ReactMemoryScan {
     }
   }
 
-  #updateDetachedRecords(): void {
+  // Updates the detached records and returns how many detached elements
+  // have survived enough full GCs.
+  #updateDetachedRecords(): number {
     const gcCount = this.#gcTracker.getCount();
+    let confirmed = 0;
     for (const weakRef of this.#elementWeakRefs) {
       const element = weakRef.deref();
       if (element == null) {
         continue;
       }
+      const record = this.#detachedRecords.get(element);
       if (element.isConnected) {
-        this.#detachedRecords.delete(element);
-      } else if (!this.#detachedRecords.has(element)) {
+        if (record != null) {
+          this.#detachedRecords.delete(element);
+        }
+      } else if (record == null) {
         this.#detachedRecords.set(element, {
           detachedAt: Date.now(),
           gcCountAtDetach: gcCount,
         });
+        if (this.#detachedElementMinGCCount <= 0) {
+          ++confirmed;
+        }
+      } else if (
+        gcCount - record.gcCountAtDetach >=
+        this.#detachedElementMinGCCount
+      ) {
+        ++confirmed;
       }
     }
+    return confirmed;
   }
 
   // full GCs the element has survived since MemLens saw it detached
@@ -540,7 +555,7 @@ export default class ReactMemoryScan {
     this.#updateElementToComponentInfo(allElements);
     this.recordBoundingRectangles(allElements);
     utils.updateWeakRefList(weakRefList, allElements);
-    this.#updateDetachedRecords();
+    const confirmedDetached = this.#updateDetachedRecords();
     const scanResult = this.#fiberAnalyzer.scan(
       weakRefList,
       this.#elementToComponentStack,
@@ -553,10 +568,7 @@ export default class ReactMemoryScan {
     scanResult.eventListenerLeaks = this.#scanEventListenerLeaks();
     scanResult.globalListenerSites = this.#scanGlobalListenerSites();
     scanResult.gcCount = this.#gcTracker.getCount();
-    scanResult.totalDetachedElementsSurvivingGC = weakRefList.filter(ref => {
-      const element = ref.deref();
-      return element != null && this.#isConfirmedDetached(element);
-    }).length;
+    scanResult.totalDetachedElementsSurvivingGC = confirmedDetached;
 
     (window as AnyValue).leakedFibers = this.packLeakedFibers(leakedFibers);
     const end = Date.now();

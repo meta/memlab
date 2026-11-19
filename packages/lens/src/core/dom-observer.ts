@@ -46,7 +46,7 @@ export class DOMObserver {
       return;
     }
     this.#mutationObserver = new MutationObserver(mutationsList => {
-      let newlyAdded: Array<WeakRef<Element>> = [];
+      const newlyAdded: Array<WeakRef<Element>> = [];
       const updateCallback = (node: Node) => {
         if (node == null) {
           return;
@@ -59,8 +59,9 @@ export class DOMObserver {
           return;
         }
         if (CAPTURE_ALL_REMOVED_ELEMENTS) {
-          const diff = this.#gatherAllElementsInRemovedSubtree(element);
-          newlyAdded = [...newlyAdded, ...diff];
+          for (const ref of this.#gatherAllElementsInRemovedSubtree(element)) {
+            newlyAdded.push(ref);
+          }
         } else if (!this.#trackedElementSet.has(element)) {
           const ref = new WeakRef(element);
           this.#trackedElements.push(ref);
@@ -69,8 +70,8 @@ export class DOMObserver {
         }
       };
 
+      // added elements are found by the scan's DOM sweep
       mutationsList.forEach(mutation => {
-        mutation.addedNodes.forEach(updateCallback);
         mutation.removedNodes.forEach(updateCallback);
       });
 

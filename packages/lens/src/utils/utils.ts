@@ -28,15 +28,11 @@ export function getDOMElements(): Array<WeakRef<Element>> {
 }
 
 export function getDOMElementCount(): number {
-  const elements = Array.from(document.querySelectorAll('*'));
-  let ret = 0;
-  for (const element of elements) {
-    if (isVisualizerElement(element)) {
-      continue;
-    }
-    ++ret;
-  }
-  return ret;
+  const total = document.getElementsByTagName('*').length;
+  const visualizerElements = document.querySelectorAll(
+    '[data-visualizer="true"]',
+  ).length;
+  return total - visualizerElements;
 }
 
 export function getMeaningfulName(name: Nullable<string>) {
@@ -99,7 +95,7 @@ export function updateWeakRefList(
       continue;
     }
     set.add(element);
-    weakRefList.push(new WeakRef(element));
+    weakRefList.push(elementRef);
   }
   return weakRefList;
 }
