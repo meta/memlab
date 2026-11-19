@@ -10,7 +10,7 @@
 import type {AnyValue} from '../../core/types';
 import {test, expect} from '@playwright/test';
 import fs from 'fs';
-import {runBundleFilePath, wait} from '../utils/test-utils';
+import {forceGC, runBundleFilePath, wait} from '../utils/test-utils';
 
 test('dispose removes the overlay, its document listeners and its boxes', async ({
   page,
@@ -39,6 +39,8 @@ test('dispose removes the overlay, its document listeners and its boxes', async 
     (window as AnyValue).__keep = card;
     card?.remove();
   });
+  await wait(1200);
+  await forceGC(page);
   await wait(1200);
   const whileRunning = await documentListenerTypes();
   await page.evaluate(() => {

@@ -10,7 +10,7 @@
 import type {AnyValue} from '../../core/types';
 import {test, expect} from '@playwright/test';
 import fs from 'fs';
-import {runBundleFilePath, wait} from '../utils/test-utils';
+import {forceGC, runBundleFilePath, wait} from '../utils/test-utils';
 
 function overlayBoxes(page: AnyValue): Promise<Array<AnyValue>> {
   return page.evaluate(() =>
@@ -53,7 +53,10 @@ test('an element without a size does not stop the overlay from painting others',
   });
   await wait(1000);
   await page.evaluate(() => (window as AnyValue).__keep[1].remove());
-  await wait(1500);
+  await wait(1200);
+  // MemLens outlines a detached element only after it survived a full GC
+  await forceGC(page);
+  await wait(1200);
 
   expect(await overlayBoxes(page)).toEqual([
     {width: '300px', height: '200px', zIndex: expect.stringMatching(/^\d+$/)},

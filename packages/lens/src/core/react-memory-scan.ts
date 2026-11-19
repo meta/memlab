@@ -34,6 +34,13 @@ import {config} from '../config/config';
 import {EventListenerTracker} from './event-listener-tracker';
 import {GCTracker} from './gc-tracker';
 
+type DetachedRecord = {
+  detachedAt: number;
+  gcCountAtDetach: number;
+};
+
+const DEFAULT_MIN_GC_COUNT = 1;
+
 export default class ReactMemoryScan {
   static nextElementId = 0;
   #elementWeakRefs: Array<WeakRef<Element>>;
@@ -52,6 +59,8 @@ export default class ReactMemoryScan {
   #isDisposed: boolean;
   #globalListenerBaseline: Map<string, number> = new Map();
   #gcTracker: GCTracker = new GCTracker();
+  #detachedRecords: WeakMap<Element, DetachedRecord> = new WeakMap();
+  #detachedElementMinGCCount: number;
 
   constructor(options: CreateOptions = {}) {
     this.#elementWeakRefs = [];
@@ -71,6 +80,10 @@ export default class ReactMemoryScan {
     this.#extensions = options.extensions ?? [];
     this.#scanIntervalMs =
       options.scanIntervalMs ?? config.performance.scanIntervalMs;
+    // without GC detection every reachable detached element is reported
+    this.#detachedElementMinGCCount = this.#gcTracker.isSupported()
+      ? (options.detachedElementMinGCCount ?? DEFAULT_MIN_GC_COUNT)
+      : 0;
   }
 
   #log(...args: AnyValue[]): void {
@@ -241,11 +254,55 @@ export default class ReactMemoryScan {
     }
   }
 
-  getDetachedDOMInfo(): Array<DOMElementInfo> {
+  #updateDetachedRecords(): void {
+    const gcCount = this.#gcTracker.getCount();
+    for (const weakRef of this.#elementWeakRefs) {
+      const element = weakRef.deref();
+      if (element == null) {
+        continue;
+      }
+      if (element.isConnected) {
+        this.#detachedRecords.delete(element);
+      } else if (!this.#detachedRecords.has(element)) {
+        this.#detachedRecords.set(element, {
+          detachedAt: Date.now(),
+          gcCountAtDetach: gcCount,
+        });
+      }
+    }
+  }
+
+  // full GCs the element has survived since MemLens saw it detached
+  #getGCSurvivedCount(element: Element): number {
+    const record = this.#detachedRecords.get(element);
+    if (record == null) {
+      return 0;
+    }
+    return this.#gcTracker.getCount() - record.gcCountAtDetach;
+  }
+
+  #isConfirmedDetached(element: Element): boolean {
+    return (
+      !element.isConnected &&
+      this.#getGCSurvivedCount(element) >= this.#detachedElementMinGCCount
+    );
+  }
+
+  /**
+   * Detached elements that are still alive after the configured number of
+   * full GCs (`detachedElementMinGCCount`, 1 by default). Pass
+   * `includeUnconfirmed` to also get those still waiting for a GC.
+   */
+  getDetachedDOMInfo(
+    options: {includeUnconfirmed?: boolean} = {},
+  ): Array<DOMElementInfo> {
     const detachedDOMElements = [];
     for (const weakRef of this.#elementWeakRefs) {
       const element = weakRef.deref();
       if (element == null || element.isConnected) {
+        continue;
+      }
+      if (!options.includeUnconfirmed && !this.#isConfirmedDetached(element)) {
         continue;
       }
       // add a unique id to that detach dom element
@@ -260,6 +317,8 @@ export default class ReactMemoryScan {
         element: weakRef,
         boundingRect: this.#elementToBoundingRects.get(element),
         componentStack,
+        detachedAt: this.#detachedRecords.get(element)?.detachedAt,
+        gcSurvivedCount: this.#getGCSurvivedCount(element),
       });
     }
     return detachedDOMElements;
@@ -393,6 +452,7 @@ export default class ReactMemoryScan {
     this.#updateElementToComponentInfo(allElements);
     this.recordBoundingRectangles(allElements);
     utils.updateWeakRefList(weakRefList, allElements);
+    this.#updateDetachedRecords();
     const scanResult = this.#fiberAnalyzer.scan(
       weakRefList,
       this.#elementToComponentStack,
@@ -405,6 +465,10 @@ export default class ReactMemoryScan {
     scanResult.eventListenerLeaks = this.#scanEventListenerLeaks();
     scanResult.globalListenerSites = this.#scanGlobalListenerSites();
     scanResult.gcCount = this.#gcTracker.getCount();
+    scanResult.totalDetachedElementsSurvivingGC = weakRefList.filter(ref => {
+      const element = ref.deref();
+      return element != null && this.#isConfirmedDetached(element);
+    }).length;
 
     (window as AnyValue).leakedFibers = this.packLeakedFibers(leakedFibers);
     const end = Date.now();

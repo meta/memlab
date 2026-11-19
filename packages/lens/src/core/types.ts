@@ -59,6 +59,8 @@ export type CreateOptions = {
   extensions?: Array<BasicExtension>;
   scanIntervalMs?: number;
   trackEventListenerLeaks?: boolean;
+  // full GCs a detached element must survive before it is reported (default 1)
+  detachedElementMinGCCount?: number;
 };
 
 /**
@@ -110,6 +112,8 @@ export type ScanResult = {
   globalListenerSites?: GlobalListenerGrowth[];
   // full garbage collections seen since the scanner was created (a lower bound)
   gcCount?: number;
+  // detached elements still alive after `detachedElementMinGCCount` full GCs
+  totalDetachedElementsSurvivingGC?: number;
 };
 
 /**
@@ -165,6 +169,10 @@ export type DOMElementInfo = {
   element: WeakRef<Element>;
   boundingRect: Optional<BoundingRect>;
   componentStack: Optional<string[]>;
+  // when MemLens first saw the element detached (ms since epoch)
+  detachedAt?: number;
+  // full GCs the element has survived since then
+  gcSurvivedCount?: number;
 };
 
 /** @internal */
