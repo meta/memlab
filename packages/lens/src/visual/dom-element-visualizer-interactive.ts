@@ -32,6 +32,17 @@ export type VisualizerData = {
 export type DateUpdateCallback = (data: VisualizerData) => void;
 export type RegisterDataUpdateCallback = (cb: DateUpdateCallback) => void;
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return (
+    target.closest(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+    ) != null
+  );
+}
+
 export default class DOMElementVisualizerInteractive extends DOMElementVisualizer {
   #elementIdToRectangle: Map<number, ElementVisualizer>;
   #visualizationOverlayDiv: HTMLDivElement;
@@ -64,12 +75,18 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
 
   #listenToKeyboardEvent() {
     document.addEventListener('keydown', event => {
-      if (event.key === 'd' || event.key === 'D') {
-        if (this.#currentVisualData.selectedElementId != null) {
-          this.#blockedElementIds.add(
-            this.#currentVisualData.selectedElementId,
-          );
-        }
+      if (event.key !== 'd' && event.key !== 'D') {
+        return;
+      }
+      // leave shortcuts and typing in the app alone
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      if (isEditableTarget(event.target)) {
+        return;
+      }
+      if (this.#currentVisualData.selectedElementId != null) {
+        this.#blockedElementIds.add(this.#currentVisualData.selectedElementId);
       }
     });
   }
