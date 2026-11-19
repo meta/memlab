@@ -56,7 +56,8 @@ export class EventListenerTracker {
       options?: boolean | AddEventListenerOptions,
     ) {
       self.#originalAddEventListener.call(this, type, listener, options);
-      if (this instanceof Element) {
+      // a null listener is valid and the browser ignores it
+      if (listener != null && this instanceof Element) {
         const fiber = getFiberNodeFromElement(this);
         const entry: EventListenerEntry = {
           type,
