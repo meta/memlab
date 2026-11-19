@@ -50,6 +50,14 @@ export class EventListenerTracker {
   #detachedListeners: Map<string, DetachedListenerGroup[]>;
   #originalAddEventListener: typeof EventTarget.prototype.addEventListener;
   #originalRemoveEventListener: typeof EventTarget.prototype.removeEventListener;
+  #patchedAddEventListener: Nullable<
+    typeof EventTarget.prototype.addEventListener
+  > = null;
+  #patchedRemoveEventListener: Nullable<
+    typeof EventTarget.prototype.removeEventListener
+  > = null;
+  #isActive = true;
+  #refCount = 0;
 
   private constructor() {
     this.#listenerMap = new WeakMapPlus({fallback: 'noop', cleanupMs: 100});
@@ -60,72 +68,85 @@ export class EventListenerTracker {
     this.#patchEventListeners();
   }
 
-  static getInstance(): EventListenerTracker {
+  /**
+   * Returns the shared tracker. Every acquire() must be paired with one
+   * release(); the tracker is destroyed when the last user releases it.
+   */
+  static acquire(): EventListenerTracker {
     if (!EventListenerTracker.instance) {
       EventListenerTracker.instance = new EventListenerTracker();
     }
+    ++EventListenerTracker.instance.#refCount;
     return EventListenerTracker.instance;
+  }
+
+  release(): void {
+    if (--this.#refCount <= 0) {
+      this.destroy();
+    }
   }
 
   #patchEventListeners(): void {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
-    EventTarget.prototype.addEventListener = function (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: boolean | AddEventListenerOptions,
-    ) {
-      self.#originalAddEventListener.call(this, type, listener, options);
-      // a null listener is valid and the browser ignores it
-      if (listener != null && this instanceof Element) {
-        const capture = getCapture(options);
-        const optionsObject = typeof options === 'object' ? options : null;
-        // the browser does not add a listener whose signal is already aborted
-        if (optionsObject?.signal?.aborted) {
-          return;
-        }
-        const listeners = self.#listenerMap.get(this) ?? [];
-        // the browser ignores a listener that is already registered
-        if (listeners.some(e => isSameListener(e, type, listener, capture))) {
-          return;
-        }
-        const fiber = getFiberNodeFromElement(this);
-        const entry: EventListenerEntry = {
-          type,
-          cb: new WeakRef(listener),
-          capture,
-          fiber: fiber ? new WeakRef(fiber) : undefined,
-        };
-        listeners.push(entry);
-        self.#listenerMap.set(this, listeners);
-        self.#forgetWhenBrowserRemoves(this, entry, optionsObject);
-      }
-    };
-
-    EventTarget.prototype.removeEventListener = function (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: boolean | EventListenerOptions,
-    ) {
-      self.#originalRemoveEventListener.call(this, type, listener, options);
-      if (this instanceof Element) {
-        const listeners = self.#listenerMap.get(this);
-        if (listeners) {
+    EventTarget.prototype.addEventListener = this.#patchedAddEventListener =
+      function (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) {
+        self.#originalAddEventListener.call(this, type, listener, options);
+        // a null listener is valid and the browser ignores it
+        if (self.#isActive && listener != null && this instanceof Element) {
           const capture = getCapture(options);
-          const index = listeners.findIndex(entry =>
-            isSameListener(entry, type, listener, capture),
-          );
-          if (index !== -1) {
-            listeners.splice(index, 1);
+          const optionsObject = typeof options === 'object' ? options : null;
+          // the browser does not add a listener whose signal is already aborted
+          if (optionsObject?.signal?.aborted) {
+            return;
           }
-          if (listeners.length === 0) {
-            self.#listenerMap.delete(this);
-          } else {
-            self.#listenerMap.set(this, listeners);
+          const listeners = self.#listenerMap.get(this) ?? [];
+          // the browser ignores a listener that is already registered
+          if (listeners.some(e => isSameListener(e, type, listener, capture))) {
+            return;
+          }
+          const fiber = getFiberNodeFromElement(this);
+          const entry: EventListenerEntry = {
+            type,
+            cb: new WeakRef(listener),
+            capture,
+            fiber: fiber ? new WeakRef(fiber) : undefined,
+          };
+          listeners.push(entry);
+          self.#listenerMap.set(this, listeners);
+          self.#forgetWhenBrowserRemoves(this, entry, optionsObject);
+        }
+      };
+
+    EventTarget.prototype.removeEventListener =
+      this.#patchedRemoveEventListener = function (
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | EventListenerOptions,
+      ) {
+        self.#originalRemoveEventListener.call(this, type, listener, options);
+        if (self.#isActive && this instanceof Element) {
+          const listeners = self.#listenerMap.get(this);
+          if (listeners) {
+            const capture = getCapture(options);
+            const index = listeners.findIndex(entry =>
+              isSameListener(entry, type, listener, capture),
+            );
+            if (index !== -1) {
+              listeners.splice(index, 1);
+            }
+            if (listeners.length === 0) {
+              self.#listenerMap.delete(this);
+            } else {
+              self.#listenerMap.set(this, listeners);
+            }
           }
         }
-      }
-    };
+      };
   }
 
   // The browser removes a `once` listener after it runs and a listener whose
@@ -173,9 +194,21 @@ export class EventListenerTracker {
   }
 
   #unpatchEventListeners(): void {
-    EventTarget.prototype.addEventListener = this.#originalAddEventListener;
-    EventTarget.prototype.removeEventListener =
-      this.#originalRemoveEventListener;
+    // Code that patched these methods after MemLens calls through to the
+    // MemLens wrappers. Restoring the originals would drop its patch, so in
+    // that case the wrappers stay in place and only stop tracking.
+    if (
+      EventTarget.prototype.addEventListener === this.#patchedAddEventListener
+    ) {
+      EventTarget.prototype.addEventListener = this.#originalAddEventListener;
+    }
+    if (
+      EventTarget.prototype.removeEventListener ===
+      this.#patchedRemoveEventListener
+    ) {
+      EventTarget.prototype.removeEventListener =
+        this.#originalRemoveEventListener;
+    }
   }
 
   addListener(
@@ -237,6 +270,8 @@ export class EventListenerTracker {
   }
 
   destroy(): void {
+    this.#isActive = false;
+    this.#refCount = 0;
     this.#unpatchEventListeners();
     this.#listenerMap.destroy();
     this.#detachedListeners.clear();

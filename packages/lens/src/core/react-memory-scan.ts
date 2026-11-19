@@ -56,7 +56,7 @@ export default class ReactMemoryScan {
     this.#elementToComponentStack = new WeakMap();
     this.#knownFiberNodes = [];
     this.#eventListenerTracker = options.trackEventListenerLeaks
-      ? EventListenerTracker.getInstance()
+      ? EventListenerTracker.acquire()
       : null;
     this.#intervalId = null;
     this.#isDisposed = false;
@@ -212,7 +212,7 @@ export default class ReactMemoryScan {
 
     // Dispose event listener tracker if it exists
     if (this.#eventListenerTracker) {
-      this.#eventListenerTracker.destroy();
+      this.#eventListenerTracker.release();
       this.#eventListenerTracker = null;
     }
 

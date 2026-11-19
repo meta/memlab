@@ -154,4 +154,73 @@ test.describe('event listener tracking', () => {
       {type: 'scroll', count: 2},
     ]);
   });
+  test('disposing one scanner keeps tracking on for another', async ({
+    page,
+  }) => {
+    const leaks = await page.evaluate(() => {
+      const {MemLens} = window as AnyValue;
+      const first = MemLens.createReactMemoryScan({
+        trackEventListenerLeaks: true,
+      });
+      const second = MemLens.createReactMemoryScan({
+        trackEventListenerLeaks: true,
+      });
+      first.dispose();
+      const div = document.createElement('div');
+      document.body.appendChild(div);
+      div.addEventListener('click', () => undefined);
+      div.remove();
+      (window as AnyValue).__keep = div;
+      const result = second.scan().eventListenerLeaks;
+      second.dispose();
+      return result.map(({type, count}: AnyValue) => ({type, count}));
+    });
+    expect(leaks).toEqual([{type: 'click', count: 1}]);
+  });
+
+  test('dispose restores the native methods', async ({page}) => {
+    const restored = await page.evaluate(() => {
+      const scan = (window as AnyValue).MemLens.createReactMemoryScan({
+        trackEventListenerLeaks: true,
+      });
+      const patched = EventTarget.prototype.addEventListener;
+      scan.dispose();
+      return {
+        wasPatched: !String(patched).includes('[native code]'),
+        add: String(EventTarget.prototype.addEventListener).includes(
+          '[native code]',
+        ),
+        remove: String(EventTarget.prototype.removeEventListener).includes(
+          '[native code]',
+        ),
+      };
+    });
+    expect(restored).toEqual({wasPatched: true, add: true, remove: true});
+  });
+
+  test('dispose keeps a patch installed after MemLens', async ({page}) => {
+    const result = await page.evaluate(() => {
+      const scan = (window as AnyValue).MemLens.createReactMemoryScan({
+        trackEventListenerLeaks: true,
+      });
+      const memlensAdd = EventTarget.prototype.addEventListener;
+      let seen = 0;
+      const otherAdd = function (this: EventTarget, ...args: AnyValue[]) {
+        ++seen;
+        return memlensAdd.apply(this, args as AnyValue);
+      };
+      EventTarget.prototype.addEventListener = otherAdd;
+      scan.dispose();
+      let clicks = 0;
+      const div = document.createElement('div');
+      div.addEventListener('click', () => ++clicks);
+      div.click();
+      return {
+        kept: EventTarget.prototype.addEventListener === otherAdd,
+        seen,
+        clicks,
+      };
+    });
+    expect(result).toEqual({kept: true, seen: 1, clicks: 1});
+  });
 });
