@@ -14,9 +14,28 @@ import {WeakMapPlus} from '../utils/weak-ref-utils';
 type EventListenerEntry = {
   type: string;
   cb: WeakRef<EventListenerOrEventListenerObject>;
-  options?: boolean | AddEventListenerOptions;
+  capture: boolean;
   fiber?: WeakRef<Fiber>;
 };
+
+// The DOM identifies a listener by its type, callback and capture flag;
+// every other option is ignored when matching.
+function getCapture(options?: boolean | EventListenerOptions): boolean {
+  return typeof options === 'boolean' ? options : Boolean(options?.capture);
+}
+
+function isSameListener(
+  entry: EventListenerEntry,
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  capture: boolean,
+): boolean {
+  return (
+    entry.type === type &&
+    entry.capture === capture &&
+    entry.cb.deref() === listener
+  );
+}
 
 type DetachedListenerGroup = {
   type: string;
@@ -58,14 +77,19 @@ export class EventListenerTracker {
       self.#originalAddEventListener.call(this, type, listener, options);
       // a null listener is valid and the browser ignores it
       if (listener != null && this instanceof Element) {
+        const capture = getCapture(options);
+        const listeners = self.#listenerMap.get(this) ?? [];
+        // the browser ignores a listener that is already registered
+        if (listeners.some(e => isSameListener(e, type, listener, capture))) {
+          return;
+        }
         const fiber = getFiberNodeFromElement(this);
         const entry: EventListenerEntry = {
           type,
           cb: new WeakRef(listener),
-          options,
+          capture,
           fiber: fiber ? new WeakRef(fiber) : undefined,
         };
-        const listeners = self.#listenerMap.get(this) ?? [];
         listeners.push(entry);
         self.#listenerMap.set(this, listeners);
       }
@@ -80,11 +104,9 @@ export class EventListenerTracker {
       if (this instanceof Element) {
         const listeners = self.#listenerMap.get(this);
         if (listeners) {
-          const index = listeners.findIndex(
-            entry =>
-              entry.type === type &&
-              entry.cb.deref() === listener &&
-              entry.options === options,
+          const capture = getCapture(options);
+          const index = listeners.findIndex(entry =>
+            isSameListener(entry, type, listener, capture),
           );
           if (index !== -1) {
             listeners.splice(index, 1);

@@ -11,6 +11,25 @@ import type {AnyValue} from '../../core/types';
 import {test, expect} from '@playwright/test';
 import {readLibBundle} from '../utils/test-utils';
 
+async function leaksAfter(
+  page: AnyValue,
+  register: string,
+): Promise<Array<{type: string; count: number}>> {
+  return await page.evaluate((body: string) => {
+    const scan = (window as AnyValue).MemLens.createReactMemoryScan({
+      trackEventListenerLeaks: true,
+    });
+    const div = document.createElement('div');
+    document.body.appendChild(div);
+    new Function('div', body)(div);
+    div.remove();
+    (window as AnyValue).__keep = div;
+    const leaks = scan.scan().eventListenerLeaks;
+    scan.dispose();
+    return leaks.map(({type, count}: AnyValue) => ({type, count}));
+  }, register);
+}
+
 test.describe('event listener tracking', () => {
   test.beforeEach(async ({page}) => {
     await page.setContent('<!DOCTYPE html><html><body></body></html>');
@@ -38,5 +57,51 @@ test.describe('event listener tracking', () => {
     });
     expect(result.error).toBeNull();
     expect(result.leaks).toEqual([]);
+  });
+  test('removal with a new options object matches like the DOM', async ({
+    page,
+  }) => {
+    const leaks = await leaksAfter(
+      page,
+      `const f = () => {};
+       div.addEventListener('click', f, {capture: false, passive: true});
+       div.removeEventListener('click', f, {capture: false});`,
+    );
+    expect(leaks).toEqual([]);
+  });
+
+  test('removal without options matches a listener added with false', async ({
+    page,
+  }) => {
+    const leaks = await leaksAfter(
+      page,
+      `const f = () => {};
+       div.addEventListener('click', f, false);
+       div.removeEventListener('click', f);`,
+    );
+    expect(leaks).toEqual([]);
+  });
+
+  test('a duplicate add is ignored like the DOM ignores it', async ({page}) => {
+    const leaks = await leaksAfter(
+      page,
+      `const f = () => {};
+       div.addEventListener('click', f);
+       div.addEventListener('click', f);
+       div.removeEventListener('click', f);`,
+    );
+    expect(leaks).toEqual([]);
+  });
+
+  test('a removal with a different capture flag keeps the listener', async ({
+    page,
+  }) => {
+    const leaks = await leaksAfter(
+      page,
+      `const f = () => {};
+       div.addEventListener('click', f, true);
+       div.removeEventListener('click', f, false);`,
+    );
+    expect(leaks).toEqual([{type: 'click', count: 1}]);
   });
 });
