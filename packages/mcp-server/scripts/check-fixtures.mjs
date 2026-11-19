@@ -57,6 +57,15 @@ globalThis.__fixtureWidgets = [
   new FixtureWidget(),
   new FixtureWidget(),
 ];
+// The widgets again, in a Map one property away from a findable class.
+class FixtureWidgetIndex {
+  constructor(widgets) {
+    this.byName = new Map(widgets.map((w, i) => [`w${i}`, w]));
+  }
+}
+globalThis.__fixtureWidgetIndex = new FixtureWidgetIndex(
+  globalThis.__fixtureWidgets,
+);
 // A class that is reachable but has no instances.
 class FixtureUnusedWidget {}
 globalThis.__fixtureUnusedWidget = FixtureUnusedWidget;
@@ -391,6 +400,39 @@ await shapeCheck(
     assert(
       json.m.k === 2 && json.s[0] === 3,
       `m/s: ${JSON.stringify([json.m, json.s])}`,
+    );
+  },
+);
+
+await shapeCheck(
+  'eval helpers: a node works where an id is expected',
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: [
+        "const m = helpers.getProp(helpers.iterByClass('FixtureWidgetIndex')[0], 'byName');",
+        'const node = snapshot.getNodeById(m);',
+        'result = {',
+        '  fromRef: helpers.mapEntryNodes(m).length,',
+        '  fromNode: helpers.mapEntryNodes(node).length,',
+        '  sameNode: snapshot.getNodeById(node).id === node.id,',
+        '  retained: helpers.retainedSize(node) > 0,',
+        "  h: helpers.histogram(helpers.byClass('FixtureWidget'), id => snapshot.getNodeById(id).type),",
+        '};',
+      ].join('\n'),
+    });
+    const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(
+      json.fromRef === 3 &&
+        json.fromNode === 3 &&
+        json.sameNode &&
+        json.retained,
+      `map: ${text.slice(0, 300)}`,
+    );
+    assert(
+      json.h.length === 1 &&
+        json.h[0].key === 'object' &&
+        json.h[0].count === 3,
+      `histogram: ${JSON.stringify(json.h)}`,
     );
   },
 );

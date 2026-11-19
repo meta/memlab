@@ -872,6 +872,16 @@ function propsOf(target: object): Record<string, unknown> {
   return out;
 }
 
+// An id, a node, or a `{ref}` entry from `helpers.props()`. `histogram` hands
+// its key function the node while the examples name that argument `id`, and a
+// `props()` value is the natural thing to pass on, so an entry point that read
+// only numbers was handed the other two often.
+type NodeRef = number | {id: number} | {ref: number | null};
+function toNodeId(x: NodeRef): number {
+  if (typeof x === 'number' || x == null) return x;
+  return (x as {id?: number}).id ?? ((x as {ref?: number}).ref as number);
+}
+
 function wrapSnapshot(snapshot: unknown, budget: VisitBudget): unknown {
   return new Proxy(snapshot as object, {
     get(target, prop, receiver) {
@@ -886,7 +896,7 @@ function wrapSnapshot(snapshot: unknown, budget: VisitBudget): unknown {
         const orig = (
           target as Record<string, (...args: unknown[]) => unknown>
         ).getNodeById.bind(target);
-        return (id: number) => wrapNode(orig(id));
+        return (x: NodeRef) => wrapNode(orig(toNodeId(x)));
       }
       if (prop === 'nodes') {
         const nodes = Reflect.get(target, prop, receiver);
@@ -1388,8 +1398,8 @@ Answers "who owns these?" without one trace per instance. \`helpers.owner\` is t
 nearest dominator carrying a class identity — \`node.dominatorNode\` is usually a
 \`system /\` container, and it is refused on a light load.
 
-    result = helpers.histogram(helpers.byClass('Thing'), id => {
-      const o = helpers.owner(id);
+    result = helpers.histogram(helpers.byClass('Thing'), node => {
+      const o = helpers.owner(node);
       return o ? o.name : '(none)';
     });
 
@@ -1521,8 +1531,8 @@ owner names the buffer that never drains.
 
     const ids = helpers.withProp('timestamp', {edgeTypes: ['property']})
       .concat(helpers.withProp('timestampMs', {edgeTypes: ['property']}));
-    result = helpers.histogram(ids, id => {
-      const o = helpers.owner(id);
+    result = helpers.histogram(ids, node => {
+      const o = helpers.owner(node);
       return o ? o.name : '(none)';
     });
 
@@ -1626,7 +1636,7 @@ export function registerEval(server: McpServer): void {
       '`helpers.rootPath(id)` is the GC-root path without hand-writing the `pathEdge` loop; ' +
       '`helpers.mapEntries(id)` / `helpers.setElements(id)` enumerate Maps/Sets correctly. ' +
       '**`helpers.props()` is for INSPECTION, not shape matching** — on a node with no property edges it falls back to internal/hidden edges and adds synthetic keys, so a shape test written against `Object.keys(props(id))` returns zero matches on objects that plainly have the shape. Call `mode: "describe_env"` for the full surface and its gotchas.\n' +
-      '**Get node by ID:** `snapshot.getNodeById(id)` returns IHeapNode or null.\n' +
+      '**Get node by ID:** `snapshot.getNodeById(id)` returns IHeapNode or null. Passing a node, or a `{ref}` value from `helpers.props()`, returns that node; helpers that take an id take either too.\n' +
       '**String values:** `node.toStringNode()?.stringValue` for string nodes.\n' +
       '**Caveat — retained_size is unreliable here:** inside eval, `node.retained_size`/`.retainedSize` can read back ~0 for every node on some loads. Node counts, property/edge walks, and string values ARE trustworthy. For authoritative retained sizes call `helpers.retainedSize(id)` (number) / `helpers.retainedSizes([ids])` (a `Record<id, bytes>` object, NOT an array) — they re-resolve the node on the real snapshot — or use the dedicated tools (`memlab_largest_objects`, `memlab_class_histogram`, `memlab_pinch_points`, `memlab_object_shape`).\n\n' +
       '**Example — inspect Map entries (use the helper; do NOT hand-roll the ' +
@@ -1694,7 +1704,7 @@ export function registerEval(server: McpServer): void {
             'remember(name, value)/recall(name?) (persist ACROSS sessions), ' +
             'sample(items, n) (deterministic, evenly spaced), ' +
             'owner(idOrNode, {maxHops?})->{id,name,type,hops,selfSize,named}|null, ' +
-            'histogram(ids, keyFn, {limit?})->[{key,count}], ' +
+            'histogram(ids, keyFn(node, id), {limit?})->[{key,count}], ' +
             'pathBetween(fromId, toId, {maxNodes?})->{found,exhausted,path[]}, ' +
             'save(name, value) / load(name, {allowCrossSnapshot?}) / listSaved() (SESSION-scoped, survives loading another snapshot) }), ' +
             'and standard JS built-ins. ' +
@@ -2324,15 +2334,16 @@ export async function runEval({
         `helpers.${what} needs retained sizes, which a LIGHT snapshot does not have (it would return 0 for every id). Reload with memlab_load_snapshot({file_path, light: false}).`,
       );
     };
-    const retainedSize = (id: number): number => {
+    const retainedSize = (nodeOrId: NodeRef): number => {
       requireRetention('retainedSize');
-      const n = snapshot.getNodeById(id);
+      const n = resolveNode(nodeOrId);
       return n ? n.retainedSize : 0;
     };
-    const retainedSizes = (ids: number[]): Record<number, number> => {
+    const retainedSizes = (ids: NodeRef[]): Record<number, number> => {
       requireRetention('retainedSizes');
       const out: Record<number, number> = {};
-      for (const id of ids) {
+      for (const x of ids) {
+        const id = toNodeId(x);
         const n = snapshot.getNodeById(id);
         out[id] = n ? n.retainedSize : 0;
       }
@@ -2390,11 +2401,10 @@ export async function runEval({
           };
 
     const resolveNode = (
-      nodeOrId: number | {id: number} | null | undefined,
+      nodeOrId: NodeRef | null | undefined,
     ): IHeapNode | null => {
       if (nodeOrId == null) return null;
-      const id = typeof nodeOrId === 'number' ? nodeOrId : nodeOrId.id;
-      return snapshot.getNodeById(id);
+      return snapshot.getNodeById(toNodeId(nodeOrId));
     };
 
     // `<Module>.<edge>.<edge>` — the same name at every rung, unlike an id.
@@ -2896,7 +2906,8 @@ export async function runEval({
           `Pass a larger limit, or use helpers.${helper === 'mapEntries' ? 'mapEntryNodes' : 'setElementNodes'}(${id}), which has none.`,
       );
     };
-    const mapEntries = (id: number, limit = 1000) => {
+    const mapEntries = (nodeOrId: NodeRef, limit = 1000) => {
+      const id = toNodeId(nodeOrId);
       const node = snapshot.getNodeById(id);
       if (!node) throw new Error(`mapEntries: node @${id} not found`);
       // Guard the node type — enumerateMapEntries assumes key/value slots, so
@@ -2917,7 +2928,8 @@ export async function runEval({
     // The node-returning twins: `.references` / `.self_size` work on what
     // they return (the brief helpers above return plain summaries), and
     // there is no default cap.
-    const mapEntryNodes = (id: number, limit = Infinity) => {
+    const mapEntryNodes = (nodeOrId: NodeRef, limit = Infinity) => {
+      const id = toNodeId(nodeOrId);
       const node = snapshot.getNodeById(id);
       if (!node) throw new Error(`mapEntryNodes: node @${id} not found`);
       if (node.name !== 'Map' && node.name !== 'WeakMap') {
@@ -2932,7 +2944,8 @@ export async function runEval({
           valueNode: e.value == null ? null : wrapNode(e.value),
         }));
     };
-    const setElementNodes = (id: number, limit = Infinity) => {
+    const setElementNodes = (nodeOrId: NodeRef, limit = Infinity) => {
+      const id = toNodeId(nodeOrId);
       const node = snapshot.getNodeById(id);
       if (!node) throw new Error(`setElementNodes: node @${id} not found`);
       if (node.name !== 'Set' && node.name !== 'WeakSet') {
@@ -2942,7 +2955,8 @@ export async function runEval({
       }
       return enumerateSetElements(node).slice(0, limit).map(wrapNode);
     };
-    const setElements = (id: number, limit = 1000) => {
+    const setElements = (nodeOrId: NodeRef, limit = 1000) => {
+      const id = toNodeId(nodeOrId);
       const node = snapshot.getNodeById(id);
       if (!node) throw new Error(`setElements: node @${id} not found`);
       if (node.name !== 'Set' && node.name !== 'WeakSet') {
@@ -3577,10 +3591,13 @@ export async function runEval({
     // summing helpers.retainedSize over the ids, this does not double-count
     // bytes when one id dominates another in the set.
     const aggregateRetained = (
-      ids: number[],
+      ids: NodeRef[],
     ): {retained: number; exact: boolean; unresolved?: number} => {
       requireRetention('aggregateRetained');
-      const out = boundedDominatorRetainedSize(new NumericSet(ids), snapshot);
+      const out = boundedDominatorRetainedSize(
+        new NumericSet(Array.from(ids, toNodeId)),
+        snapshot,
+      );
       // A set where NOTHING resolved is not a 0-byte population, it is a
       // mistake in the call — almost always node objects passed where ids were
       // expected, or `.map(n => n.id)` over an array that already held ids
@@ -3595,10 +3612,9 @@ export async function runEval({
         // against a visibly longer array reads as a second bug.
         throw new Error(
           `aggregateRetained: none of the ${formatNumber(raw.length)} value(s) passed resolve to a heap node ` +
-            `(first few: ${JSON.stringify(sample)}). It takes an array of NUMERIC ids. ` +
+            `(first few: ${JSON.stringify(sample)}). It takes an array of ids or nodes. ` +
             'Note that `helpers.byClass` / `byTypename` / `withProp` already return ids, so ' +
-            '`byTypename("X").map(n => n.id)` yields `[undefined, …]` — pass the array straight through. ' +
-            'For node objects (from `iterByClass`, `sample`, …) use `.map(n => n.id)`.',
+            '`byTypename("X").map(n => n.id)` yields `[undefined, …]` — pass the array straight through.',
         );
       }
       return out.unresolved > 0
@@ -4736,12 +4752,13 @@ export async function runEval({
     // code, and the one whose hand-written versions most often silently drop
     // the undefined bucket.
     const histogram = (
-      ids: Iterable<number>,
+      ids: Iterable<NodeRef>,
       keyFn: (node: unknown, id: number) => string | null | undefined,
       opts?: {limit?: number},
     ): Array<{key: string; count: number}> => {
       const counts = new Map<string, number>();
-      for (const id of ids) {
+      for (const x of ids) {
+        const id = toNodeId(x);
         const node = snapshot.getNodeById(id);
         if (node == null) continue;
         const raw = keyFn(wrapNode(node), id);
@@ -6067,7 +6084,7 @@ function describeEnvLines(): string[] {
     '- `helpers.defineFn(name, src)` / `helpers.fn(name)` / `helpers.listFns()` / `helpers.forgetFn(name)` — persist CODE, not just data. `save`/`load` and `remember`/`recall` keep values; there was nothing for the edge-name walk that gets rewritten, slightly differently, in every fourth eval. `src` is a FUNCTION EXPRESSION (`"id => helpers.props(id).foo"`), compiled at definition time so a syntax error is reported there rather than inside a later probe, and compiled inside the running eval\'s context so it sees `helpers` and `snapshot`. Stored on disk, so it survives into a later session. For setup that is only needed for THIS call, pass `prelude` instead — it runs in the same context immediately before `code`, and `memlab_ladder_probe` applies it to every metric.',
     '- `helpers.remember(name, value)` / `helpers.recall(name?)` — persist a derived fact to disk (`~/.memlab/eval-store.json`, override with `MEMLAB_STATE_DIR`) and read it back in a LATER session. `save`/`load` are per-snapshot and dropped on unload, which is right for id lists (ids are per-capture) and wrong for a conclusion. `recall()` with no name lists the keys.',
     '- `helpers.sample(items, n) -> items[]` — evenly-spaced sample, NOT random: two calls over the same population return the same members, so a follow-up question lands on the objects the first answer described.',
-    '- `helpers.histogram(ids, keyFn, {limit?}) -> [{key, count}]` — group-and-count over ids, sorted by count; a null/undefined key becomes `(none)` rather than being dropped. `helpers.groupCount` is the same helper.',
+    '- `helpers.histogram(ids, keyFn, {limit?}) -> [{key, count}]` — group-and-count over ids (or nodes), sorted by count; `keyFn` is called as `keyFn(node, id)`, node first; a null/undefined key becomes `(none)` rather than being dropped. `helpers.groupCount` is the same helper.',
     '- `helpers.pathBetween(fromId, toId, {maxNodes?}) -> {found, exhausted, path[]}` — BFS over outgoing edges; `exhausted:true` means the budget ran out, which is NOT the same as "no path".',
     '- `helpers.save(name, value)` / `helpers.load(name, {allowCrossSnapshot?})` / `helpers.listSaved()` — named result sets, SESSION-scoped: they survive loading another snapshot, which is what makes a baseline-vs-final comparison possible. The snapshot each was saved against is recorded, and a cross-snapshot read is refused unless you opt in — node ids are per-capture and mean nothing in another snapshot. To compare collections across snapshots, save `{stableKey → count}` instead of ids (recipe 18).',
     '- `helpers.aggregateRetained(ids[]) -> {retained, exact}` — dominator-deduped retained size for a SET of ids (does not double-count when one id dominates another); `exact:false` means the bounded walk was truncated (upper bound).',
