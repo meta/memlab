@@ -14,6 +14,10 @@ import {
 } from '../dom-element-visualizer-interactive';
 import {createVisualizerElement} from '../visual-utils';
 
+// built at runtime so that no build step turns it into a non-ASCII
+// character; the bundle may run on pages that do not declare UTF-8
+const APPROX = String.fromCharCode(0x2248);
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -36,17 +40,19 @@ export function createStatusText(
   statusWidget.textContent = '';
 
   registerDataUpdateCallback((data: VisualizerData) => {
-    const performance = (window as AnyValue).performance;
-    const memory = performance?.memory;
-
-    const usedHeap = memory?.usedJSHeapSize ?? 0;
-    const totalHeap = memory?.totalJSHeapSize ?? 0;
     const totalElements = data.totalDOMElementsCount ?? 0;
     const detachedElements = data.detachedDOMElementsCount ?? 0;
+    let text = `DOM: ${totalElements} total, ${detachedElements} detached`;
 
-    statusWidget.textContent =
-      `DOM: ${totalElements} total, ${detachedElements} detached | ` +
-      `Heap: ${formatBytes(usedHeap)} / ${formatBytes(totalHeap)}`;
+    // Chrome-only, and rounded and refreshed rarely unless Chrome runs with
+    // --enable-precise-memory-info, so it is shown as an approximation
+    const memory = (window as AnyValue).performance?.memory;
+    const usedHeap = memory?.usedJSHeapSize ?? 0;
+    if (usedHeap > 0) {
+      const totalHeap = memory?.totalJSHeapSize ?? 0;
+      text += ` | Heap ${APPROX} ${formatBytes(usedHeap)} / ${formatBytes(totalHeap)}`;
+    }
+    statusWidget.textContent = text;
   });
 
   return statusWidget;
