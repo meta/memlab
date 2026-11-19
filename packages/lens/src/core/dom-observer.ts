@@ -106,7 +106,9 @@ export class DOMObserver {
       window.clearInterval(this.#consolidateInterval);
       this.#consolidateInterval = null;
     }
-    // TODO: clean up memory
+    this.#trackedElements = [];
+    this.#trackedElementSet = new WeakSet();
+    this.#observeCallback = [];
   }
 
   #consolidateElementRefs(): void {

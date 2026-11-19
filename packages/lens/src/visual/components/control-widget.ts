@@ -7,6 +7,7 @@
  * @format
  * @oncall memory_lab
  */
+import type {AnyValue} from '../../core/types';
 import {RegisterDataUpdateCallback} from '../dom-element-visualizer-interactive';
 import {createVisualizerElement} from '../visual-utils';
 import {createStatusText} from './status-text';
@@ -50,7 +51,11 @@ export function createControlWidget(
   );
   controlWidget.appendChild(componentStackPanel);
 
-  supportDragging(controlWidget);
+  const stopDragging = supportDragging(controlWidget);
+  (controlWidget as AnyValue).__cleanup = () => {
+    stopDragging();
+    (controlWidget as AnyValue).__cleanup = null;
+  };
 
   const toggleButton = createToggleButton(overlayDiv, hideAllRef);
   header.appendChild(toggleButton);
@@ -61,7 +66,8 @@ export function createControlWidget(
   return controlWidget;
 }
 
-function supportDragging(controlWidget: HTMLDivElement) {
+// returns a function that removes the document listeners
+function supportDragging(controlWidget: HTMLDivElement): () => void {
   let isDragging = false;
   let offsetX = 0;
   let offsetY = 0;
@@ -81,16 +87,21 @@ function supportDragging(controlWidget: HTMLDivElement) {
     controlWidget.style.cursor = 'move';
   });
 
-  document.addEventListener('mousemove', e => {
+  const onMouseMove = (e: MouseEvent) => {
     if (isDragging) {
       controlWidget.style.left = `${e.clientX - offsetX}px`;
       controlWidget.style.top = `${e.clientY - offsetY}px`;
       controlWidget.style.right = '';
     }
-  });
-
-  document.addEventListener('mouseup', () => {
+  };
+  const onMouseUp = () => {
     isDragging = false;
     controlWidget.style.cursor = 'default';
-  });
+  };
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+  return () => {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+  };
 }

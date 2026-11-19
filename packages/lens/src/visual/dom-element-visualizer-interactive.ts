@@ -53,6 +53,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   #updateDataCallbacks: Array<DateUpdateCallback> = [];
   // detached elements of the last repaint, outlined or not
   #detachedElementCount = 0;
+  #onKeyDown: Nullable<(event: KeyboardEvent) => void> = null;
 
   constructor() {
     super();
@@ -74,7 +75,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   }
 
   #listenToKeyboardEvent() {
-    document.addEventListener('keydown', event => {
+    this.#onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'd' && event.key !== 'D') {
         return;
       }
@@ -88,7 +89,8 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
       if (this.#currentVisualData.selectedElementId != null) {
         this.#blockedElementIds.add(this.#currentVisualData.selectedElementId);
       }
-    });
+    };
+    document.addEventListener('keydown', this.#onKeyDown);
   }
 
   #initVisualizerData(): VisualizerData {
@@ -382,6 +384,11 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   }
 
   cleanup(): void {
+    if (this.#onKeyDown != null) {
+      document.removeEventListener('keydown', this.#onKeyDown);
+      this.#onKeyDown = null;
+    }
+
     // Clean up the visualization overlay
     if (this.#visualizationOverlayDiv) {
       this.#visualizationOverlayDiv.remove();
@@ -389,10 +396,14 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
 
     // Clean up the control widget
     if (this.#controlWidget) {
+      (this.#controlWidget as AnyValue).__cleanup?.();
       this.#controlWidget.remove();
     }
 
-    // Clear all element references
+    // Each box holds listeners and an intersection observer entry
+    for (const elementId of [...this.#elementIdToRectangle.keys()]) {
+      this.#removeVisualizerElement(elementId);
+    }
     this.#elementIdToRectangle.clear();
     this.#blockedElementIds.clear();
     this.#updateDataCallbacks = [];
