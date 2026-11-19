@@ -88,7 +88,7 @@ test('the widget summarizes leaked components and listeners, and copies the repo
 
   expect(await status()).toMatch(/^DOM: \d+ total, 3 detached after GC/);
   expect(await summary()).toMatch(
-    /^React: Dialog ×3 · Listeners: \d+ on detached elements, 1 growing site on window\/document · GCs: \d+$/,
+    /^Outlines: 3 on screen · React: Dialog ×3 · Listeners: \d+ on detached elements, 1 growing site on window\/document · GCs: \d+$/,
   );
 
   await page.click('#memory-visualization-leak-summary button');

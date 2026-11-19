@@ -34,6 +34,16 @@ export type VisualizerData = {
   selectedReactComponentStack: Array<string>;
   setPinnedElementId: (elementId: Nullable<number>) => void;
   summary: Nullable<LeakSummary>;
+  // where the outlines of the last repaint are, so the widget can explain
+  // a detached count with nothing outlined in view
+  outlines: OutlineCounts;
+};
+
+export type OutlineCounts = {
+  onScreen: number;
+  offScreen: number;
+  // detached elements with no recorded size or position to outline
+  withoutPosition: number;
 };
 
 export type VisualizerOptions = {
@@ -65,6 +75,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   #updateDataCallbacks: Array<DateUpdateCallback> = [];
   // detached elements of the last repaint, outlined or not
   #detachedElementCount = 0;
+  #withoutPositionCount = 0;
   #onKeyDown: Nullable<(event: KeyboardEvent) => void> = null;
 
   constructor(options: VisualizerOptions = {}) {
@@ -114,6 +125,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
       selectedReactComponentStack: [],
       pinnedElementId: null,
       summary: null,
+      outlines: {onScreen: 0, offScreen: 0, withoutPosition: 0},
       setPinnedElementId: (pinnedElementId: Nullable<number>) => {
         if (data.pinnedElementId == pinnedElementId) {
           return;
@@ -294,6 +306,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
 
   #paint(domElementInfoList: Array<DOMElementInfo>) {
     this.#detachedElementCount = 0;
+    this.#withoutPositionCount = 0;
     for (const info of domElementInfoList) {
       const element = info.element.deref() as AnyValue;
       if (element == null) {
@@ -365,6 +378,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
         visualizerElementRef == null ||
         visualizerElementRef.deref() == null
       ) {
+        ++this.#withoutPositionCount;
         continue;
       }
       const visualizer = {
@@ -375,12 +389,45 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
     }
   }
 
+  #countOutlines(): OutlineCounts {
+    const counts = {
+      onScreen: 0,
+      offScreen: 0,
+      withoutPosition: this.#withoutPositionCount,
+    };
+    const top = window.scrollY;
+    const left = window.scrollX;
+    const bottom = top + window.innerHeight;
+    const right = left + window.innerWidth;
+    for (const {elementInfo} of this.#elementIdToRectangle.values()) {
+      const rect = elementInfo.boundingRect;
+      if (rect == null) {
+        continue;
+      }
+      // outlines are placed in document coordinates
+      const y = rect.top + rect.scrollTop;
+      const x = rect.left + rect.scrollLeft;
+      if (
+        y < bottom &&
+        y + rect.height > top &&
+        x < right &&
+        x + rect.width > left
+      ) {
+        ++counts.onScreen;
+      } else {
+        ++counts.offScreen;
+      }
+    }
+    return counts;
+  }
+
   #updateVisualizerData() {
     const data = this.#currentVisualData;
     if (data.pinnedElementId != null) {
       data.selectedElementId = data.pinnedElementId;
     }
     data.detachedDOMElementsCount = this.#detachedElementCount;
+    data.outlines = this.#countOutlines();
     data.totalDOMElementsCount = getDOMElementCount();
     const selectedElementInfo = this.#elementIdToRectangle.get(
       data.selectedElementId ?? -1,

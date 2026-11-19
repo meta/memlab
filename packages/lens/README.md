@@ -97,7 +97,7 @@ await page.addScriptTag({content: getBundleContent()});
 ### Overlay controls and interactions
 
 - **Status line**: total elements, detached elements that survived a GC, and how many are still waiting for one
-- **Summary row**: leaked React components, listeners on detached elements, growing `window`/`document` listener sites, and the number of GCs seen
+- **Summary row**: how many outlines are on screen, off-screen, or missing because the element never had a size or position, then leaked React components, listeners on detached elements, growing `window`/`document` listener sites, and the number of GCs seen
 - **Copy report**: copies `getReport()` as JSON (and logs it to the console)
 - **Outlines**: a gray dashed outline is a detached element still waiting for a GC, which may yet be collected; it turns teal and dotted once the element survives one
 - **Toggle switch**: Show/hide all overlay rectangles

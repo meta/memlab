@@ -9,6 +9,7 @@
  */
 import type {LeakSummary} from '../../core/types';
 import {
+  OutlineCounts,
   RegisterDataUpdateCallback,
   VisualizerData,
 } from '../dom-element-visualizer-interactive';
@@ -19,6 +20,17 @@ const MAX_LISTED_COMPONENTS = 3;
 // characters; the bundle may run on pages that do not declare UTF-8
 const TIMES = String.fromCharCode(0xd7);
 const DOT = String.fromCharCode(0xb7);
+
+export function formatOutlineCounts(outlines: OutlineCounts): string {
+  const parts = [`${outlines.onScreen} on screen`];
+  if (outlines.offScreen > 0) {
+    parts.push(`${outlines.offScreen} off-screen`);
+  }
+  if (outlines.withoutPosition > 0) {
+    parts.push(`${outlines.withoutPosition} without a position`);
+  }
+  return `Outlines: ${parts.join(', ')}`;
+}
 
 export function formatLeakSummary(summary: LeakSummary): string {
   const components = summary.leakedComponents;
@@ -93,8 +105,15 @@ export function createLeakSummary(
   }
 
   registerDataUpdateCallback((data: VisualizerData) => {
+    if (data.summary == null) {
+      text.textContent = '';
+      return;
+    }
+    const {onScreen, offScreen, withoutPosition} = data.outlines;
     text.textContent =
-      data.summary != null ? formatLeakSummary(data.summary) : '';
+      onScreen + offScreen + withoutPosition > 0
+        ? `${formatOutlineCounts(data.outlines)} ${DOT} ${formatLeakSummary(data.summary)}`
+        : formatLeakSummary(data.summary);
   });
   return row;
 }
