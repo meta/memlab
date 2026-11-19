@@ -40,6 +40,8 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   #currentVisualData: VisualizerData;
   #hideAllRef: {value: boolean};
   #updateDataCallbacks: Array<DateUpdateCallback> = [];
+  // detached elements of the last repaint, outlined or not
+  #detachedElementCount = 0;
 
   constructor() {
     super();
@@ -252,11 +254,13 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
     // element with a higher element id (created later) has a higher z-index
     ret += parseInt(elementId, 10);
     // element with bigger area will have a lower z-index
-    ret += Math.floor(10000000 / (rectangle.width * rectangle.height));
+    const area = Math.max(1, rectangle.width * rectangle.height);
+    ret += Math.floor(10000000 / area);
     return ret;
   }
 
   #paint(domElementInfoList: Array<DOMElementInfo>) {
+    this.#detachedElementCount = 0;
     for (const info of domElementInfoList) {
       const element = info.element.deref() as AnyValue;
       if (element == null) {
@@ -268,6 +272,10 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
       }
       if (this.#blockedElementIds.has(elementId)) {
         continue;
+      }
+      // counted even when it has no size to outline
+      if (!element.isConnected) {
+        ++this.#detachedElementCount;
       }
       if (this.#elementIdToRectangle.has(elementId)) {
         continue;
@@ -319,7 +327,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
         visualizerElementRef == null ||
         visualizerElementRef.deref() == null
       ) {
-        return null;
+        continue;
       }
       const visualizer = {
         elementInfo: info,
@@ -334,7 +342,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
     if (data.pinnedElementId != null) {
       data.selectedElementId = data.pinnedElementId;
     }
-    data.detachedDOMElementsCount = this.#elementIdToRectangle.size;
+    data.detachedDOMElementsCount = this.#detachedElementCount;
     data.totalDOMElementsCount = getDOMElementCount();
     const selectedElementInfo = this.#elementIdToRectangle.get(
       data.selectedElementId ?? -1,

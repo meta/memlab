@@ -54,7 +54,8 @@ export function createOverlayRectangle(
   zIndex: number,
 ): WeakRef<Element> | null {
   const rect = info.boundingRect;
-  if (!rect) return null;
+  // nothing to outline for an element that never had a size on screen
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
 
   const div = createVisualizerElement('div') as HTMLDivElement;
   div.style.position = 'absolute';
