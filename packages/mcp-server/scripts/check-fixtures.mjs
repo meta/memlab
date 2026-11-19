@@ -377,6 +377,25 @@ await shapeCheck(
 );
 
 await shapeCheck(
+  'eval result: nodes, Maps and Sets come back as JSON, not [object Object]',
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: "result = {n: 1, widget: helpers.iterByClass('FixtureWidget')[0], m: new Map([['k', 2]]), s: new Set([3])}",
+    });
+    const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(json.n === 1, `n: ${text.slice(0, 200)}`);
+    assert(
+      json.widget.name === 'FixtureWidget',
+      `widget: ${JSON.stringify(json.widget)}`,
+    );
+    assert(
+      json.m.k === 2 && json.s[0] === 3,
+      `m/s: ${JSON.stringify([json.m, json.s])}`,
+    );
+  },
+);
+
+await shapeCheck(
   'name width: the session width replaces defaults, a per-call width wins',
   async () => {
     const longName =

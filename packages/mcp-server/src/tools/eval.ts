@@ -392,6 +392,80 @@ export function unwrapNode<T>(node: T): T {
 }
 
 /**
+ * The eval `result` as plain JSON.
+ *
+ * Several helpers return heap nodes (`entries`, `iterByClass`, `edgeTarget`),
+ * and a node does not survive `JSON.stringify`: it threw, and the caller fell
+ * back to `String(result)`, so a result object holding ONE node anywhere came
+ * back as the bare text `[object Object]` and every other field in it was lost.
+ * A Map or Set serialized to `{}`, indistinguishable from an empty result.
+ *
+ * Nodes become `{id, name, type, self_size}` briefs and edges
+ * `{edge, type, from, to}`; Maps and Sets become an object and an array;
+ * a BigInt becomes its decimal string; a cycle is marked rather than thrown on.
+ */
+export function jsonSafeResult(value: unknown): unknown {
+  const onPath = new Set<object>();
+  const nodeBrief = (n: Record<string, unknown>) => ({
+    id: n.id,
+    name: typeof n.name === 'string' ? n.name.slice(0, 200) : n.name,
+    type: n.type,
+    self_size: n.self_size,
+  });
+  const isNode = (o: Record<string, unknown>): boolean =>
+    typeof o.id === 'number' &&
+    typeof o.type === 'string' &&
+    'self_size' in o &&
+    'references' in o;
+  const isEdge = (o: Record<string, unknown>): boolean =>
+    'toNode' in o && 'fromNode' in o && 'name_or_index' in o;
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'bigint') return v.toString();
+    if (v == null || typeof v !== 'object') return v;
+    const raw = unwrapNode(v) as Record<string, unknown>;
+    try {
+      if (isEdge(raw)) {
+        return {
+          edge: String(raw.name_or_index),
+          type: raw.type,
+          from: nodeBrief(raw.fromNode as Record<string, unknown>),
+          to: nodeBrief(raw.toNode as Record<string, unknown>),
+        };
+      }
+      if (isNode(raw)) return nodeBrief(raw);
+    } catch {
+      // Not a heap node after all; fall through to the generic walk.
+    }
+    if (onPath.has(v)) return '[Circular]';
+    onPath.add(v);
+    try {
+      // `instanceof` does not work across the vm realm the code ran in.
+      const tag = Object.prototype.toString.call(v);
+      if (Array.isArray(v)) return v.map(walk);
+      if (tag === '[object Map]') {
+        const out: Record<string, unknown> = {};
+        for (const [k, x] of v as Map<unknown, unknown>) {
+          out[
+            typeof k === 'object' && k != null
+              ? JSON.stringify(walk(k))
+              : String(k)
+          ] = walk(x);
+        }
+        return out;
+      }
+      if (tag === '[object Set]') return [...(v as Set<unknown>)].map(walk);
+      if (typeof (v as {toJSON?: unknown}).toJSON === 'function') return v;
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v)) out[k] = walk(x);
+      return out;
+    } finally {
+      onPath.delete(v);
+    }
+  };
+  return walk(value);
+}
+
+/**
  * `node.retainedSize` read off a node inside eval has been observed to come
  * back ~0 for every node on some loads, while the same id read through
  * `snapshot.getNodeById(id).retainedSize` returns the true value. A field that
@@ -5321,7 +5395,7 @@ export async function runEval({
 
     onResult?.(sandbox.result);
     const budgetBytes = max_result_bytes ?? MAX_OUTPUT_SIZE;
-    const shrunk = shrinkResult(sandbox.result, budgetBytes);
+    const shrunk = shrinkResult(jsonSafeResult(sandbox.result), budgetBytes);
 
     let output: string;
     try {
