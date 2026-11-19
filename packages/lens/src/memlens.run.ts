@@ -13,7 +13,10 @@ import {DOMVisualizationExtension} from './extensions/dom-visualization-extensio
 import {hasStartedInPage, markStartedInPage} from './utils/utils';
 
 if (!hasStartedInPage()) {
-  const memoryScan = new ReactMemoryScan({isDevMode: true});
+  const memoryScan = new ReactMemoryScan({
+    isDevMode: true,
+    trackEventListenerLeaks: true,
+  });
   const domVisualizer = new DOMVisualizationExtension(memoryScan);
   memoryScan.registerExtension(domVisualizer);
 

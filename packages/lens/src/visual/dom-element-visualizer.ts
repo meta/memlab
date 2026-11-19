@@ -7,7 +7,12 @@
  * @format
  * @oncall memory_lab
  */
-import type {DOMElementInfo, Nullable, AnyValue} from '../core/types';
+import type {
+  DOMElementInfo,
+  LeakSummary,
+  Nullable,
+  AnyValue,
+} from '../core/types';
 import {createVisualizerElement} from './visual-utils';
 
 export default class DOMElementVisualizer {
@@ -127,7 +132,8 @@ export default class DOMElementVisualizer {
     this.#cleanup();
   }
 
-  repaint(domElementInfoList: Array<DOMElementInfo>) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  repaint(domElementInfoList: Array<DOMElementInfo>, _summary?: LeakSummary) {
     this.#cleanup();
     this.#paint(domElementInfoList);
   }

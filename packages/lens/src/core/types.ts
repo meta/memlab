@@ -156,6 +156,18 @@ export type MemLensReport = {
 };
 
 /**
+ * What the overlay widget shows after each scan
+ */
+export type LeakSummary = {
+  gcCount: number;
+  detachedSurvivingGC: number;
+  detachedWaitingForGC: number;
+  leakedComponents: Array<{component: string; count: number}>;
+  listenersOnDetachedElements: number;
+  growingGlobalListenerSites: number;
+};
+
+/**
  * Result of analyzing React fiber nodes and DOM elements
  * @property {number} start - Start time of the analysis
  * @property {number} end - End time of the analysis

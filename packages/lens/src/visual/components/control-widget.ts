@@ -13,11 +13,13 @@ import {createVisualizerElement} from '../visual-utils';
 import {createStatusText} from './status-text';
 import {createToggleButton} from './toggle-button';
 import {createComponentStackPanel} from './component-stack-panel';
+import {createLeakSummary} from './leak-summary';
 
 export function createControlWidget(
   overlayDiv: HTMLDivElement,
   hideAllRef: {value: boolean},
   registerDataUpdateCallback: RegisterDataUpdateCallback,
+  getReport?: () => object,
 ): HTMLDivElement {
   const controlWidget = createVisualizerElement('div') as HTMLDivElement;
   controlWidget.style.position = 'fixed';
@@ -44,6 +46,10 @@ export function createControlWidget(
   header.style.padding = '0 8px';
   header.style.height = '36px';
   controlWidget.appendChild(header);
+
+  controlWidget.appendChild(
+    createLeakSummary(registerDataUpdateCallback, getReport),
+  );
 
   // Create component stack panel
   const componentStackPanel = createComponentStackPanel(

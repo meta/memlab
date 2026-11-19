@@ -8,7 +8,7 @@
  * @oncall memory_lab
  */
 import type ReactMemoryScan from '../core/react-memory-scan';
-import type {AnalysisResult, Nullable} from '../core/types';
+import type {AnalysisResult, LeakSummary, Nullable} from '../core/types';
 
 import DOMElementVisualizer from '../visual/dom-element-visualizer';
 import DOMElementVisualizerInteractive from '../visual/dom-element-visualizer-interactive';
@@ -16,28 +16,52 @@ import {BasicExtension} from './basic-extension';
 
 const USE_INTERACTIVE_VISUALIZER = true;
 
+function summarize(
+  result: AnalysisResult,
+  leakedComponents: LeakSummary['leakedComponents'],
+): LeakSummary {
+  const detachedSurvivingGC = result.totalDetachedElementsSurvivingGC ?? 0;
+  return {
+    gcCount: result.gcCount ?? 0,
+    detachedSurvivingGC,
+    detachedWaitingForGC: Math.max(
+      0,
+      result.totalDetachedElements - detachedSurvivingGC,
+    ),
+    leakedComponents,
+    listenersOnDetachedElements: (result.eventListenerLeaks ?? []).reduce(
+      (sum, leak) => sum + leak.count,
+      0,
+    ),
+    growingGlobalListenerSites: (result.globalListenerSites ?? []).filter(
+      site => site.growth > 0,
+    ).length,
+  };
+}
+
 export class DOMVisualizationExtension extends BasicExtension {
   #domVirtualizer: Nullable<DOMElementVisualizer>;
 
   constructor(scanner: ReactMemoryScan) {
     super(scanner);
     if (USE_INTERACTIVE_VISUALIZER) {
-      this.#domVirtualizer = new DOMElementVisualizerInteractive();
+      this.#domVirtualizer = new DOMElementVisualizerInteractive({
+        getReport: () => scanner.getReport(),
+      });
     } else {
       this.#domVirtualizer = new DOMElementVisualizer();
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  afterScan(_analysisResult: AnalysisResult): void {
-    // const start = Date.now();
+  afterScan(analysisResult: AnalysisResult): void {
     const scanner = this.scanner;
     if (scanner.isDevMode()) {
       const detachedDOMInfo = scanner.getDetachedDOMInfo();
-      this.#domVirtualizer?.repaint(detachedDOMInfo);
+      this.#domVirtualizer?.repaint(
+        detachedDOMInfo,
+        summarize(analysisResult, scanner.getLeakedComponents(analysisResult)),
+      );
     }
-    // const end = Date.now();
-    // console.log(`repaint took ${end - start}ms`);
   }
 
   cleanup(): void {

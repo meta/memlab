@@ -25,7 +25,7 @@ test('the status shows the heap as an approximation', async ({page}) => {
   });
   await wait(1200);
   expect(await statusText(page)).toMatch(
-    /^DOM: \d+ total, \d+ detached \| Heap ≈ /,
+    /^DOM: \d+ total, \d+ detached after GC \| Heap ≈ /,
   );
 });
 
@@ -45,5 +45,7 @@ test('the status leaves out the heap where the browser does not report it', asyn
     content: fs.readFileSync(runBundleFilePath, 'utf8'),
   });
   await wait(1200);
-  expect(await statusText(page)).toMatch(/^DOM: \d+ total, \d+ detached$/);
+  expect(await statusText(page)).toMatch(
+    /^DOM: \d+ total, \d+ detached after GC$/,
+  );
 });

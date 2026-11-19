@@ -7,7 +7,13 @@
  * @format
  * @oncall memory_lab
  */
-import type {DOMElementInfo, AnyValue, Optional, Nullable} from '../core/types';
+import type {
+  DOMElementInfo,
+  AnyValue,
+  LeakSummary,
+  Optional,
+  Nullable,
+} from '../core/types';
 import DOMElementVisualizer from './dom-element-visualizer';
 import {createOverlayDiv} from './components/visual-overlay';
 import {createControlWidget} from './components/control-widget';
@@ -27,6 +33,12 @@ export type VisualizerData = {
   pinnedElementId: Nullable<number>;
   selectedReactComponentStack: Array<string>;
   setPinnedElementId: (elementId: Nullable<number>) => void;
+  summary: Nullable<LeakSummary>;
+};
+
+export type VisualizerOptions = {
+  // returns the JSON report the widget's "Copy report" button copies
+  getReport?: () => object;
 };
 
 export type DateUpdateCallback = (data: VisualizerData) => void;
@@ -55,7 +67,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   #detachedElementCount = 0;
   #onKeyDown: Nullable<(event: KeyboardEvent) => void> = null;
 
-  constructor() {
+  constructor(options: VisualizerOptions = {}) {
     super();
     this.#hideAllRef = {value: false};
     this.#visualizationOverlayDiv = createOverlayDiv();
@@ -66,6 +78,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
       cb => {
         this.#updateDataCallbacks.push(cb);
       },
+      options.getReport,
     );
     tryToAttachOverlay(this.#controlWidget);
     this.#elementIdToRectangle = new Map();
@@ -100,6 +113,7 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
       selectedElementId: null,
       selectedReactComponentStack: [],
       pinnedElementId: null,
+      summary: null,
       setPinnedElementId: (pinnedElementId: Nullable<number>) => {
         if (data.pinnedElementId == pinnedElementId) {
           return;
@@ -373,7 +387,8 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
     }
   }
 
-  repaint(domElementInfoList: Array<DOMElementInfo>) {
+  repaint(domElementInfoList: Array<DOMElementInfo>, summary?: LeakSummary) {
+    this.#currentVisualData.summary = summary ?? null;
     this.#cleanup(domElementInfoList);
     this.#paint(domElementInfoList);
     this.#updateVisualizerData();

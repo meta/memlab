@@ -41,8 +41,13 @@ export function createStatusText(
 
   registerDataUpdateCallback((data: VisualizerData) => {
     const totalElements = data.totalDOMElementsCount ?? 0;
-    const detachedElements = data.detachedDOMElementsCount ?? 0;
-    let text = `DOM: ${totalElements} total, ${detachedElements} detached`;
+    const detachedElements =
+      data.summary?.detachedSurvivingGC ?? data.detachedDOMElementsCount ?? 0;
+    let text = `DOM: ${totalElements} total, ${detachedElements} detached after GC`;
+    const waiting = data.summary?.detachedWaitingForGC ?? 0;
+    if (waiting > 0) {
+      text += ` (+${waiting} waiting for GC)`;
+    }
 
     // Chrome-only, and rounded and refreshed rarely unless Chrome runs with
     // --enable-precise-memory-info, so it is shown as an approximation

@@ -549,6 +549,23 @@ export default class ReactMemoryScan {
     return this.#isDevMode;
   }
 
+  /** GC-confirmed leaked fibers of a scan, counted per component name */
+  getLeakedComponents(
+    result: ScanResult,
+  ): Array<{component: string; count: number}> {
+    const counts = new Map<string, number>();
+    for (const ref of result.leakedFibers) {
+      const fiber = ref.deref();
+      const name = fiber != null ? getDisplayNameOfFiberNode(fiber) : null;
+      if (name != null) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+    return [...counts]
+      .map(([component, count]) => ({component, count}))
+      .sort((a, b) => b.count - a.count);
+  }
+
   /**
    * Runs a scan and returns a JSON-serializable summary of it. Detached
    * elements are those that survived the configured number of full GCs,
@@ -585,14 +602,6 @@ export default class ReactMemoryScan {
             b.gcSurvivedCount - a.gcSurvivedCount ||
             (b.detachedForMs ?? 0) - (a.detachedForMs ?? 0),
         );
-    const leakedComponents = new Map<string, number>();
-    for (const ref of result.leakedFibers) {
-      const fiber = ref.deref();
-      const name = fiber != null ? getDisplayNameOfFiberNode(fiber) : null;
-      if (name != null) {
-        leakedComponents.set(name, (leakedComponents.get(name) ?? 0) + 1);
-      }
-    }
     return {
       url: location.href,
       timestamp: now,
@@ -608,9 +617,7 @@ export default class ReactMemoryScan {
         0,
         options.maxDetachedElements ?? 100,
       ),
-      leakedComponents: [...leakedComponents]
-        .map(([component, count]) => ({component, count}))
-        .sort((a, b) => b.count - a.count),
+      leakedComponents: this.getLeakedComponents(result),
       eventListenerLeaks: result.eventListenerLeaks ?? [],
       globalListenerSites: (result.globalListenerSites ?? []).sort(
         (a, b) => b.growth - a.growth || b.count - a.count,
