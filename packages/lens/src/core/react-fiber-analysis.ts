@@ -13,7 +13,8 @@ import {
   traverseFiber,
   getDisplayNameOfFiberNode,
   getFiberNodeFromElement,
-  getTopMostFiberWithChild,
+  getCurrentHostRootFiber,
+  walkFiberTree,
 } from '../utils/react-fiber-utils';
 import {ScanResult, AnyValue} from './types';
 import {isValidComponentName} from './valid-component-name';
@@ -27,7 +28,7 @@ export default class ReactFiberAnalyzer {
     const components = new Set<string>();
     const componentToFiberNodeCount = new Map();
     const detachedComponentToFiberNodeCount = new Map();
-    const topDownVisited = new Set();
+    const topDownVisited = new Set<Fiber>();
     const analyzedFibers = new Set();
     const fiberNodes: Array<WeakRef<Fiber>> = [];
     let totalElements = 0;
@@ -82,7 +83,7 @@ export default class ReactFiberAnalyzer {
       analyzeFiber(fiberNode);
 
       // try to traverse each fiber node in the entire fiber tree
-      const rootFiber = getTopMostFiberWithChild(fiberNode);
+      const rootFiber = getCurrentHostRootFiber(fiberNode);
       if (rootFiber == null) {
         continue;
       }
@@ -92,18 +93,15 @@ export default class ReactFiberAnalyzer {
       visitedRootFibers.add(rootFiber);
 
       // start traversing fiber tree from the know root host
-      traverseFiber(
-        rootFiber,
-        (node: Fiber) => {
-          if (topDownVisited.has(node)) {
-            return true;
-          }
-          topDownVisited.add(node);
-          fiberNodes.push(new WeakRef(node));
-          analyzeFiber(node);
-        },
-        false,
-      );
+      walkFiberTree(rootFiber, (node: Fiber) => {
+        if (topDownVisited.has(node)) {
+          return false;
+        }
+        topDownVisited.add(node);
+        fiberNodes.push(new WeakRef(node));
+        analyzeFiber(node);
+        return true;
+      });
     }
 
     topDownVisited.clear();

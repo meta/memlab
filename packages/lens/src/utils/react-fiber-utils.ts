@@ -84,17 +84,6 @@ export const getTopMostHostFiber = (fiber: Fiber): Nullable<Fiber> => {
   return topMostHostFiber;
 };
 
-export const getTopMostFiberWithChild = (fiber: Fiber): Nullable<Fiber> => {
-  let topMostFiber: Nullable<Fiber> = null;
-  function checkFiber(fiber: Fiber): void {
-    if (fiber.child != null) {
-      topMostFiber = fiber;
-    }
-  }
-  traverseFiber(fiber, checkFiber, true);
-  return topMostFiber;
-};
-
 export const traverseFiber = (
   fiber: Nullable<Fiber>,
   selector: (node: Fiber) => boolean | void,
@@ -117,6 +106,53 @@ export const traverseFiber = (
   }
   return null;
 };
+
+/**
+ * Returns the current HostRoot fiber of the tree `fiber` belongs to, or null
+ * when `fiber` is in a subtree that is no longer attached to a root.
+ * A DOM element keeps the fiber it was created with, which after a re-render
+ * may belong to the alternate tree, so walking up from it can reach the
+ * alternate HostRoot; the FiberRoot always points at the current one.
+ */
+export function getCurrentHostRootFiber(fiber: Fiber): Nullable<Fiber> {
+  const visited = new Set<Fiber>();
+  let top: Fiber = fiber;
+  while (top.return != null && !visited.has(top.return)) {
+    visited.add(top);
+    top = top.return;
+  }
+  if (top.tag !== HostRoot) {
+    return null;
+  }
+  return top.stateNode?.current ?? top;
+}
+
+/**
+ * Depth-first walk of the fiber tree below `root`, in child order.
+ * `visit` returns false to skip the fiber's subtree; the walk then goes on
+ * with the next sibling.
+ */
+export function walkFiberTree(
+  root: Fiber,
+  visit: (fiber: Fiber) => boolean,
+): void {
+  const seen = new Set<Fiber>();
+  const stack: Fiber[] = [root];
+  while (stack.length > 0) {
+    const fiber = stack.pop();
+    if (fiber == null || seen.has(fiber)) {
+      continue;
+    }
+    seen.add(fiber);
+    // push the sibling first so that the child's subtree is walked before it
+    if (fiber !== root && fiber.sibling != null) {
+      stack.push(fiber.sibling);
+    }
+    if (visit(fiber) && fiber.child != null) {
+      stack.push(fiber.child);
+    }
+  }
+}
 
 // React internal property keys
 const internalKeys = [
