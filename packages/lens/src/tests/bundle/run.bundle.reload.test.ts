@@ -7,6 +7,7 @@
  * @format
  * @oncall memory_lab
  */
+import type {AnyValue} from '../../core/types';
 import {test, expect} from '@playwright/test';
 import fs from 'fs';
 import {runBundleFilePath, wait} from '../utils/test-utils';
@@ -59,5 +60,22 @@ test.describe('run.bundle.js start guard', () => {
 
     expect(starts).toBe(1);
     expect(await page.locator(`#${WIDGET_ID}`).count()).toBe(1);
+  });
+  test('exposes the started scanner as window.__memlens', async ({page}) => {
+    await page.setContent(
+      '<!DOCTYPE html><html><body><div>app</div></body></html>',
+    );
+    await page.addScriptTag({
+      content: fs.readFileSync(runBundleFilePath, 'utf8'),
+    });
+    const handle = await page.evaluate(() => {
+      const scanner = (window as AnyValue).__memlens;
+      return {
+        isDevMode: scanner?.isDevMode(),
+        totalElements: scanner?.scan().totalElements,
+      };
+    });
+    expect(handle.isDevMode).toBe(true);
+    expect(handle.totalElements).toBeGreaterThan(0);
   });
 });

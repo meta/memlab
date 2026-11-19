@@ -7,6 +7,7 @@
  * @format
  * @oncall memory_lab
  */
+import type {AnyValue} from './core/types';
 import ReactMemoryScan from './core/react-memory-scan';
 import {DOMVisualizationExtension} from './extensions/dom-visualization-extension';
 import {hasStartedInPage, markStartedInPage} from './utils/utils';
@@ -18,4 +19,6 @@ if (!hasStartedInPage()) {
 
   memoryScan.start();
   markStartedInPage();
+  // the scanner the run bundle started, for the console and for tools such as memlab
+  (window as AnyValue).__memlens = memoryScan;
 }
