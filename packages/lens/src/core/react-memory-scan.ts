@@ -33,6 +33,7 @@ import {DOMObserver} from './dom-observer';
 import {config} from '../config/config';
 import {EventListenerTracker} from './event-listener-tracker';
 import {GCTracker} from './gc-tracker';
+import {RemovalTracker} from './removal-tracker';
 
 type DetachedRecord = {
   detachedAt: number;
@@ -45,6 +46,12 @@ type UnmountedFiberRecord = {
 };
 
 const DEFAULT_MIN_GC_COUNT = 1;
+
+// Reading a rect forces a layout when the DOM changed since the last one, so
+// a commit that removes many nodes one by one would force a layout per
+// removal. Rects are read until this much time is spent in one synchronous
+// run of removals; the rest keep the rect recorded by an earlier scan.
+const REMOVAL_RECT_BUDGET_MS = 4;
 
 export default class ReactMemoryScan {
   static nextElementId = 0;
@@ -68,6 +75,10 @@ export default class ReactMemoryScan {
   #detachedElementMinGCCount: number;
   #unmountedFibers: Array<UnmountedFiberRecord> = [];
   #leakedFiberMinGCCount: number;
+  #removalTracker: Nullable<RemovalTracker>;
+  #removedSinceLastScan: Array<WeakRef<Element>> = [];
+  #removalRectTimeMs = 0;
+  #isRemovalRectResetQueued = false;
 
   constructor(options: CreateOptions = {}) {
     this.#elementWeakRefs = [];
@@ -91,6 +102,10 @@ export default class ReactMemoryScan {
     this.#detachedElementMinGCCount = this.#gcTracker.isSupported()
       ? (options.detachedElementMinGCCount ?? DEFAULT_MIN_GC_COUNT)
       : 0;
+    this.#removalTracker =
+      options.captureOnRemoval === false
+        ? null
+        : new RemovalTracker(elements => this.#recordBeforeRemoval(elements));
     this.#leakedFiberMinGCCount = this.#gcTracker.isSupported()
       ? (options.leakedFiberMinGCCount ?? DEFAULT_MIN_GC_COUNT)
       : 0;
@@ -155,6 +170,7 @@ export default class ReactMemoryScan {
     if (this.#intervalId != null) {
       return;
     }
+    this.#removalTracker?.install();
     this.#intervalId = setInterval(
       this.#scanCycle.bind(this),
       this.#scanIntervalMs,
@@ -209,6 +225,9 @@ export default class ReactMemoryScan {
     this.#elementWeakRefs = [];
     this.#knownFiberNodes = [];
     this.#unmountedFibers = [];
+    this.#removedSinceLastScan = [];
+
+    this.#removalTracker?.uninstall();
 
     // Stop DOM observer
     if (this.#domObserver) {
@@ -304,6 +323,37 @@ export default class ReactMemoryScan {
    * full GCs (`detachedElementMinGCCount`, 1 by default). Pass
    * `includeUnconfirmed` to also get those still waiting for a GC.
    */
+  // Position and component stack can only be read while the element is still
+  // attached, so take them right before it is removed. The element is then
+  // tracked even if no scan saw it attached.
+  #recordBeforeRemoval(elements: Element[]): void {
+    if (!this.#isRemovalRectResetQueued) {
+      this.#isRemovalRectResetQueued = true;
+      queueMicrotask(() => {
+        this.#removalRectTimeMs = 0;
+        this.#isRemovalRectResetQueued = false;
+      });
+    }
+    for (const element of elements) {
+      if (this.#removalRectTimeMs < REMOVAL_RECT_BUDGET_MS) {
+        const start = performance.now();
+        const rect = utils.getBoundingClientRect(element);
+        this.#removalRectTimeMs += performance.now() - start;
+        if (rect != null) {
+          this.#elementToBoundingRects.set(element, rect);
+        }
+      }
+      const fiberNode = getFiberNodeFromElement(element);
+      if (fiberNode != null) {
+        this.#elementToComponentStack.set(
+          element,
+          getReactComponentStack(fiberNode),
+        );
+      }
+      this.#removedSinceLastScan.push(new WeakRef(element));
+    }
+  }
+
   getDetachedDOMInfo(
     options: {includeUnconfirmed?: boolean} = {},
   ): Array<DOMElementInfo> {
@@ -428,10 +478,16 @@ export default class ReactMemoryScan {
   }
 
   #getTrackedDOMRefs(): Array<WeakRef<Element>> {
+    const removed = this.#removedSinceLastScan;
+    this.#removedSinceLastScan = [];
     if (this.#domObserver == null) {
-      return utils.getDOMElements();
+      return [...utils.getDOMElements(), ...removed];
     }
-    return [...utils.getDOMElements(), ...this.#domObserver.getDOMElements()];
+    return [
+      ...utils.getDOMElements(),
+      ...this.#domObserver.getDOMElements(),
+      ...removed,
+    ];
   }
 
   #runGC(): void {

@@ -63,6 +63,9 @@ export type CreateOptions = {
   detachedElementMinGCCount?: number;
   // full GCs an unmounted fiber must survive before it is reported (default 1)
   leakedFiberMinGCCount?: number;
+  // record position and component stack right before an element is removed
+  // from the DOM, by wrapping the DOM removal methods (default true)
+  captureOnRemoval?: boolean;
 };
 
 /**
