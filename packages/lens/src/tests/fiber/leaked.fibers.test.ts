@@ -44,7 +44,8 @@ for (const build of ['dev', 'prod'] as ReactBuild[]) {
         const fiber = ref.deref();
         return fiber?.type?.name ?? `tag:${fiber?.tag}`;
       };
-      const scan = w.MemLens.createReactMemoryScan();
+      // report fibers as soon as they leave the tree
+      const scan = w.MemLens.createReactMemoryScan({leakedFiberMinGCCount: 0});
       const leakedPerScan: string[][] = [];
       for (let i = 0; i < 4; i++) {
         leakedPerScan.push(scan.scan().leakedFibers.map(nameOf));

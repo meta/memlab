@@ -61,6 +61,8 @@ export type CreateOptions = {
   trackEventListenerLeaks?: boolean;
   // full GCs a detached element must survive before it is reported (default 1)
   detachedElementMinGCCount?: number;
+  // full GCs an unmounted fiber must survive before it is reported (default 1)
+  leakedFiberMinGCCount?: number;
 };
 
 /**

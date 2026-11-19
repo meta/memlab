@@ -39,6 +39,11 @@ type DetachedRecord = {
   gcCountAtDetach: number;
 };
 
+type UnmountedFiberRecord = {
+  fiber: WeakRef<Fiber>;
+  gcCountAtUnmount: number;
+};
+
 const DEFAULT_MIN_GC_COUNT = 1;
 
 export default class ReactMemoryScan {
@@ -61,6 +66,8 @@ export default class ReactMemoryScan {
   #gcTracker: GCTracker = new GCTracker();
   #detachedRecords: WeakMap<Element, DetachedRecord> = new WeakMap();
   #detachedElementMinGCCount: number;
+  #unmountedFibers: Array<UnmountedFiberRecord> = [];
+  #leakedFiberMinGCCount: number;
 
   constructor(options: CreateOptions = {}) {
     this.#elementWeakRefs = [];
@@ -83,6 +90,9 @@ export default class ReactMemoryScan {
     // without GC detection every reachable detached element is reported
     this.#detachedElementMinGCCount = this.#gcTracker.isSupported()
       ? (options.detachedElementMinGCCount ?? DEFAULT_MIN_GC_COUNT)
+      : 0;
+    this.#leakedFiberMinGCCount = this.#gcTracker.isSupported()
+      ? (options.leakedFiberMinGCCount ?? DEFAULT_MIN_GC_COUNT)
       : 0;
   }
 
@@ -198,6 +208,7 @@ export default class ReactMemoryScan {
     // Clear element references to allow garbage collection
     this.#elementWeakRefs = [];
     this.#knownFiberNodes = [];
+    this.#unmountedFibers = [];
 
     // Stop DOM observer
     if (this.#domObserver) {
@@ -383,6 +394,27 @@ export default class ReactMemoryScan {
     }
     this.#knownFiberNodes = currentFibers;
     this.#log('known fibers: ', this.#knownFiberNodes.length);
+    return this.#updateUnmountedFibers(leakedFibers);
+  }
+
+  // Fibers that left the tree are kept (weakly) and reported once they have
+  // survived `leakedFiberMinGCCount` full GCs; collected ones are dropped.
+  #updateUnmountedFibers(
+    newlyUnmounted: Array<WeakRef<Fiber>>,
+  ): Array<WeakRef<Fiber>> {
+    const gcCount = this.#gcTracker.getCount();
+    for (const fiber of newlyUnmounted) {
+      this.#unmountedFibers.push({fiber, gcCountAtUnmount: gcCount});
+    }
+    this.#unmountedFibers = this.#unmountedFibers.filter(
+      record => record.fiber.deref() != null,
+    );
+    const leakedFibers = this.#unmountedFibers
+      .filter(
+        record =>
+          gcCount - record.gcCountAtUnmount >= this.#leakedFiberMinGCCount,
+      )
+      .map(record => record.fiber);
     this.#log('leaked fibers: ', leakedFibers.length);
     return leakedFibers;
   }
