@@ -447,6 +447,27 @@ await shapeCheck(
 );
 
 await shapeCheck(
+  "eval code: JSON.stringify of a node or edge gives a brief, it doesn't throw",
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: [
+        "const w = helpers.iterByClass('FixtureWidget')[0];",
+        'result = JSON.parse(JSON.stringify({w, e: [...w.references][0]}));',
+      ].join('\n'),
+    });
+    const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(
+      json.w.name === 'FixtureWidget' && typeof json.w.id === 'number',
+      `node: ${text.slice(0, 300)}`,
+    );
+    assert(
+      typeof json.e.edge === 'string' && json.e.from.id === json.w.id,
+      `edge: ${JSON.stringify(json.e)}`,
+    );
+  },
+);
+
+await shapeCheck(
   'diff_snapshots: a long string class does not widen every row',
   async () => {
     const {text} = await call('memlab_diff_snapshots', {

@@ -391,6 +391,26 @@ export function unwrapNode<T>(node: T): T {
   return node;
 }
 
+// A heap node or edge as plain JSON: what `result` prints, and what the
+// code's own `JSON.stringify` of one gives.
+function nodeJson(n: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: n.id,
+    name: typeof n.name === 'string' ? n.name.slice(0, 200) : n.name,
+    type: n.type,
+    self_size: n.self_size,
+  };
+}
+
+function edgeJson(e: Record<string, unknown>): Record<string, unknown> {
+  return {
+    edge: String(e.name_or_index),
+    type: e.type,
+    from: nodeJson(e.fromNode as Record<string, unknown>),
+    to: nodeJson(e.toNode as Record<string, unknown>),
+  };
+}
+
 /**
  * The eval `result` as plain JSON.
  *
@@ -406,12 +426,6 @@ export function unwrapNode<T>(node: T): T {
  */
 export function jsonSafeResult(value: unknown): unknown {
   const onPath = new Set<object>();
-  const nodeBrief = (n: Record<string, unknown>) => ({
-    id: n.id,
-    name: typeof n.name === 'string' ? n.name.slice(0, 200) : n.name,
-    type: n.type,
-    self_size: n.self_size,
-  });
   const isNode = (o: Record<string, unknown>): boolean =>
     typeof o.id === 'number' &&
     typeof o.type === 'string' &&
@@ -424,15 +438,8 @@ export function jsonSafeResult(value: unknown): unknown {
     if (v == null || typeof v !== 'object') return v;
     const raw = unwrapNode(v) as Record<string, unknown>;
     try {
-      if (isEdge(raw)) {
-        return {
-          edge: String(raw.name_or_index),
-          type: raw.type,
-          from: nodeBrief(raw.fromNode as Record<string, unknown>),
-          to: nodeBrief(raw.toNode as Record<string, unknown>),
-        };
-      }
-      if (isNode(raw)) return nodeBrief(raw);
+      if (isEdge(raw)) return edgeJson(raw);
+      if (isNode(raw)) return nodeJson(raw);
     } catch {
       // Not a heap node after all; fall through to the generic walk.
     }
@@ -537,6 +544,10 @@ function wrapNode(node: unknown): unknown {
   return new Proxy(node as object, {
     get(target, prop, receiver) {
       if (prop === RAW_NODE) return target;
+      // The code's own `JSON.stringify` of a node threw on its BigInt field.
+      if (prop === 'toJSON') {
+        return () => nodeJson(target as Record<string, unknown>);
+      }
       if (typeof prop === 'string' && RETAINED_SIZE_PROPS.has(prop)) {
         const id = (target as {id?: unknown}).id;
         throw new Error(
@@ -762,6 +773,9 @@ function wrapEdge(edge: unknown): unknown {
   if (edge == null) return edge;
   return new Proxy(edge as object, {
     get(target, prop, receiver) {
+      if (prop === 'toJSON') {
+        return () => edgeJson(target as Record<string, unknown>);
+      }
       let val;
       try {
         val = Reflect.get(target, prop, receiver);
