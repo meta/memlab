@@ -57,14 +57,20 @@ export function isMinifiedName(name: string): boolean {
   if (name.length >= 5) {
     return false;
   }
-  // Minified names are often very short, e.g., "a", "b", "c"
-  if (name.length <= 3) {
+  // Minifiers mostly emit one- and two-character names, e.g. "a", "Zt"
+  if (name.length <= 2) {
     return true;
   }
 
   // Names with non-alphanumeric characters (except $ and _) are unlikely to be minified
   if (/[^a-zA-Z0-9$_]/.test(name)) {
     return false;
+  }
+
+  // A three-character name is kept only when it reads as a capitalized
+  // word, e.g. "App", "Nav", "Row"
+  if (name.length === 3) {
+    return !/^[A-Z][a-z]{2}$/.test(name);
   }
 
   // Minified names rarely have meaningful words (detect camelCase or PascalCase)
