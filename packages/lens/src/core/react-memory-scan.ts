@@ -19,13 +19,16 @@ import type {
   AnyValue,
   EventListenerLeak,
   GlobalListenerGrowth,
+  MemLensReport,
   Nullable,
+  ReportedDetachedElement,
 } from './types';
 import type {BasicExtension} from '../extensions/basic-extension';
 
 import * as utils from '../utils/utils';
 import ReactFiberAnalyzer from './react-fiber-analysis';
 import {
+  getDisplayNameOfFiberNode,
   getFiberNodeFromElement,
   getFiberRootOfContainer,
   getReactComponentStack,
@@ -544,6 +547,75 @@ export default class ReactMemoryScan {
 
   isDevMode(): boolean {
     return this.#isDevMode;
+  }
+
+  /**
+   * Runs a scan and returns a JSON-serializable summary of it. Detached
+   * elements are those that survived the configured number of full GCs,
+   * longest-surviving first, up to `maxDetachedElements` (default 100).
+   */
+  getReport(options: {maxDetachedElements?: number} = {}): MemLensReport {
+    const result = this.scan();
+    const now = Date.now();
+    const detachedElements: ReportedDetachedElement[] =
+      this.getDetachedDOMInfo()
+        .map(info => {
+          const element = info.element.deref() as AnyValue;
+          const rect = info.boundingRect;
+          return {
+            id: element?.detachedElementIdStr ?? '',
+            tagName: element?.tagName ?? '',
+            componentStack: info.componentStack ?? [],
+            detachedForMs:
+              info.detachedAt != null ? now - info.detachedAt : null,
+            gcSurvivedCount: info.gcSurvivedCount ?? 0,
+            rect:
+              rect != null
+                ? {
+                    x: rect.left + rect.scrollLeft,
+                    y: rect.top + rect.scrollTop,
+                    width: rect.width,
+                    height: rect.height,
+                  }
+                : null,
+          };
+        })
+        .sort(
+          (a, b) =>
+            b.gcSurvivedCount - a.gcSurvivedCount ||
+            (b.detachedForMs ?? 0) - (a.detachedForMs ?? 0),
+        );
+    const leakedComponents = new Map<string, number>();
+    for (const ref of result.leakedFibers) {
+      const fiber = ref.deref();
+      const name = fiber != null ? getDisplayNameOfFiberNode(fiber) : null;
+      if (name != null) {
+        leakedComponents.set(name, (leakedComponents.get(name) ?? 0) + 1);
+      }
+    }
+    return {
+      url: location.href,
+      timestamp: now,
+      gcCount: result.gcCount ?? 0,
+      totals: {
+        elements: result.totalElements,
+        detachedElements: result.totalDetachedElements,
+        detachedElementsSurvivingGC:
+          result.totalDetachedElementsSurvivingGC ?? 0,
+        leakedFibers: result.leakedFibers.length,
+      },
+      detachedElements: detachedElements.slice(
+        0,
+        options.maxDetachedElements ?? 100,
+      ),
+      leakedComponents: [...leakedComponents]
+        .map(([component, count]) => ({component, count}))
+        .sort((a, b) => b.count - a.count),
+      eventListenerLeaks: result.eventListenerLeaks ?? [],
+      globalListenerSites: (result.globalListenerSites ?? []).sort(
+        (a, b) => b.growth - a.growth || b.count - a.count,
+      ),
+    };
   }
 
   #updateElementToComponentInfo(elements: Array<WeakRef<Element>>): void {

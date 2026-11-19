@@ -122,6 +122,40 @@ export type ScanResult = {
 };
 
 /**
+ * A detached element in a MemLensReport
+ * @property {string} id - Also stored on the element as `detachedElementIdStr`,
+ * so a heap snapshot can be searched for it
+ */
+export type ReportedDetachedElement = {
+  id: string;
+  tagName: string;
+  componentStack: string[];
+  detachedForMs: Nullable<number>;
+  gcSurvivedCount: number;
+  rect: Nullable<{x: number; y: number; width: number; height: number}>;
+};
+
+/**
+ * JSON-serializable summary of what a scan found, for the console and for
+ * tools driving the page (see ReactMemoryScan.getReport)
+ */
+export type MemLensReport = {
+  url: string;
+  timestamp: number;
+  gcCount: number;
+  totals: {
+    elements: number;
+    detachedElements: number;
+    detachedElementsSurvivingGC: number;
+    leakedFibers: number;
+  };
+  detachedElements: ReportedDetachedElement[];
+  leakedComponents: Array<{component: string; count: number}>;
+  eventListenerLeaks: EventListenerLeak[];
+  globalListenerSites: GlobalListenerGrowth[];
+};
+
+/**
  * Result of analyzing React fiber nodes and DOM elements
  * @property {number} start - Start time of the analysis
  * @property {number} end - End time of the analysis
