@@ -374,13 +374,17 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
   }
 
   repaint(domElementInfoList: Array<DOMElementInfo>) {
-    // this.#controlWidget.remove();
-    this.#visualizationOverlayDiv.remove();
     this.#cleanup(domElementInfoList);
     this.#paint(domElementInfoList);
     this.#updateVisualizerData();
-    tryToAttachOverlay(this.#visualizationOverlayDiv);
-    // tryToAttachOverlay(this.#controlWidget);
+    // attach once; when MemLens starts before <body> exists, this is the
+    // first chance to do it
+    if (!this.#visualizationOverlayDiv.isConnected) {
+      tryToAttachOverlay(this.#visualizationOverlayDiv);
+    }
+    if (!this.#controlWidget.isConnected) {
+      tryToAttachOverlay(this.#controlWidget);
+    }
   }
 
   cleanup(): void {
