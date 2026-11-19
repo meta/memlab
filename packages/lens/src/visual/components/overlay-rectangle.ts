@@ -15,7 +15,11 @@ import {
   removeAllListeners,
 } from '../visual-utils';
 
-type OutlineState = {pinned: boolean; selected: boolean};
+type OutlineState = {pinned: boolean; selected: boolean; confirmed: boolean};
+
+const CONFIRMED_BORDER = '1px dotted rgba(75, 192, 192, 0.8)';
+// detached, but not through a full GC yet, so it may still be collected
+const WAITING_FOR_GC_BORDER = '1px dashed rgba(160, 160, 160, 0.55)';
 
 const MAX_Z_INDEX = `${Math.pow(2, 30) - 1}`;
 
@@ -63,7 +67,8 @@ export function createOverlayRectangle(
   div.style.height = `${rect.height}px`;
   div.style.top = `${rect.top + rect.scrollTop}px`;
   div.style.left = `${rect.left + rect.scrollLeft}px`;
-  div.style.border = '1px dotted rgba(75, 192, 192, 0.8)';
+  let confirmed = info.gcConfirmed !== false;
+  div.style.border = confirmed ? CONFIRMED_BORDER : WAITING_FOR_GC_BORDER;
   div.style.borderRadius = '1px';
   div.style.zIndex = zIndex.toString();
 
@@ -82,7 +87,9 @@ export function createOverlayRectangle(
     const elementIdStr = `memory-id-${elementId}@`;
     labelDiv.remove();
     divRef.deref()?.appendChild(labelDiv);
-    labelDiv.textContent = `${componentName} (${elementIdStr})`;
+    labelDiv.textContent = `${componentName} (${elementIdStr})${
+      confirmed ? '' : ', waiting for GC'
+    }`;
     labelDiv.style.display = 'inline-block';
     setSelectedId(elementId);
   });
@@ -99,22 +106,27 @@ export function createOverlayRectangle(
 
   (div as AnyValue).__selected = () => {
     selected = true;
-    styleOnInteraction(divRef, {selected, pinned});
+    styleOnInteraction(divRef, {selected, pinned, confirmed});
   };
 
   (div as AnyValue).__unselected = () => {
     selected = false;
-    styleOnInteraction(divRef, {selected, pinned});
+    styleOnInteraction(divRef, {selected, pinned, confirmed});
+  };
+
+  (div as AnyValue).__confirmed = () => {
+    confirmed = true;
+    styleOnInteraction(divRef, {selected, pinned, confirmed});
   };
 
   (div as AnyValue).__pinned = () => {
     pinned = true;
-    styleOnInteraction(divRef, {selected, pinned});
+    styleOnInteraction(divRef, {selected, pinned, confirmed});
   };
 
   (div as AnyValue).__unpinned = () => {
     pinned = false;
-    styleOnInteraction(divRef, {selected, pinned});
+    styleOnInteraction(divRef, {selected, pinned, confirmed});
   };
 
   observerManager.observe(divRef, (entry: IntersectionObserverEntry) => {
@@ -135,6 +147,7 @@ export function createOverlayRectangle(
     (div as AnyValue).__cleanup = null;
     (div as AnyValue).__selected = null;
     (div as AnyValue).__unselected = null;
+    (div as AnyValue).__confirmed = null;
     (div as AnyValue).__pinned = null;
     (div as AnyValue).__unpinned = null;
   };
@@ -151,13 +164,13 @@ function styleOnInteraction(
   if (div == null) {
     return;
   }
-  const {pinned, selected} = state;
+  const {pinned, selected, confirmed} = state;
   if (!pinned) {
     if (selected) {
       div.style.border = '1px solid rgba(75, 192, 192, 0.8)';
       div.style.background = 'rgba(75, 192, 192, 0.02)';
     } else {
-      div.style.border = '1px dotted rgba(75, 192, 192, 0.8)';
+      div.style.border = confirmed ? CONFIRMED_BORDER : WAITING_FOR_GC_BORDER;
       div.style.background = '';
     }
   } else {

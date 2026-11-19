@@ -70,29 +70,50 @@ test('only detached elements that survive a full GC are reported', async ({
   });
 });
 
-test('the overlay outlines a detached element only after it survives a full GC', async ({
+test('the overlay outlines a detached element faded until it survives a full GC', async ({
   page,
 }) => {
   await page.setContent(`<!DOCTYPE html><html><body style="margin:0">
-    <div id="card" style="width:300px;height:200px"></div></body></html>`);
+    <div id="kept" style="width:300px;height:200px"></div>
+    <div id="garbage" style="width:300px;height:100px"></div></body></html>`);
   await page.addScriptTag({
     content: fs.readFileSync(runBundleFilePath, 'utf8'),
   });
   await wait(1200);
   await page.evaluate(() => {
-    const card = document.getElementById('card');
-    (window as AnyValue).__keep = card;
-    card?.remove();
+    const kept = document.getElementById('kept');
+    (window as AnyValue).__keep = kept;
+    kept?.remove();
+    document.getElementById('garbage')?.remove();
   });
   await wait(2200);
   const boxes = () =>
-    page.evaluate(
-      () =>
-        document.getElementById('memory-visualization-overlay')?.children
-          .length,
-    );
-  expect(await boxes()).toBe(0);
+    page.evaluate(() => {
+      const overlay = document.getElementById('memory-visualization-overlay');
+      return Array.from(overlay?.children ?? []).map(box => {
+        const style = (box as HTMLElement).style;
+        return {height: style.height, border: style.borderStyle};
+      });
+    });
+  // both are outlined right away, in the faded "waiting for GC" style
+  expect(await boxes()).toEqual([
+    {height: '200px', border: 'dashed'},
+    {height: '100px', border: 'dashed'},
+  ]);
+  await page.evaluate(() => {
+    (window as AnyValue).__keptBox = document.getElementById(
+      'memory-visualization-overlay',
+    )?.firstElementChild;
+  });
   await forceGC(page);
   await wait(1200);
-  expect(await boxes()).toBe(1);
+  // the collected one is gone and the kept one is now confirmed, in place
+  expect(await boxes()).toEqual([{height: '200px', border: 'dotted'}]);
+  expect(
+    await page.evaluate(
+      () =>
+        document.getElementById('memory-visualization-overlay')
+          ?.firstElementChild === (window as AnyValue).__keptBox,
+    ),
+  ).toBe(true);
 });

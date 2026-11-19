@@ -549,6 +549,7 @@ export default class ReactMemoryScan {
         componentStack,
         detachedAt: this.#detachedRecords.get(element)?.detachedAt,
         gcSurvivedCount: this.#getGCSurvivedCount(element),
+        gcConfirmed: this.#isConfirmedDetached(element),
       });
     }
     return detachedDOMElements;

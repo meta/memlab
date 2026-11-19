@@ -224,6 +224,8 @@ export type DOMElementInfo = {
   detachedAt?: number;
   // full GCs the element has survived since then
   gcSurvivedCount?: number;
+  // survived enough full GCs (`detachedElementMinGCCount`) to be reported
+  gcConfirmed?: boolean;
 };
 
 /** @internal */

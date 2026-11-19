@@ -310,7 +310,12 @@ export default class DOMElementVisualizerInteractive extends DOMElementVisualize
       if (!element.isConnected) {
         ++this.#detachedElementCount;
       }
-      if (this.#elementIdToRectangle.has(elementId)) {
+      const painted = this.#elementIdToRectangle.get(elementId);
+      if (painted != null) {
+        if (info.gcConfirmed && !painted.elementInfo.gcConfirmed) {
+          painted.elementInfo = info;
+          (painted.visualizerElementRef.deref() as AnyValue)?.__confirmed?.();
+        }
         continue;
       }
       if (element == null) {

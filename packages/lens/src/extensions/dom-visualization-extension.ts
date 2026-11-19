@@ -56,7 +56,10 @@ export class DOMVisualizationExtension extends BasicExtension {
   afterScan(analysisResult: AnalysisResult): void {
     const scanner = this.scanner;
     if (scanner.isDevMode()) {
-      const detachedDOMInfo = scanner.getDetachedDOMInfo();
+      // elements still waiting for a GC are outlined right away, faded
+      const detachedDOMInfo = scanner.getDetachedDOMInfo({
+        includeUnconfirmed: true,
+      });
       this.#domVirtualizer?.repaint(
         detachedDOMInfo,
         summarize(analysisResult, scanner.getLeakedComponents(analysisResult)),

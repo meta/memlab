@@ -14,7 +14,7 @@ It can run as a one-line console snippet or as a small library you embed in dev 
 - **GC-confirmed results**: a detached element or unmounted fiber is reported only once it has survived a full GC after it left the page, so garbage the browser has not collected yet is not reported as a leak. Full GCs are counted with a `FinalizationRegistry` sentinel; no `--expose-gc` flag is needed
 - **Captured at removal**: the position and React component stack of an element are recorded right before it is removed from the DOM, so elements that live for less than a scan interval are still outlined and attributed
 - **No DOM sweep while running**: a started scanner looks only at removed elements and walks the React trees from their roots
-- **Visual overlay**: outlines GC-confirmed detached elements; the widget shows counts, leaked components, listener growth and the React component stack of the selected element, and copies a JSON report
+- **Visual overlay**: outlines detached elements as soon as they leave the page, in faded gray dashes until they survive a GC and in teal after; the widget shows counts, leaked components, listener growth and the React component stack of the selected element, and copies a JSON report
 - **Shadow DOM**: open shadow roots, and closed ones attached while MemLens runs, are covered
 - **Non-intrusive**: uses a transparent overlay, never lets its own failures reach the app's DOM or listener calls, and restores everything it patched when stopped
 
@@ -99,6 +99,7 @@ await page.addScriptTag({content: getBundleContent()});
 - **Status line**: total elements, detached elements that survived a GC, and how many are still waiting for one
 - **Summary row**: leaked React components, listeners on detached elements, growing `window`/`document` listener sites, and the number of GCs seen
 - **Copy report**: copies `getReport()` as JSON (and logs it to the console)
+- **Outlines**: a gray dashed outline is a detached element still waiting for a GC, which may yet be collected; it turns teal and dotted once the element survives one
 - **Toggle switch**: Show/hide all overlay rectangles
 - **Select/pin**: Click a rectangle to pin/unpin the current selection
 - **Hover**: Reveal the selection chain of related detached elements
