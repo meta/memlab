@@ -9,6 +9,7 @@
  */
 import type {Fiber} from 'react-reconciler';
 import {getFiberNodeFromElement} from '../utils/react-fiber-utils';
+import type {Nullable} from './types';
 import {WeakMapPlus} from '../utils/weak-ref-utils';
 
 type EventListenerEntry = {
@@ -78,6 +79,11 @@ export class EventListenerTracker {
       // a null listener is valid and the browser ignores it
       if (listener != null && this instanceof Element) {
         const capture = getCapture(options);
+        const optionsObject = typeof options === 'object' ? options : null;
+        // the browser does not add a listener whose signal is already aborted
+        if (optionsObject?.signal?.aborted) {
+          return;
+        }
         const listeners = self.#listenerMap.get(this) ?? [];
         // the browser ignores a listener that is already registered
         if (listeners.some(e => isSameListener(e, type, listener, capture))) {
@@ -92,6 +98,7 @@ export class EventListenerTracker {
         };
         listeners.push(entry);
         self.#listenerMap.set(this, listeners);
+        self.#forgetWhenBrowserRemoves(this, entry, optionsObject);
       }
     };
 
@@ -119,6 +126,50 @@ export class EventListenerTracker {
         }
       }
     };
+  }
+
+  // The browser removes a `once` listener after it runs and a listener whose
+  // `signal` aborts, without a removeEventListener call to observe.
+  #forgetWhenBrowserRemoves(
+    target: Element,
+    entry: EventListenerEntry,
+    options: Nullable<AddEventListenerOptions>,
+  ): void {
+    if (options == null) {
+      return;
+    }
+    const targetRef = new WeakRef(target);
+    const forget = () => this.#forgetEntry(targetRef, entry);
+    if (options.once) {
+      // added after the app's listener, so it runs right after it
+      this.#originalAddEventListener.call(target, entry.type, forget, {
+        capture: entry.capture,
+        once: true,
+      });
+    }
+    if (options.signal != null) {
+      this.#originalAddEventListener.call(options.signal, 'abort', forget, {
+        once: true,
+      });
+    }
+  }
+
+  #forgetEntry(targetRef: WeakRef<Element>, entry: EventListenerEntry): void {
+    const target = targetRef.deref();
+    if (target == null) {
+      return;
+    }
+    const listeners = this.#listenerMap.get(target);
+    if (listeners == null) {
+      return;
+    }
+    const index = listeners.indexOf(entry);
+    if (index !== -1) {
+      listeners.splice(index, 1);
+    }
+    if (listeners.length === 0) {
+      this.#listenerMap.delete(target);
+    }
   }
 
   #unpatchEventListeners(): void {

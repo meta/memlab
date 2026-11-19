@@ -104,4 +104,40 @@ test.describe('event listener tracking', () => {
     );
     expect(leaks).toEqual([{type: 'click', count: 1}]);
   });
+  test('a once listener is forgotten after it runs', async ({page}) => {
+    const leaks = await leaksAfter(
+      page,
+      `div.addEventListener('click', () => {}, {once: true});
+       div.click();`,
+    );
+    expect(leaks).toEqual([]);
+  });
+
+  test('a once listener that never ran is still reported', async ({page}) => {
+    const leaks = await leaksAfter(
+      page,
+      `div.addEventListener('click', () => {}, {once: true});`,
+    );
+    expect(leaks).toEqual([{type: 'click', count: 1}]);
+  });
+
+  test('a listener is forgotten when its signal aborts', async ({page}) => {
+    const leaks = await leaksAfter(
+      page,
+      `const controller = new AbortController();
+       div.addEventListener('click', () => {}, {signal: controller.signal});
+       controller.abort();`,
+    );
+    expect(leaks).toEqual([]);
+  });
+
+  test('a listener with an already aborted signal is not recorded', async ({
+    page,
+  }) => {
+    const leaks = await leaksAfter(
+      page,
+      `div.addEventListener('click', () => {}, {signal: AbortSignal.abort()});`,
+    );
+    expect(leaks).toEqual([]);
+  });
 });
