@@ -223,4 +223,57 @@ test.describe('event listener tracking', () => {
     });
     expect(result).toEqual({kept: true, seen: 1, clicks: 1});
   });
+  test('window and document listeners are grouped by call site', async ({
+    page,
+  }) => {
+    await page.addScriptTag({
+      content: `
+        function mountLeakyWidget() {
+          window.addEventListener('resize', () => {});
+          document.addEventListener('keydown', () => {});
+        }
+        function mountCleanWidget() {
+          const onResize = () => {};
+          window.addEventListener('resize', onResize);
+          return () => window.removeEventListener('resize', onResize);
+        }
+      `,
+    });
+    const sites = await page.evaluate(() => {
+      const w = window as AnyValue;
+      const scan = w.MemLens.createReactMemoryScan({
+        trackEventListenerLeaks: true,
+      });
+      const summarize = () =>
+        scan
+          .scan()
+          .globalListenerSites.map(
+            ({target, type, site, count, growth}: AnyValue) => ({
+              target,
+              type,
+              leaky: site.includes('mountLeakyWidget'),
+              count,
+              growth,
+            }),
+          );
+      w.mountLeakyWidget();
+      w.mountCleanWidget()();
+      const first = summarize();
+      for (let i = 0; i < 4; i++) {
+        w.mountLeakyWidget();
+        w.mountCleanWidget()();
+      }
+      const later = summarize();
+      scan.dispose();
+      return {first, later};
+    });
+    expect(sites.first).toEqual([
+      {target: 'window', type: 'resize', leaky: true, count: 1, growth: 0},
+      {target: 'document', type: 'keydown', leaky: true, count: 1, growth: 0},
+    ]);
+    expect(sites.later).toEqual([
+      {target: 'window', type: 'resize', leaky: true, count: 5, growth: 4},
+      {target: 'document', type: 'keydown', leaky: true, count: 5, growth: 4},
+    ]);
+  });
 });

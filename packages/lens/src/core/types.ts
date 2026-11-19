@@ -75,6 +75,29 @@ export type EventListenerLeak = {
   count: number;
 };
 
+export type GlobalListenerTarget = 'window' | 'document';
+
+/**
+ * Live listeners on window or document added from one call site
+ * @property {string} site - The stack frame that called addEventListener
+ * @property {number} count - Listeners from this site that are still registered
+ */
+export type GlobalListenerSite = {
+  target: GlobalListenerTarget;
+  type: string;
+  site: string;
+  count: number;
+};
+
+/**
+ * @property {number} growth - Change in `count` since the scanner first saw
+ * the site; a site that keeps growing as an interaction is repeated adds a
+ * listener per run and never removes it
+ */
+export type GlobalListenerGrowth = GlobalListenerSite & {
+  growth: number;
+};
+
 export type ScanResult = {
   components: Set<string>;
   componentToFiberNodeCount: Map<string, number>;
@@ -84,6 +107,7 @@ export type ScanResult = {
   fiberNodes: Array<WeakRef<Fiber>>;
   leakedFibers: Array<WeakRef<Fiber>>;
   eventListenerLeaks?: EventListenerLeak[];
+  globalListenerSites?: GlobalListenerGrowth[];
 };
 
 /**

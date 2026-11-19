@@ -18,6 +18,7 @@ import type {
   ScanResult,
   AnyValue,
   EventListenerLeak,
+  GlobalListenerGrowth,
   Nullable,
 } from './types';
 import type {BasicExtension} from '../extensions/basic-extension';
@@ -48,6 +49,7 @@ export default class ReactMemoryScan {
   #domObserver: Optional<DOMObserver>;
   #eventListenerTracker: Nullable<EventListenerTracker>;
   #isDisposed: boolean;
+  #globalListenerBaseline: Map<string, number> = new Map();
 
   constructor(options: CreateOptions = {}) {
     this.#elementWeakRefs = [];
@@ -364,6 +366,20 @@ export default class ReactMemoryScan {
     return eventListenerLeaks;
   }
 
+  #scanGlobalListenerSites(): GlobalListenerGrowth[] {
+    if (this.#eventListenerTracker == null) {
+      return [];
+    }
+    return this.#eventListenerTracker.getGlobalListenerSites().map(site => {
+      const key = `${site.target}\u0000${site.type}\u0000${site.site}`;
+      const baseline = this.#globalListenerBaseline.get(key);
+      if (baseline == null) {
+        this.#globalListenerBaseline.set(key, site.count);
+      }
+      return {...site, growth: site.count - (baseline ?? site.count)};
+    });
+  }
+
   scan(): ScanResult {
     const start = Date.now();
     this.#runGC();
@@ -383,6 +399,7 @@ export default class ReactMemoryScan {
     // scan for event listener leaks
     // TODO: show the results in the UI widget
     scanResult.eventListenerLeaks = this.#scanEventListenerLeaks();
+    scanResult.globalListenerSites = this.#scanGlobalListenerSites();
 
     (window as AnyValue).leakedFibers = this.packLeakedFibers(leakedFibers);
     const end = Date.now();

@@ -9,7 +9,7 @@
  */
 import type {Fiber} from 'react-reconciler';
 import {getFiberNodeFromElement} from '../utils/react-fiber-utils';
-import type {Nullable} from './types';
+import type {GlobalListenerSite, GlobalListenerTarget, Nullable} from './types';
 import {WeakMapPlus} from '../utils/weak-ref-utils';
 
 type EventListenerEntry = {
@@ -17,7 +17,27 @@ type EventListenerEntry = {
   cb: WeakRef<EventListenerOrEventListenerObject>;
   capture: boolean;
   fiber?: WeakRef<Fiber>;
+  site?: string;
 };
+
+function getGlobalTargetName(
+  target: EventTarget,
+): Nullable<GlobalListenerTarget> {
+  if (typeof window !== 'undefined' && target === window) {
+    return 'window';
+  }
+  if (typeof document !== 'undefined' && target === document) {
+    return 'document';
+  }
+  return null;
+}
+
+// The first stack frame outside MemLens: [0] is the message, [1] this
+// function, [2] the addEventListener wrapper, [3] its caller.
+function getCallSite(): string {
+  const frames = new Error().stack?.split('\n') ?? [];
+  return frames[3]?.trim().replace(/^at /, '') ?? '<unknown>';
+}
 
 // The DOM identifies a listener by its type, callback and capture flag;
 // every other option is ignored when matching.
@@ -47,6 +67,9 @@ type DetachedListenerGroup = {
 export class EventListenerTracker {
   private static instance: EventListenerTracker | null = null;
   #listenerMap: WeakMapPlus<EventTarget, EventListenerEntry[]>;
+  // listeners on window and document, which outlive every component, so a
+  // listener added on mount and not removed on unmount accumulates here
+  #globalListeners: Map<EventTarget, EventListenerEntry[]> = new Map();
   #detachedListeners: Map<string, DetachedListenerGroup[]>;
   #originalAddEventListener: typeof EventTarget.prototype.addEventListener;
   #originalRemoveEventListener: typeof EventTarget.prototype.removeEventListener;
@@ -91,60 +114,60 @@ export class EventListenerTracker {
     const self = this;
     EventTarget.prototype.addEventListener = this.#patchedAddEventListener =
       function (
+        this: EventTarget,
         type: string,
         listener: EventListenerOrEventListenerObject,
         options?: boolean | AddEventListenerOptions,
       ) {
         self.#originalAddEventListener.call(this, type, listener, options);
         // a null listener is valid and the browser ignores it
-        if (self.#isActive && listener != null && this instanceof Element) {
-          const capture = getCapture(options);
-          const optionsObject = typeof options === 'object' ? options : null;
-          // the browser does not add a listener whose signal is already aborted
-          if (optionsObject?.signal?.aborted) {
-            return;
-          }
-          const listeners = self.#listenerMap.get(this) ?? [];
-          // the browser ignores a listener that is already registered
-          if (listeners.some(e => isSameListener(e, type, listener, capture))) {
-            return;
-          }
-          const fiber = getFiberNodeFromElement(this);
-          const entry: EventListenerEntry = {
-            type,
-            cb: new WeakRef(listener),
-            capture,
-            fiber: fiber ? new WeakRef(fiber) : undefined,
-          };
-          listeners.push(entry);
-          self.#listenerMap.set(this, listeners);
-          self.#forgetWhenBrowserRemoves(this, entry, optionsObject);
+        if (!self.#isActive || listener == null || !self.#isTracked(this)) {
+          return;
         }
+        const capture = getCapture(options);
+        const optionsObject = typeof options === 'object' ? options : null;
+        // the browser does not add a listener whose signal is already aborted
+        if (optionsObject?.signal?.aborted) {
+          return;
+        }
+        const listeners = self.#getListeners(this) ?? [];
+        // the browser ignores a listener that is already registered
+        if (listeners.some(e => isSameListener(e, type, listener, capture))) {
+          return;
+        }
+        const entry: EventListenerEntry = {
+          type,
+          cb: new WeakRef(listener),
+          capture,
+        };
+        if (this instanceof Element) {
+          const fiber = getFiberNodeFromElement(this);
+          entry.fiber = fiber ? new WeakRef(fiber) : undefined;
+        } else {
+          entry.site = getCallSite();
+        }
+        listeners.push(entry);
+        self.#setListeners(this, listeners);
+        self.#forgetWhenBrowserRemoves(this, entry, optionsObject);
       };
 
     EventTarget.prototype.removeEventListener =
       this.#patchedRemoveEventListener = function (
+        this: EventTarget,
         type: string,
         listener: EventListenerOrEventListenerObject,
         options?: boolean | EventListenerOptions,
       ) {
         self.#originalRemoveEventListener.call(this, type, listener, options);
-        if (self.#isActive && this instanceof Element) {
-          const listeners = self.#listenerMap.get(this);
-          if (listeners) {
-            const capture = getCapture(options);
-            const index = listeners.findIndex(entry =>
-              isSameListener(entry, type, listener, capture),
-            );
-            if (index !== -1) {
-              listeners.splice(index, 1);
-            }
-            if (listeners.length === 0) {
-              self.#listenerMap.delete(this);
-            } else {
-              self.#listenerMap.set(this, listeners);
-            }
-          }
+        if (!self.#isActive || !self.#isTracked(this)) {
+          return;
+        }
+        const capture = getCapture(options);
+        const entry = self
+          .#getListeners(this)
+          ?.find(e => isSameListener(e, type, listener, capture));
+        if (entry != null) {
+          self.#forgetEntry(new WeakRef(this), entry);
         }
       };
   }
@@ -152,7 +175,7 @@ export class EventListenerTracker {
   // The browser removes a `once` listener after it runs and a listener whose
   // `signal` aborts, without a removeEventListener call to observe.
   #forgetWhenBrowserRemoves(
-    target: Element,
+    target: EventTarget,
     entry: EventListenerEntry,
     options: Nullable<AddEventListenerOptions>,
   ): void {
@@ -175,12 +198,15 @@ export class EventListenerTracker {
     }
   }
 
-  #forgetEntry(targetRef: WeakRef<Element>, entry: EventListenerEntry): void {
+  #forgetEntry(
+    targetRef: WeakRef<EventTarget>,
+    entry: EventListenerEntry,
+  ): void {
     const target = targetRef.deref();
     if (target == null) {
       return;
     }
-    const listeners = this.#listenerMap.get(target);
+    const listeners = this.#getListeners(target);
     if (listeners == null) {
       return;
     }
@@ -189,8 +215,67 @@ export class EventListenerTracker {
       listeners.splice(index, 1);
     }
     if (listeners.length === 0) {
-      this.#listenerMap.delete(target);
+      this.#deleteListeners(target);
     }
+  }
+
+  #isTracked(target: EventTarget): boolean {
+    return target instanceof Element || getGlobalTargetName(target) != null;
+  }
+
+  #getListeners(target: EventTarget): EventListenerEntry[] | undefined {
+    return target instanceof Element
+      ? this.#listenerMap.get(target)
+      : this.#globalListeners.get(target);
+  }
+
+  #setListeners(target: EventTarget, listeners: EventListenerEntry[]): void {
+    if (target instanceof Element) {
+      this.#listenerMap.set(target, listeners);
+    } else {
+      this.#globalListeners.set(target, listeners);
+    }
+  }
+
+  #deleteListeners(target: EventTarget): void {
+    if (target instanceof Element) {
+      this.#listenerMap.delete(target);
+    } else {
+      this.#globalListeners.delete(target);
+    }
+  }
+
+  /**
+   * Live listeners on window and document, grouped by target, type and the
+   * call site that added them, largest groups first.
+   */
+  getGlobalListenerSites(): GlobalListenerSite[] {
+    const sites = new Map<string, GlobalListenerSite>();
+    for (const [target, listeners] of this.#globalListeners) {
+      const targetName = getGlobalTargetName(target);
+      if (targetName == null) {
+        continue;
+      }
+      for (const listener of listeners) {
+        if (listener.cb.deref() == null) {
+          continue;
+        }
+        const site = listener.site ?? '<unknown>';
+        const key = `${targetName}\u0000${listener.type}\u0000${site}`;
+        const group = sites.get(key);
+        if (group != null) {
+          ++group.count;
+        } else {
+          sites.set(key, {
+            target: targetName,
+            type: listener.type,
+            site,
+            count: 1,
+          });
+        }
+      }
+    }
+    return [...sites.values()].sort((a, b) => b.count - a.count);
   }
 
   #unpatchEventListeners(): void {
@@ -274,6 +359,7 @@ export class EventListenerTracker {
     this.#refCount = 0;
     this.#unpatchEventListeners();
     this.#listenerMap.destroy();
+    this.#globalListeners.clear();
     this.#detachedListeners.clear();
     EventListenerTracker.instance = null;
   }
