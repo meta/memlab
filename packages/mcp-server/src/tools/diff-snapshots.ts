@@ -23,6 +23,8 @@ import {
   setCurrentSnapshot,
 } from '../heap-state.js';
 import {
+  clampLabelTo,
+  clipTableColumn,
   errorResult,
   formatBytes,
   formatNumber,
@@ -156,6 +158,14 @@ function rankChurn(
     );
 }
 
+// A string's class name is its content, up to the 1,024 characters V8 keeps,
+// so one long string row padded every row of its table to that width, and 40
+// rows of templates passed the client's size limit.
+const CLASS_COLUMN_WIDTH = 60;
+const JSON_NAME_MAX = 300;
+const jsonName = (name: string): string =>
+  name.length > JSON_NAME_MAX ? clampLabelTo(name, JSON_NAME_MAX) : name;
+
 function churnSection(rows: ClassChurn[], shown: ClassChurn[]): string[] {
   let added = 0;
   let deleted = 0;
@@ -187,7 +197,9 @@ function churnSection(rows: ClassChurn[], shown: ClassChurn[]): string[] {
         'Δ Size',
       ],
       shown.map(r => [
-        r.name.length > 60 ? `${r.name.slice(0, 57)}…` : r.name,
+        r.name.length > CLASS_COLUMN_WIDTH
+          ? `${r.name.slice(0, CLASS_COLUMN_WIDTH - 3)}…`
+          : r.name,
         r.type,
         formatNumber(r.added),
         formatNumber(r.deleted),
@@ -669,11 +681,19 @@ export function registerDiffSnapshots(server: McpServer): void {
               `+${formatNumber(d.count_delta)}`,
               `${sign(d.size_delta)}${formatBytes(Math.abs(d.size_delta))}`,
             ]);
+          const clipped = clipTableColumn(rows, 0, CLASS_COLUMN_WIDTH);
           lines.push(
             `### Classes that grew (${formatNumber(grew.length)} total, showing ${rows.length})`,
           );
           lines.push('');
-          lines.push(markdownTable(headers, rows, rightCols));
+          lines.push(markdownTable(headers, clipped.rows, rightCols));
+          if (clipped.footnotes.length > 0) {
+            lines.push(
+              '',
+              'Full class names of clipped rows:',
+              ...clipped.footnotes,
+            );
+          }
           lines.push('');
         }
 
@@ -698,11 +718,19 @@ export function registerDiffSnapshots(server: McpServer): void {
               formatNumber(d.count_delta),
               `${sign(d.size_delta)}${formatBytes(Math.abs(d.size_delta))}`,
             ]);
+          const clipped = clipTableColumn(rows, 0, CLASS_COLUMN_WIDTH);
           lines.push(
             `### Classes that shrunk (${formatNumber(shrunk.length)} total, showing ${rows.length})`,
           );
           lines.push('');
-          lines.push(markdownTable(headers, rows, rightCols));
+          lines.push(markdownTable(headers, clipped.rows, rightCols));
+          if (clipped.footnotes.length > 0) {
+            lines.push(
+              '',
+              'Full class names of clipped rows:',
+              ...clipped.footnotes,
+            );
+          }
           lines.push('');
         }
 
@@ -750,7 +778,7 @@ export function registerDiffSnapshots(server: McpServer): void {
         );
 
         const row = (d: DiffEntry) => ({
-          name: d.name,
+          name: jsonName(d.name),
           type: d.type,
           before_count: d.before_count,
           after_count: d.after_count,
@@ -774,7 +802,7 @@ export function registerDiffSnapshots(server: McpServer): void {
             ...(churnRows != null
               ? {
                   churn: churnRows.map(r => ({
-                    name: r.name,
+                    name: jsonName(r.name),
                     type: r.type,
                     added: r.added,
                     deleted: r.deleted,

@@ -94,6 +94,15 @@ class FixtureWidthProbeWithAVeryLongClassNameForNameWidthChecks {}
 globalThis.__fixtureWidthProbe =
   new FixtureWidthProbeWithAVeryLongClassNameForNameWidthChecks();
 const nodeSnapshot = v8.writeHeapSnapshot(path.join(tmp, 'node.heapsnapshot'));
+// Distinct long strings that exist only in the second snapshot. A flat
+// string's class name is its content, so each is a "class" that grew.
+// `padEnd` alone makes a concatenated string, which is not named by content.
+globalThis.__fixtureLongStrings = Array.from({length: 5}, (_, i) =>
+  JSON.parse(JSON.stringify(`fixture-long-string-${i}-`.padEnd(400, 'z'))),
+);
+const nodeSnapshotLater = v8.writeHeapSnapshot(
+  path.join(tmp, 'node-later.heapsnapshot'),
+);
 
 const child = spawn(process.execPath, [server], {
   stdio: ['pipe', 'pipe', 'ignore'],
@@ -433,6 +442,33 @@ await shapeCheck(
         json.h[0].key === 'object' &&
         json.h[0].count === 3,
       `histogram: ${JSON.stringify(json.h)}`,
+    );
+  },
+);
+
+await shapeCheck(
+  'diff_snapshots: a long string class does not widen every row',
+  async () => {
+    const {text} = await call('memlab_diff_snapshots', {
+      before: nodeSnapshot,
+      after: nodeSnapshotLater,
+      set_active: false,
+      limit: 5000,
+    });
+    assert(
+      text.includes('fixture-long-string-0'),
+      'the long strings are not in the diff',
+    );
+    const widest = Math.max(
+      ...text
+        .split('\n')
+        .filter(l => l.startsWith('|'))
+        .map(l => l.length),
+    );
+    assert(widest <= 200, `a table row is ${widest} characters wide`);
+    assert(
+      text.includes('Full class names of clipped rows'),
+      'no footnotes for the clipped names',
     );
   },
 );
