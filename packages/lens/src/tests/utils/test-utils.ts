@@ -7,6 +7,7 @@
  * @format
  * @oncall memory_lab
  */
+import type {Page} from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
@@ -44,4 +45,18 @@ export function readReactScripts(build: ReactBuild): string {
 
 export function readLibBundle(): string {
   return fs.readFileSync(libBundleFilePath, 'utf8');
+}
+
+/**
+ * Runs `count` full GCs through CDP, letting FinalizationRegistry callbacks
+ * run in between. MemLens counts a full GC only after its sentinel has
+ * survived two GCs, so three forced GCs advance its count by about one.
+ */
+export async function forceGC(page: Page, count = 3): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  for (let i = 0; i < count; i++) {
+    await cdp.send('HeapProfiler.collectGarbage');
+    await wait(30);
+  }
+  await cdp.detach();
 }

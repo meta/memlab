@@ -108,6 +108,8 @@ export type ScanResult = {
   leakedFibers: Array<WeakRef<Fiber>>;
   eventListenerLeaks?: EventListenerLeak[];
   globalListenerSites?: GlobalListenerGrowth[];
+  // full garbage collections seen since the scanner was created (a lower bound)
+  gcCount?: number;
 };
 
 /**

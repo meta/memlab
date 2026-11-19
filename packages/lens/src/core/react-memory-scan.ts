@@ -32,6 +32,7 @@ import {
 import {DOMObserver} from './dom-observer';
 import {config} from '../config/config';
 import {EventListenerTracker} from './event-listener-tracker';
+import {GCTracker} from './gc-tracker';
 
 export default class ReactMemoryScan {
   static nextElementId = 0;
@@ -50,6 +51,7 @@ export default class ReactMemoryScan {
   #eventListenerTracker: Nullable<EventListenerTracker>;
   #isDisposed: boolean;
   #globalListenerBaseline: Map<string, number> = new Map();
+  #gcTracker: GCTracker = new GCTracker();
 
   constructor(options: CreateOptions = {}) {
     this.#elementWeakRefs = [];
@@ -217,6 +219,8 @@ export default class ReactMemoryScan {
       this.#eventListenerTracker.release();
       this.#eventListenerTracker = null;
     }
+
+    this.#gcTracker.dispose();
 
     // Mark as disposed to prevent reuse
     this.#isDisposed = true;
@@ -400,6 +404,7 @@ export default class ReactMemoryScan {
     // TODO: show the results in the UI widget
     scanResult.eventListenerLeaks = this.#scanEventListenerLeaks();
     scanResult.globalListenerSites = this.#scanGlobalListenerSites();
+    scanResult.gcCount = this.#gcTracker.getCount();
 
     (window as AnyValue).leakedFibers = this.packLeakedFibers(leakedFibers);
     const end = Date.now();
