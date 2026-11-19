@@ -20,6 +20,11 @@ export function createToggleButton(
   toggleWrapper.style.backgroundColor = '#34C759'; // ON by default
   toggleWrapper.style.cursor = 'pointer';
   toggleWrapper.style.position = 'relative';
+  // a flex item; without these a long status text next to it shrinks the
+  // track under the knob
+  toggleWrapper.style.flexShrink = '0';
+  toggleWrapper.style.minWidth = '40px';
+  toggleWrapper.style.boxSizing = 'border-box';
   toggleWrapper.style.transition = 'background-color 0.3s ease';
 
   const knob = createVisualizerElement('div');
