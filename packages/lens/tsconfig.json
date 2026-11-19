@@ -14,5 +14,5 @@
     "composite": true
   },
   "include": ["src/**/*"], // Include all files in the src directory
-  "exclude": ["node_modules", "dist", "src/lib-index.js.flow"] // Exclude unnecessary directories
+  "exclude": ["node_modules", "dist"] // Exclude unnecessary directories
 }

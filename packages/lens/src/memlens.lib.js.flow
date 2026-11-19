@@ -8,7 +8,10 @@
  * @format
  * @oncall memory_lab
  */
-// Core types
+
+// A React fiber node; MemLens only hands them out through WeakRefs
+export type Fiber = {...};
+
 export type BoundingRect = {
   bottom: number,
   height: number,
@@ -18,29 +21,83 @@ export type BoundingRect = {
   width: number,
   x: number,
   y: number,
+  scrollLeft: number,
+  scrollTop: number,
 };
 
 export type DOMElementInfo = {
-  boundingRect: BoundingRect,
+  element: WeakRef<Element>,
+  boundingRect: ?BoundingRect,
+  componentStack: ?Array<string>,
+  detachedAt?: number,
+  gcSurvivedCount?: number,
 };
 
 export type Nullable<T> = T | null;
 
-// [lib-index.ts]
-export type ReactMemoryScan = {
-  constructor: (options: CreateOptions) => void,
-  start: () => void,
-  stop: () => void,
-  scan: () => void,
-  visualize: () => void,
-  subscribe: (callback: AnalysisResultCallback) => () => void,
-  unsubscribe: (callback: AnalysisResultCallback) => void,
-  isDevMode: () => boolean,
+export type EventListenerLeak = {
+  type: string,
+  componentName: string,
+  count: number,
 };
 
-declare export function createReactMemoryScan(
-  options: CreateOptions,
-): ReactMemoryScan;
+export type GlobalListenerTarget = 'window' | 'document';
+
+export type GlobalListenerGrowth = {
+  target: GlobalListenerTarget,
+  type: string,
+  site: string,
+  count: number,
+  growth: number,
+};
+
+export type ScanResult = {
+  components: Set<string>,
+  componentToFiberNodeCount: Map<string, number>,
+  totalElements: number,
+  totalDetachedElements: number,
+  detachedComponentToFiberNodeCount: Map<string, number>,
+  fiberNodes: Array<WeakRef<Fiber>>,
+  leakedFibers: Array<WeakRef<Fiber>>,
+  eventListenerLeaks?: Array<EventListenerLeak>,
+  globalListenerSites?: Array<GlobalListenerGrowth>,
+  gcCount?: number,
+  totalDetachedElementsSurvivingGC?: number,
+};
+
+export type AnalysisResult = {
+  ...ScanResult,
+  start: number,
+  end: number,
+  scanner: ReactMemoryScan,
+};
+
+export type AnalysisResultCallback = (result: AnalysisResult) => void;
+
+export type ReportedDetachedElement = {
+  id: string,
+  tagName: string,
+  componentStack: Array<string>,
+  detachedForMs: Nullable<number>,
+  gcSurvivedCount: number,
+  rect: Nullable<{x: number, y: number, width: number, height: number}>,
+};
+
+export type MemLensReport = {
+  url: string,
+  timestamp: number,
+  gcCount: number,
+  totals: {
+    elements: number,
+    detachedElements: number,
+    detachedElementsSurvivingGC: number,
+    leakedFibers: number,
+  },
+  detachedElements: Array<ReportedDetachedElement>,
+  leakedComponents: Array<{component: string, count: number}>,
+  eventListenerLeaks: Array<EventListenerLeak>,
+  globalListenerSites: Array<GlobalListenerGrowth>,
+};
 
 export type BasicExtension = {
   beforeScan: () => void,
@@ -52,24 +109,35 @@ export type CreateOptions = {
   subscribers?: Array<AnalysisResultCallback>,
   extensions?: Array<BasicExtension>,
   scanIntervalMs?: number,
+  trackEventListenerLeaks?: boolean,
+  detachedElementMinGCCount?: number,
+  leakedFiberMinGCCount?: number,
+  captureOnRemoval?: boolean,
 };
 
-export type ScanResult = {
-  components: Set<string>,
-  componentToFiberNodeCount: Map<string, number>,
-  totalElements: number,
-  totalDetachedElements: number,
-  detachedComponentToFiberNodeCount: Map<string, number>,
-  fiberNodes: Array<WeakRef<Fiber>>,
-  leakedFibers: Array<WeakRef<Fiber>>,
+// [memlens.lib.ts]
+export type ReactMemoryScan = {
+  start: () => void,
+  pause: () => void,
+  stop: () => void,
+  dispose: () => void,
+  scan: () => ScanResult,
+  getReport: (options?: {maxDetachedElements?: number}) => MemLensReport,
+  getDetachedDOMInfo: (options?: {
+    includeUnconfirmed?: boolean,
+  }) => Array<DOMElementInfo>,
+  getLeakedComponents: (
+    result: ScanResult,
+  ) => Array<{component: string, count: number}>,
+  subscribe: (callback: AnalysisResultCallback) => () => void,
+  unsubscribe: (callback: AnalysisResultCallback) => void,
+  registerExtension: (extension: BasicExtension) => () => void,
+  unregisterExtension: (extension: BasicExtension) => void,
+  isDevMode: () => boolean,
 };
 
-export type AnalysisResult = {
-  ...ScanResult,
-  start: number,
-  end: number,
-};
-
-export type AnalysisResultCallback = (result: AnalysisResult) => void;
+declare export function createReactMemoryScan(
+  options?: CreateOptions,
+): ReactMemoryScan;
 
 export type DOMObserveCallback = (list: Array<WeakRef<Element>>) => void;
