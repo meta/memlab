@@ -294,48 +294,29 @@ export default class ReactMemoryScan {
   }
 
   updateFiberNodes(fiberNodes: Array<WeakRef<Fiber>>): Array<WeakRef<Fiber>> {
-    const knownFiberSet = new WeakSet<Fiber>();
-    for (const fiberNode of this.#knownFiberNodes) {
-      const fiber = fiberNode.deref();
-      if (fiber != null) {
-        knownFiberSet.add(fiber);
-      }
-    }
-    const newFiberSet = new WeakSet<Fiber>();
-    for (const fiberNode of fiberNodes) {
-      const fiber = fiberNode.deref();
-      if (fiber != null) {
-        newFiberSet.add(fiber);
-      }
-    }
-    const leakedFibers: Array<WeakRef<Fiber>> = [];
-    const newExistingFibers: Array<WeakRef<Fiber>> = [];
-    // clean up and compact the existing fiber node lists
-    for (const fiberRef of this.#knownFiberNodes) {
-      const fiber = fiberRef.deref();
-      if (fiber == null) {
-        continue;
-      }
-      if (!newFiberSet.has(fiber)) {
-        leakedFibers.push(fiberRef);
-      } else {
-        newExistingFibers.push(fiberRef);
-        if (fiber.return == null) {
-          leakedFibers.push(fiberRef);
-        }
-      }
-    }
-    // add new fibers to the existing list
+    const fibersInTree = new WeakSet<Fiber>();
+    const currentFibers: Array<WeakRef<Fiber>> = [];
     for (const fiberRef of fiberNodes) {
       const fiber = fiberRef.deref();
-      if (fiber == null) {
-        continue;
-      }
-      if (!knownFiberSet.has(fiber)) {
-        newExistingFibers.push(fiberRef);
+      if (fiber != null) {
+        fibersInTree.add(fiber);
+        currentFibers.push(fiberRef);
       }
     }
-    this.#knownFiberNodes = newExistingFibers;
+    // React keeps two fibers per mounted component (current and alternate)
+    // and swaps them on every commit, so either one being in the tree means
+    // the component is still mounted.
+    const isInTree = (fiber: Fiber): boolean =>
+      fibersInTree.has(fiber) ||
+      (fiber.alternate != null && fibersInTree.has(fiber.alternate));
+    const leakedFibers: Array<WeakRef<Fiber>> = [];
+    for (const fiberRef of this.#knownFiberNodes) {
+      const fiber = fiberRef.deref();
+      if (fiber != null && !isInTree(fiber)) {
+        leakedFibers.push(fiberRef);
+      }
+    }
+    this.#knownFiberNodes = currentFibers;
     this.#log('known fibers: ', this.#knownFiberNodes.length);
     this.#log('leaked fibers: ', leakedFibers.length);
     return leakedFibers;
