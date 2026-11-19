@@ -1612,7 +1612,7 @@ export function registerEval(server: McpServer): void {
             'rootPath(nodeOrId, {maxHops?, skipDev?})->[{id,name,type,edge}] (GC-root path, root first — the retainer_trace walk, callable inside an eval; skipDev:true walks the production path instead when the shortest one crosses a React DEV/Fast Refresh/devtools edge — same shape, same hop cap and collapsing, never throws: with no production path it returns the dev path), ' +
             'byClass(name, {type?})->ids[] & byTypename(name)->ids[] & withProp(name, {edgeTypes?})->ids[] & byEdgeName(name)->ids[] (INDEXED lookups — built once per snapshot then memoized in a session scratch, so repeated questions are index-speed not full-scan; byClass covers EVERY node type, matching memlab_find_nodes_by_class, so closures/strings/arrays/natives are found — pass {type:"object"} to narrow. NOTE byClass also returns the CONSTRUCTOR closure and the `Foo (prototype)` object alongside the instances, and tracing one of those yields a meaningless modulesMap path; use iterByClass, whose instancesOnly defaults true, when you mean instances. withProp matches `property` AND `context` edges by default, so a CLOSURE-CAPTURED variable is found — pass {edgeTypes:["property"]} for own properties only, and byEdgeName to ignore edge type entirely), ' +
             'aggregateRetained(ids[])->{retained,exact} (dominator-deduped retained for a SET of ids, no double-counting), ' +
-            'iterByClass(name, {type?, instancesOnly?})->nodes[] & iterByType(type)->nodes[] (INDEXED iteration — no full scan; instancesOnly defaults TRUE and drops the constructor closure, the `Foo (prototype)` object and `system/SharedFunctionInfo/Foo`, which otherwise come back as class members whose only "properties" are length/map and make a per-instance loop produce garbage), ' +
+            'iterByClass(name, {type?, instancesOnly?})->nodes[] & iterByType(type)->nodes[] (INDEXED iteration — no full scan; instancesOnly defaults TRUE and drops the constructor closure, the `Foo (prototype)` object, `system/SharedFunctionInfo/Foo` and the string `"Foo"`, which otherwise come back as class members whose only "properties" are length/map and make a per-instance loop produce garbage; a class with no live instances gives []), ' +
             'classCounts({pattern?, type?, minCount?, baseline?, minDelta?})->[{name,type,count,selfSize, baselineCount?, delta?}] (one-pass histogram, cached; with `baseline` (a resident handle) only classes that grew by ≥minDelta, largest delta first), ' +
             "entries(nodeOrId, {limit?, keyPattern?})->[{key,value}] (generic Map/Set/WeakMap/Array/object walk, holes filtered; keyPattern is a case-insensitive regex on the key or the key node's name), " +
             'edgeTarget(nodeOrId, edgeName)->node|null, walkChain(startOrNode, edgeName, {maxHops?, collectIds?})->{length, terminated:"cycle"|"end"|"cap", truncated} (USE THIS instead of a hand-written `while` over `.next` — a hand-rolled loop cannot tell a circular list from its own hop cap, and reports the cap as if it were the length), isRealDetached(node)->boolean (same filtering the tools apply internally), detachedElements()->ids[] (detached DOM elements only, not the Blink records attached to them), countShapes({name: [props]})->{name: count} (plain objects having every listed property, through the property index), countStrings(regex, {prefix?})->number (string nodes matching; `prefix` narrows through the prefix buckets), ' +
@@ -3098,11 +3098,10 @@ export async function runEval({
     const isClassScaffolding = (id: number, className: string): boolean => {
       const n = snapshot.getNodeById(id);
       if (!n) return false;
-      // `Foo (prototype) / https://…` and `system / SharedFunctionInfo / Foo`.
-      if (n.name !== className) return true;
-      if (n.type === 'code' || n.type === 'synthetic') return true;
-      // The constructor closure itself: a closure named exactly like the class
-      // whose only outgoing named edge is `prototype`.
+      if (isCertainScaffolding(n, className)) return true;
+      // A closure named like the class with a `prototype` property: the
+      // constructor of a function-style class. An ordinary function has one
+      // too, so this is the part of the heuristic that can be wrong.
       if (n.type === 'closure') {
         let isCtor = false;
         forEachRef(n, e => {
@@ -3118,6 +3117,28 @@ export async function runEval({
       }
       return false;
     };
+    /**
+     * Nodes named after a class that are never one of its instances:
+     * `Foo (prototype) / https://…` and `system / SharedFunctionInfo / Foo`,
+     * code, the `class Foo` constructor (V8 gives it a `ClassPositions`
+     * property), and the string `"Foo"` — a string node is named by its value,
+     * so every named class has one.
+     */
+    const isCertainScaffolding = (n: IHeapNode, className: string): boolean => {
+      if (n.name !== className) return true;
+      if (n.type === 'code' || n.type === 'synthetic' || n.isString) {
+        return true;
+      }
+      if (n.type !== 'closure') return false;
+      let isClassCtor = false;
+      forEachRef(n, e => {
+        if (e.toNode.name === 'system / ClassPositions') {
+          isClassCtor = true;
+          return false;
+        }
+      });
+      return isClassCtor;
+    };
     const byClass = (
       name: string,
       opts?: {type?: string; instancesOnly?: boolean},
@@ -3130,9 +3151,15 @@ export async function runEval({
           : raw.filter(id => snapshot.getNodeById(id)?.type === want);
       if (opts?.instancesOnly === false) return ids;
       const filtered = ids.filter(id => !isClassScaffolding(id, name));
-      // If the filter would empty a non-empty class, the heuristic is wrong for
-      // this shape — hand back what we had rather than report "not present".
-      return filtered.length > 0 || ids.length === 0 ? filtered : ids;
+      if (filtered.length > 0) return filtered;
+      // The filter emptied the class. That is right when only certain
+      // scaffolding was dropped (a class with no live instances counts 0); if
+      // anything else was dropped, the heuristic is wrong for this shape, so
+      // hand that back rather than report "not present".
+      return ids.filter(id => {
+        const n = snapshot.getNodeById(id);
+        return n != null && !isCertainScaffolding(n, name);
+      });
     };
     const byTypename = (name: string): number[] =>
       buildClassTypeIndex().byTypename.get(name) ?? [];

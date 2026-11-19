@@ -57,6 +57,9 @@ globalThis.__fixtureWidgets = [
   new FixtureWidget(),
   new FixtureWidget(),
 ];
+// A class that is reachable but has no instances.
+class FixtureUnusedWidget {}
+globalThis.__fixtureUnusedWidget = FixtureUnusedWidget;
 // Two views of one subtree (a holder and its payload) with more equal-size
 // arrays than any fixed look-back window between them in size-then-scan order:
 // collapse mode must still fold the payload into its holder.
@@ -355,6 +358,21 @@ await shapeCheck(
       past.text.includes('past the last of 3'),
       `past-end message: ${past.text.slice(0, 120)}`,
     );
+  },
+);
+
+await shapeCheck(
+  'eval iterByClass: instances only, never the class name string',
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: "result = [helpers.iterByClass('FixtureWidget').map(n => n.type), helpers.iterByClass('FixtureUnusedWidget').length]",
+    });
+    const [types, unused] = JSON.parse(text.match(/^\[[\s\S]*?^\]$/m)[0]);
+    assert(
+      types.length === 3 && types.every(t => t === 'object'),
+      `FixtureWidget: ${JSON.stringify(types)}`,
+    );
+    assert(unused === 0, `FixtureUnusedWidget: ${unused}`);
   },
 );
 
