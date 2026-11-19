@@ -180,9 +180,6 @@ export default class ReactMemoryScan {
       return;
     }
     this.#removalTracker?.install();
-    if (this.#isEventDriven()) {
-      this.#sweepOnStart();
-    }
     this.#intervalId = setInterval(
       this.#scanCycle.bind(this),
       this.#scanIntervalMs,
@@ -198,6 +195,9 @@ export default class ReactMemoryScan {
         // component info is not correct or not set yet
       }
       this.#domObserver.startMonitoring();
+    }
+    if (this.#isEventDriven()) {
+      this.#sweepOnStart();
     }
     console.log('[Memory] Tracking React and DOM memory...');
   }
@@ -364,7 +364,15 @@ export default class ReactMemoryScan {
   // One full pass when tracking starts: find the React roots, and record the
   // rects of the elements already on the page (one layout for all of them).
   #sweepOnStart(): void {
-    for (const element of Array.from(document.querySelectorAll('*'))) {
+    const domObserver = this.#domObserver;
+    const elements = utils.getAllElements(element => {
+      const shadowRoot = domObserver?.getShadowRoot(element) ?? null;
+      if (shadowRoot != null) {
+        domObserver?.observe(shadowRoot);
+      }
+      return shadowRoot;
+    });
+    for (const element of elements) {
       if (isVisualizerElement(element)) {
         continue;
       }

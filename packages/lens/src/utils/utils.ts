@@ -15,8 +15,31 @@ import type {
 } from '../core/types';
 import {isVisualizerElement} from '../visual/visual-utils';
 
+/**
+ * Every element in the document and in the shadow roots reachable from it
+ * (open ones, and closed ones MemLens saw being attached).
+ */
+export function getAllElements(
+  getShadowRoot: (element: Element) => Nullable<ShadowRoot> = element =>
+    element.shadowRoot,
+): Element[] {
+  const elements: Element[] = [];
+  const roots: Array<Document | ShadowRoot> = [document];
+  while (roots.length > 0) {
+    const root = roots.pop() as Document | ShadowRoot;
+    for (const element of Array.from(root.querySelectorAll('*'))) {
+      elements.push(element);
+      const shadowRoot = getShadowRoot(element);
+      if (shadowRoot != null) {
+        roots.push(shadowRoot);
+      }
+    }
+  }
+  return elements;
+}
+
 export function getDOMElements(): Array<WeakRef<Element>> {
-  const elements = Array.from(document.querySelectorAll('*'));
+  const elements = getAllElements();
   const ret = [];
   for (const element of elements) {
     if (isVisualizerElement(element)) {

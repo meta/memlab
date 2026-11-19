@@ -25,6 +25,9 @@ export class DOMObserver {
   #consolidateInterval: Optional<number>;
   #observeCallback: Array<DOMObserveCallback>;
   #onMutations: Optional<(records: MutationRecord[]) => void>;
+  #shadowRoots: WeakMap<Element, ShadowRoot> = new WeakMap();
+  #originalAttachShadow: Optional<typeof Element.prototype.attachShadow>;
+  #patchedAttachShadow: Optional<typeof Element.prototype.attachShadow>;
 
   constructor(onMutations?: (records: MutationRecord[]) => void) {
     this.#onMutations = onMutations;
@@ -93,6 +96,7 @@ export class DOMObserver {
     };
 
     waitForBodyAndObserve();
+    this.#patchAttachShadow();
 
     // starts consolidating removedElements weak references;
     this.#consolidateInterval = window.setInterval(() => {
@@ -100,7 +104,49 @@ export class DOMObserver {
     }, 3000);
   }
 
+  /** Watch a shadow root's subtree the way document.body is watched */
+  observe(root: ShadowRoot): void {
+    this.#mutationObserver?.observe(root, {childList: true, subtree: true});
+  }
+
+  /** The shadow root of `element`, including closed ones seen being attached */
+  getShadowRoot(element: Element): Optional<ShadowRoot> {
+    return element.shadowRoot ?? this.#shadowRoots.get(element);
+  }
+
+  #patchAttachShadow(): void {
+    if (typeof Element.prototype.attachShadow !== 'function') {
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    const original = Element.prototype.attachShadow;
+    this.#originalAttachShadow = original;
+    this.#patchedAttachShadow = function (
+      this: Element,
+      init: ShadowRootInit,
+    ): ShadowRoot {
+      const root = original.call(this, init);
+      self.#shadowRoots.set(this, root);
+      self.observe(root);
+      return root;
+    };
+    Element.prototype.attachShadow = this.#patchedAttachShadow;
+  }
+
+  #unpatchAttachShadow(): void {
+    if (
+      this.#patchedAttachShadow != null &&
+      Element.prototype.attachShadow === this.#patchedAttachShadow &&
+      this.#originalAttachShadow != null
+    ) {
+      Element.prototype.attachShadow = this.#originalAttachShadow;
+    }
+    this.#patchedAttachShadow = null;
+  }
+
   stopMonitoring(): void {
+    this.#unpatchAttachShadow();
     if (this.#mutationObserver != null) {
       this.#mutationObserver.disconnect();
       this.#mutationObserver = null;
