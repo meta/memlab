@@ -87,7 +87,13 @@ export function findObjects(
     if (node.id <= 3 || node.retainedSize < minRetained) {
       return;
     }
-    if (query.nodeType != null && node.type !== query.nodeType) {
+    if (query.nodeType != null) {
+      if (node.type !== query.nodeType) {
+        return;
+      }
+    } else if (node.type === 'synthetic') {
+      // the root categories under (GC roots), such as (Strong root list)
+      // or (Stack roots), are not objects; list them only when asked for
       return;
     }
     if (query.detachedOnly === true && !node.is_detached) {
