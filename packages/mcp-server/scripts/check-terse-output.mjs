@@ -87,6 +87,24 @@ test('terseText leaves an all-prose answer and JSON alone', () => {
   assert.equal(terseText('{"a": 1}'), '{"a": 1}');
 });
 
+test('terseText keeps a JSON result whole after a header line', () => {
+  const json = JSON.stringify(
+    {
+      ReportViewer: 20,
+      batch: 2400,
+      path: `Window -> ${'InternalNode -> '.repeat(12)}ReportViewer`,
+      note: 'a value with no markdown structure in it at all, long enough',
+    },
+    null,
+    2,
+  );
+  const text = `> Snapshot: s3.heapsnapshot\n\n${json}`;
+  assert.ok(json.length > 160);
+  assert.equal(terseText(text), text);
+  const notJson = `> Snapshot: s3.heapsnapshot\n\n{ ${prose} }`;
+  assert.doesNotMatch(terseText(notJson), /Plain prose/);
+});
+
 test('parseCell reads counts and leaves units as text', () => {
   assert.equal(parseCell('369,886'), 369886);
   assert.equal(parseCell('+42,008'), 42008);

@@ -110,8 +110,26 @@ function cutVerdictTail(line: string): string {
   return /[.!?:]\*\*$/.test(m[1]) ? m[1] : `${m[1]}${colon}`;
 }
 
-function dropBlock(b: Block): boolean {
+/**
+ * A block that parses as a JSON object or array is data — a `memlab_eval`
+ * result, for one — and is kept whole. It has no markdown structure, so the
+ * prose rule below would otherwise drop it outright once it reached
+ * PROSE_MAX characters, or cut its long lines.
+ */
+function isJsonBlock(b: Block): boolean {
   if (b.fenced) return false;
+  const text = b.lines.join('\n').trim();
+  if (!/^[[{]/.test(text) || !/[\]}]$/.test(text)) return false;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function dropBlock(b: Block): boolean {
+  if (b.fenced || isJsonBlock(b)) return false;
   const text = b.lines.join('\n').trim();
   if (NEXT_STEPS_BLOCK.test(text)) return true;
   // A whole-italic note, `_…_`, that explains rather than states.
@@ -149,7 +167,7 @@ export function terseText(text: string): string {
       continue;
     }
     if (dropBlock(b)) continue;
-    if (b.fenced) {
+    if (b.fenced || isJsonBlock(b)) {
       kept.push(b.lines.join('\n'));
       continue;
     }
