@@ -128,6 +128,25 @@ export function getCurrentHostRootFiber(fiber: Fiber): Nullable<Fiber> {
 }
 
 /**
+ * Returns the React FiberRoot whose container is `element`, or null when the
+ * element is not a React root container. `createRoot()` and `render()` mark
+ * the container with `__reactContainer$<id>` (the HostRoot fiber it was
+ * created with), and `render()` also sets `_reactRootContainer`.
+ */
+export function getFiberRootOfContainer(element: Element): AnyValue {
+  for (const key of Object.getOwnPropertyNames(element)) {
+    if (key.startsWith('__reactContainer$')) {
+      return (element as AnyValue)[key]?.stateNode ?? null;
+    }
+    if (key === '_reactRootContainer') {
+      const container = (element as AnyValue)[key];
+      return container?._internalRoot ?? container ?? null;
+    }
+  }
+  return null;
+}
+
+/**
  * Depth-first walk of the fiber tree below `root`, in child order.
  * `visit` returns false to skip the fiber's subtree; the walk then goes on
  * with the next sibling.

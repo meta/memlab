@@ -20,9 +20,14 @@ import {ScanResult, AnyValue} from './types';
 import {isValidComponentName} from './valid-component-name';
 
 export default class ReactFiberAnalyzer {
+  /**
+   * Walks the fiber trees of `rootFibers` and of the roots reached from the
+   * elements' fibers, and counts the detached elements in the list.
+   */
   scan(
     elementWeakRefList: Array<WeakRef<Element>>,
     elementToComponentStack: WeakMap<Element, string[]>,
+    rootFibers: Array<Fiber> = [],
   ): ScanResult {
     const visitedRootFibers = new Set<Fiber>();
     const components = new Set<string>();
@@ -54,6 +59,26 @@ export default class ReactFiberAnalyzer {
         },
         true,
       );
+    }
+
+    function walkTree(rootFiber: Fiber): void {
+      if (visitedRootFibers.has(rootFiber)) {
+        return;
+      }
+      visitedRootFibers.add(rootFiber);
+      walkFiberTree(rootFiber, (node: Fiber) => {
+        if (topDownVisited.has(node)) {
+          return false;
+        }
+        topDownVisited.add(node);
+        fiberNodes.push(new WeakRef(node));
+        analyzeFiber(node);
+        return true;
+      });
+    }
+
+    for (const rootFiber of rootFibers) {
+      walkTree(rootFiber);
     }
 
     for (const weakRef of elementWeakRefList) {
@@ -93,24 +118,9 @@ export default class ReactFiberAnalyzer {
 
       // try to traverse each fiber node in the entire fiber tree
       const rootFiber = getCurrentHostRootFiber(fiberNode);
-      if (rootFiber == null) {
-        continue;
+      if (rootFiber != null) {
+        walkTree(rootFiber);
       }
-      if (visitedRootFibers.has(rootFiber)) {
-        continue;
-      }
-      visitedRootFibers.add(rootFiber);
-
-      // start traversing fiber tree from the know root host
-      walkFiberTree(rootFiber, (node: Fiber) => {
-        if (topDownVisited.has(node)) {
-          return false;
-        }
-        topDownVisited.add(node);
-        fiberNodes.push(new WeakRef(node));
-        analyzeFiber(node);
-        return true;
-      });
     }
 
     topDownVisited.clear();

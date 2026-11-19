@@ -22,9 +22,17 @@ type Patch = {
   patched: PropertyDescriptor;
 };
 
-function collectElements(nodes: Iterable<Node>, out: Element[]): void {
+/**
+ * Appends the elements in the subtrees of `nodes` to `out`, skipping
+ * MemLens's own elements, until `out` holds `limit` elements.
+ */
+export function collectElements(
+  nodes: Iterable<Node>,
+  out: Element[],
+  limit = MAX_ELEMENTS_PER_REMOVAL,
+): void {
   const stack: Node[] = [...nodes];
-  while (stack.length > 0 && out.length < MAX_ELEMENTS_PER_REMOVAL) {
+  while (stack.length > 0 && out.length < limit) {
     const node = stack.pop();
     if (node == null || node.nodeType !== Node.ELEMENT_NODE) {
       continue;
@@ -56,6 +64,10 @@ export class RemovalTracker {
 
   constructor(callback: BeforeRemoveCallback) {
     this.#callback = callback;
+  }
+
+  isInstalled(): boolean {
+    return this.#patches.length > 0;
   }
 
   install(): void {

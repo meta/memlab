@@ -24,8 +24,10 @@ export class DOMObserver {
   #trackedElementSet: WeakSet<Element>;
   #consolidateInterval: Optional<number>;
   #observeCallback: Array<DOMObserveCallback>;
+  #onMutations: Optional<(records: MutationRecord[]) => void>;
 
-  constructor() {
+  constructor(onMutations?: (records: MutationRecord[]) => void) {
+    this.#onMutations = onMutations;
     this.#elementCount = 0;
     this.#detachedElementCount = 0;
     this.#trackedElements = [];
@@ -70,10 +72,10 @@ export class DOMObserver {
         }
       };
 
-      // added elements are found by the scan's DOM sweep
       mutationsList.forEach(mutation => {
         mutation.removedNodes.forEach(updateCallback);
       });
+      this.#onMutations?.(mutationsList);
 
       this.#observeCallback.forEach(cb => cb(newlyAdded));
     });

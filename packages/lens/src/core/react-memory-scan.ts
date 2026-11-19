@@ -27,13 +27,15 @@ import * as utils from '../utils/utils';
 import ReactFiberAnalyzer from './react-fiber-analysis';
 import {
   getFiberNodeFromElement,
+  getFiberRootOfContainer,
   getReactComponentStack,
 } from '../utils/react-fiber-utils';
 import {DOMObserver} from './dom-observer';
 import {config} from '../config/config';
 import {EventListenerTracker} from './event-listener-tracker';
 import {GCTracker} from './gc-tracker';
-import {RemovalTracker} from './removal-tracker';
+import {collectElements, RemovalTracker} from './removal-tracker';
+import {isVisualizerElement} from '../visual/visual-utils';
 
 type DetachedRecord = {
   detachedAt: number;
@@ -52,6 +54,9 @@ const DEFAULT_MIN_GC_COUNT = 1;
 // removal. Rects are read until this much time is spent in one synchronous
 // run of removals; the rest keep the rect recorded by an earlier scan.
 const REMOVAL_RECT_BUDGET_MS = 4;
+
+// elements whose rect is recorded per animation frame after they are added
+const ADDED_RECTS_PER_FRAME = 5000;
 
 export default class ReactMemoryScan {
   static nextElementId = 0;
@@ -79,6 +84,10 @@ export default class ReactMemoryScan {
   #removedSinceLastScan: Array<WeakRef<Element>> = [];
   #removalRectTimeMs = 0;
   #isRemovalRectResetQueued = false;
+  #reactRoots: Array<WeakRef<AnyValue>> = [];
+  #knownReactRoots: WeakSet<object> = new WeakSet();
+  #addedSinceLastFrame: Array<WeakRef<Element>> = [];
+  #isAddedRectFrameRequested = false;
 
   constructor(options: CreateOptions = {}) {
     this.#elementWeakRefs = [];
@@ -171,13 +180,18 @@ export default class ReactMemoryScan {
       return;
     }
     this.#removalTracker?.install();
+    if (this.#isEventDriven()) {
+      this.#sweepOnStart();
+    }
     this.#intervalId = setInterval(
       this.#scanCycle.bind(this),
       this.#scanIntervalMs,
     );
     if (config.features.enableMutationObserver) {
       if (this.#domObserver == null) {
-        this.#domObserver = new DOMObserver();
+        this.#domObserver = new DOMObserver(records =>
+          this.#onMutations(records),
+        );
         // NOTE: do not update the fiber or component information here
         // with this.#domObserver.register as those elements in the delta
         // list may be unmounted or just attached and their shape and
@@ -226,6 +240,8 @@ export default class ReactMemoryScan {
     this.#knownFiberNodes = [];
     this.#unmountedFibers = [];
     this.#removedSinceLastScan = [];
+    this.#addedSinceLastFrame = [];
+    this.#reactRoots = [];
 
     this.#removalTracker?.uninstall();
 
@@ -338,6 +354,124 @@ export default class ReactMemoryScan {
    * full GCs (`detachedElementMinGCCount`, 1 by default). Pass
    * `includeUnconfirmed` to also get those still waiting for a GC.
    */
+  // While the removal tracker runs, removed elements are reported as they
+  // leave the DOM, so a scan only has to look at those and walk the React
+  // trees from their roots, instead of sweeping the whole DOM.
+  #isEventDriven(): boolean {
+    return this.#removalTracker?.isInstalled() ?? false;
+  }
+
+  // One full pass when tracking starts: find the React roots, and record the
+  // rects of the elements already on the page (one layout for all of them).
+  #sweepOnStart(): void {
+    for (const element of Array.from(document.querySelectorAll('*'))) {
+      if (isVisualizerElement(element)) {
+        continue;
+      }
+      this.#addReactRootOf(element);
+      if (!this.#elementToBoundingRects.has(element)) {
+        const rect = utils.getBoundingClientRect(element);
+        if (rect != null) {
+          this.#elementToBoundingRects.set(element, rect);
+        }
+      }
+    }
+  }
+
+  #addReactRootOf(container: Element): void {
+    const root = getFiberRootOfContainer(container);
+    if (root != null && !this.#knownReactRoots.has(root)) {
+      this.#knownReactRoots.add(root);
+      this.#reactRoots.push(new WeakRef(root));
+    }
+  }
+
+  #getRootFibers(): Array<Fiber> {
+    const rootFibers: Array<Fiber> = [];
+    this.#reactRoots = this.#reactRoots.filter(ref => {
+      const current = ref.deref()?.current;
+      if (current != null) {
+        rootFibers.push(current);
+      }
+      return ref.deref() != null;
+    });
+    return rootFibers;
+  }
+
+  #onMutations(records: MutationRecord[]): void {
+    if (!this.#isEventDriven()) {
+      return;
+    }
+    for (const record of records) {
+      if (record.addedNodes.length === 0) {
+        continue;
+      }
+      // a root's first render appends to its container
+      if (record.target instanceof Element) {
+        this.#addReactRootOf(record.target);
+      }
+      record.addedNodes.forEach(node => {
+        if (node instanceof Element) {
+          this.#addedSinceLastFrame.push(new WeakRef(node));
+        }
+      });
+    }
+    if (
+      this.#addedSinceLastFrame.length > 0 &&
+      !this.#isAddedRectFrameRequested
+    ) {
+      this.#isAddedRectFrameRequested = true;
+      requestAnimationFrame(() => this.#recordAddedRects());
+    }
+  }
+
+  // Rects of added elements, read in the next frame before it is laid out
+  // anyway. They are the fallback for removals past the rect budget.
+  #recordAddedRects(): void {
+    this.#isAddedRectFrameRequested = false;
+    const queue = this.#addedSinceLastFrame;
+    this.#addedSinceLastFrame = [];
+    const elements: Element[] = [];
+    let index = 0;
+    for (; index < queue.length; ++index) {
+      if (elements.length >= ADDED_RECTS_PER_FRAME) {
+        break;
+      }
+      const node = queue[index].deref();
+      if (node?.isConnected) {
+        collectElements([node], elements, ADDED_RECTS_PER_FRAME);
+      }
+    }
+    for (const element of elements) {
+      if (!this.#elementToBoundingRects.has(element)) {
+        const rect = utils.getBoundingClientRect(element);
+        if (rect != null) {
+          this.#elementToBoundingRects.set(element, rect);
+        }
+      }
+    }
+    if (index < queue.length) {
+      this.#addedSinceLastFrame.push(...queue.slice(index));
+    }
+    if (
+      this.#addedSinceLastFrame.length > 0 &&
+      !this.#isAddedRectFrameRequested
+    ) {
+      this.#isAddedRectFrameRequested = true;
+      requestAnimationFrame(() => this.#recordAddedRects());
+    }
+  }
+
+  #takeRemovedElements(): Array<WeakRef<Element>> {
+    const removed = this.#removedSinceLastScan;
+    this.#removedSinceLastScan = [];
+    if (this.#domObserver != null) {
+      // removals the DOM wrappers do not cover, e.g. Range.deleteContents()
+      removed.push(...this.#domObserver.getDOMElements());
+    }
+    return removed;
+  }
+
   // Position and component stack can only be read while the element is still
   // attached, so take them right before it is removed. The element is then
   // tracked even if no scan saw it attached.
@@ -549,17 +683,34 @@ export default class ReactMemoryScan {
   scan(): ScanResult {
     const start = Date.now();
     this.#runGC();
-    const weakRefList = this.#elementWeakRefs;
-    // TODO: associate elements with URL and other metadata
-    const allElements = this.#getTrackedDOMRefs();
-    this.#updateElementToComponentInfo(allElements);
-    this.recordBoundingRectangles(allElements);
-    utils.updateWeakRefList(weakRefList, allElements);
+    const isEventDriven = this.#isEventDriven();
+    if (isEventDriven) {
+      const removed = this.#takeRemovedElements();
+      this.#updateElementToComponentInfo(removed);
+      utils.updateWeakRefList(this.#elementWeakRefs, removed);
+    } else {
+      const allElements = this.#getTrackedDOMRefs();
+      this.#updateElementToComponentInfo(allElements);
+      this.recordBoundingRectangles(allElements);
+      utils.updateWeakRefList(this.#elementWeakRefs, allElements);
+    }
     const confirmedDetached = this.#updateDetachedRecords();
+    if (isEventDriven) {
+      // an element put back into the DOM is reported again if removed again
+      this.#elementWeakRefs = this.#elementWeakRefs.filter(ref => {
+        const element = ref.deref();
+        return element != null && !element.isConnected;
+      });
+    }
     const scanResult = this.#fiberAnalyzer.scan(
-      weakRefList,
+      this.#elementWeakRefs,
       this.#elementToComponentStack,
+      isEventDriven ? this.#getRootFibers() : [],
     );
+    if (isEventDriven) {
+      scanResult.totalElements =
+        utils.getDOMElementCount() + scanResult.totalDetachedElements;
+    }
     const leakedFibers = this.updateFiberNodes(scanResult.fiberNodes);
     scanResult.leakedFibers = leakedFibers;
 
