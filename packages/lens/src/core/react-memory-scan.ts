@@ -125,6 +125,9 @@ export default class ReactMemoryScan {
     }
 
     this.#isActivated = true;
+    if (this.#intervalId != null) {
+      return;
+    }
     this.#intervalId = setInterval(
       this.#scanCycle.bind(this),
       this.#scanIntervalMs,
