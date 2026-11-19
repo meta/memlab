@@ -24,13 +24,14 @@ type Patch = {
 
 /**
  * Appends the elements in the subtrees of `nodes` to `out`, skipping
- * MemLens's own elements, until `out` holds `limit` elements.
+ * MemLens's own elements, until `out` holds `limit` elements. Returns the
+ * roots of the subtrees it did not get to.
  */
 export function collectElements(
   nodes: Iterable<Node>,
   out: Element[],
   limit = MAX_ELEMENTS_PER_REMOVAL,
-): void {
+): Node[] {
   const stack: Node[] = [...nodes];
   while (stack.length > 0 && out.length < limit) {
     const node = stack.pop();
@@ -47,6 +48,7 @@ export function collectElements(
       child = child.previousElementSibling;
     }
   }
+  return stack;
 }
 
 /**

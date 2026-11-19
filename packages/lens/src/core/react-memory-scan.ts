@@ -89,7 +89,7 @@ export default class ReactMemoryScan {
   #isRemovalRectResetQueued = false;
   #reactRoots: Array<WeakRef<AnyValue>> = [];
   #knownReactRoots: WeakSet<object> = new WeakSet();
-  #addedSinceLastFrame: Array<WeakRef<Element>> = [];
+  #addedSinceLastFrame: Array<WeakRef<Node>> = [];
   #isAddedRectFrameRequested = false;
 
   constructor(options: CreateOptions = {}) {
@@ -443,6 +443,8 @@ export default class ReactMemoryScan {
     const queue = this.#addedSinceLastFrame;
     this.#addedSinceLastFrame = [];
     const elements: Element[] = [];
+    // what is past this frame's limit, including the rest of a subtree
+    const next: Array<WeakRef<Node>> = [];
     let index = 0;
     for (; index < queue.length; ++index) {
       if (elements.length >= ADDED_RECTS_PER_FRAME) {
@@ -450,7 +452,13 @@ export default class ReactMemoryScan {
       }
       const node = queue[index].deref();
       if (node?.isConnected) {
-        collectElements([node], elements, ADDED_RECTS_PER_FRAME);
+        for (const rest of collectElements(
+          [node],
+          elements,
+          ADDED_RECTS_PER_FRAME,
+        )) {
+          next.push(new WeakRef(rest));
+        }
       }
     }
     for (const element of elements) {
@@ -461,9 +469,10 @@ export default class ReactMemoryScan {
         }
       }
     }
-    if (index < queue.length) {
-      this.#addedSinceLastFrame.push(...queue.slice(index));
+    for (; index < queue.length; ++index) {
+      next.push(queue[index]);
     }
+    this.#addedSinceLastFrame = next;
     if (
       this.#addedSinceLastFrame.length > 0 &&
       !this.#isAddedRectFrameRequested
