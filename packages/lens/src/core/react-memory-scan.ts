@@ -352,17 +352,12 @@ export default class ReactMemoryScan {
       this.getCachedComponentName.bind(this),
     );
     const eventListenerLeaks: EventListenerLeak[] = [];
-    for (const [componentName, listeners] of detachedListeners.entries()) {
-      const typeCount = new Map<string, number>();
-      for (const listener of listeners) {
-        const count = typeCount.get(listener.type) ?? 0;
-        typeCount.set(listener.type, count + 1);
-      }
-      for (const [type, count] of typeCount.entries()) {
+    for (const [componentName, groups] of detachedListeners.entries()) {
+      for (const group of groups) {
         eventListenerLeaks.push({
-          type,
+          type: group.type,
           componentName,
-          count,
+          count: group.count,
         });
       }
     }

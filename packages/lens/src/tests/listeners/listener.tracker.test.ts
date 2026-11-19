@@ -140,4 +140,18 @@ test.describe('event listener tracking', () => {
     );
     expect(leaks).toEqual([]);
   });
+  test('the count is the number of leaked listeners', async ({page}) => {
+    const leaks = await leaksAfter(
+      page,
+      `div.addEventListener('click', () => {});
+       div.addEventListener('click', () => {});
+       div.addEventListener('click', () => {}, true);
+       div.addEventListener('scroll', () => {});
+       div.addEventListener('scroll', () => {});`,
+    );
+    expect(leaks).toEqual([
+      {type: 'click', count: 3},
+      {type: 'scroll', count: 2},
+    ]);
+  });
 });
