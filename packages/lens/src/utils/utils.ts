@@ -165,37 +165,12 @@ export function consoleLog(...args: AnyValue[]) {
   _consoleLog.apply(_console, args);
 }
 
-const SESSION_STORAGE_KEY = 'memory_lens_session';
+const STARTED_IN_PAGE_KEY = '__memlens_started';
 
-function isSessionStorageAvailable(): boolean {
-  try {
-    const testKey = '__memory_lens_session_test__';
-    sessionStorage.setItem(testKey, '1');
-    sessionStorage.removeItem(testKey);
-    return true;
-  } catch {
-    return false;
-  }
+export function hasStartedInPage(): boolean {
+  return (window as AnyValue)[STARTED_IN_PAGE_KEY] === true;
 }
 
-export function hasRunInSession(): boolean {
-  if (!isSessionStorageAvailable()) {
-    return false;
-  }
-  try {
-    return sessionStorage.getItem(SESSION_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-export function setRunInSession(): void {
-  if (!isSessionStorageAvailable()) {
-    return;
-  }
-  try {
-    sessionStorage.setItem(SESSION_STORAGE_KEY, 'true');
-  } catch {
-    // do nothing
-  }
+export function markStartedInPage(): void {
+  (window as AnyValue)[STARTED_IN_PAGE_KEY] = true;
 }

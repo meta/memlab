@@ -9,13 +9,13 @@
  */
 import ReactMemoryScan from './core/react-memory-scan';
 import {DOMVisualizationExtension} from './extensions/dom-visualization-extension';
-import {hasRunInSession, setRunInSession} from './utils/utils';
+import {hasStartedInPage, markStartedInPage} from './utils/utils';
 
-if (!hasRunInSession()) {
+if (!hasStartedInPage()) {
   const memoryScan = new ReactMemoryScan({isDevMode: true});
   const domVisualizer = new DOMVisualizationExtension(memoryScan);
   memoryScan.registerExtension(domVisualizer);
 
   memoryScan.start();
-  setRunInSession();
+  markStartedInPage();
 }
