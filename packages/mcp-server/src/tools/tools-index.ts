@@ -234,6 +234,10 @@ const GROUPS: Group[] = [
         'A dev-build round and a production-build round of the same combo, lined up per population by property set and unmangled class: dev-only, production-real, production-saturating or production-only, and how much of the dev heap growth a production build keeps.',
       ],
       [
+        'memlab_code_diff',
+        'Did a build change make functions BIGGER, or did V8 just compile more of them in this capture? Per-function bytecode A/B joined by name + script: same-function growth (components vs others), compile-state flips, and unmatched functions, with the net code delta split between them.',
+      ],
+      [
         'memlab_compare_rounds',
         'Compare N rounds of a sweep: rates that land on a WHOLE NUMBER per cycle or per landed step, with the step they match (a mechanism, not a trend), and populations that grew while app_delta was negative (invisible to the aggregate ladder). Takes round names from the shared round index too.',
       ],
