@@ -107,6 +107,10 @@ const GROUPS: Group[] = [
         'Split ONE snapshot by realm (page, iframes, extension worlds, detached windows, Node `vm` contexts): bytes each NativeContext owns alone, shared bytes, unattributed bytes, and the largest classes in any of them.',
       ],
       [
+        'memlab_node_server',
+        'Node.js server heaps: `require.cache` entries ranked by what their exports retain, IncomingMessage / ServerResponse / Socket / Timeout counts with lifecycle flags, and the sockets and timers carrying AsyncLocalStorage request stores, with their routes.',
+      ],
+      [
         'memlab_realm_summary',
         'Page + worker snapshots side by side: app / bundle / code per realm, with shared Wasm modules and SharedArrayBuffers counted once.',
       ],

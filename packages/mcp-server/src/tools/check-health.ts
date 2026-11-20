@@ -11,6 +11,7 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {getSnapshot, getSnapshotEnv} from '../heap-state.js';
 import {formatBytes, formatNumber, errorResult, toolResult} from '../utils.js';
+import {nodeServerFindings} from './node-server.js';
 
 type Severity = 'critical' | 'warning' | 'info';
 
@@ -619,6 +620,8 @@ export function registerCheckHealth(server: McpServer): void {
               'memlab_string_patterns to identify which modules are retained, then check if source can be released after evaluation',
           });
         }
+
+        findings.push(...nodeServerFindings(snapshot, env));
 
         // Sort by severity
         const severityOrder: Record<Severity, number> = {

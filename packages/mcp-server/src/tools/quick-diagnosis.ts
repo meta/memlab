@@ -36,6 +36,7 @@ import {
   heldByLabel,
 } from '../utils.js';
 import {splitClassKey} from './sequence-analysis.js';
+import {nodeServerFlagLines} from './node-server.js';
 
 export function registerQuickDiagnosis(server: McpServer): void {
   server.tool(
@@ -349,6 +350,8 @@ export function registerQuickDiagnosis(server: McpServer): void {
             '',
           );
         }
+
+        lines.push(...nodeServerFlagLines(snapshot, env));
 
         const caveat = singleSnapshotCaveat();
         if (caveat != null) {
