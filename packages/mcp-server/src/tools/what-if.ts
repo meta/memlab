@@ -65,7 +65,7 @@ function resolveScope(node: IHeapNode): IHeapNode | null {
   return ctx != null && isContext(ctx) ? scopeInfoOf(ctx) : null;
 }
 
-function findRootIds(snapshot: IHeapSnapshot): number[] {
+export function findRootIds(snapshot: IHeapSnapshot): number[] {
   const roots: number[] = [];
   snapshot.nodes.forEach(node => {
     if (roots.length > 0) return;

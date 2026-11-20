@@ -174,6 +174,7 @@ import {registerSnapshotBudgetPlanner} from './tools/snapshot-budget-planner.js'
 import {registerUnitCost} from './tools/unit-cost.js';
 import {registerIdentify} from './tools/identify.js';
 import {registerWhatIf} from './tools/what-if.js';
+import {registerResidual} from './tools/residual.js';
 import {registerMetric} from './tools/metric.js';
 import {registerTraceAll} from './tools/trace-all.js';
 import {registerRetainerDiff} from './tools/retainer-diff.js';
@@ -358,6 +359,7 @@ registerSnapshotBudgetPlanner(server);
 registerUnitCost(server);
 registerIdentify(server);
 registerWhatIf(server);
+registerResidual(server);
 registerMetric(server);
 registerTraceAll(server);
 registerRetainerDiff(server);

@@ -152,6 +152,10 @@ const GROUPS: Group[] = [
         'If this set were freed, how many bytes actually come back — dominator-deduped, no double counting. Select by ids, class, typename, shape, or `scope_of` (every context of one function scope, a whole scope chain).',
       ],
       [
+        'memlab_residual',
+        'Cut every explained finding at once and census what is still reachable: bytes each cut frees alone and together (with overlap), top remaining dominators, holder `Class.edge` groups, heap-number holders, arrays over 100 KB. Finds the long tail after the big items.',
+      ],
+      [
         'memlab_trace_all',
         'Retainer-trace an ENTIRE population and cluster the paths server-side — finds the minority path a 10-instance sample cannot. Clusters past `limit` are listed one line each, as path shapes.',
       ],
