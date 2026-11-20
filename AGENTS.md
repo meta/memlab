@@ -57,9 +57,10 @@ npm run memlab -- help     # run the CLI built from this checkout
 - Public APIs are documented with TSDoc comments. The pages under
   `website/docs/api/` are generated from those comments; change the comment,
   not the generated markdown.
-- `website/docs/cli/CLI-commands.md` is generated from the CLI command
-  definitions in `packages/cli/src/commands/`; change the command, not the
-  markdown.
+- `website/docs/cli/CLI-commands.md` (index), the per-command pages in
+  `website/docs/cli/` (e.g. `run.md`) and `website/docs/cli/sidebar.json`
+  are generated from the CLI command definitions in
+  `packages/cli/src/commands/`; change the command, not the markdown.
 - If you change a public API or CLI option, update `README.md`, `AI.md` and the
   affected package README in the same change.
 
