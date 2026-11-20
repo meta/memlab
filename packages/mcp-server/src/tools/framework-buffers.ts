@@ -217,7 +217,7 @@ function wideTableNote(table: IHeapNode, props: number, base: string): string {
 }
 
 /** Element targets of an array, from the node or its `elements` store. */
-function arrayElements(arr: IHeapNode): IHeapNode[] {
+export function arrayElements(arr: IHeapNode): IHeapNode[] {
   const out: IHeapNode[] = [];
   let backing: IHeapNode | null = null;
   for (const e of arr.references) {
@@ -262,6 +262,28 @@ function tombstonedListeners(
   if (elems.slice(0, 20).filter(n => n.type === 'closure').length < 10) {
     return null;
   }
+  const shared = sharedCapturedFunction(elems);
+  if (shared == null) return null;
+  const {best, closures} = shared;
+  if (best.n < 100 || best.n < closures * 0.5) return null;
+  return {
+    entries: elems.length,
+    dead: best.n,
+    fn: best.name === '' ? '(anonymous)' : best.name,
+    bytes: best.bytes,
+  };
+}
+
+/**
+ * The function object captured (in their scope) by the most closures among
+ * `elems`, with how many closures there are in all. A wrapper cancelled in
+ * place captures the shared no-op it was swapped to, so this is the
+ * signature of a tombstone.
+ */
+export function sharedCapturedFunction(elems: IHeapNode[]): {
+  best: {n: number; name: string; bytes: number};
+  closures: number;
+} | null {
   const byFn = new Map<number, {n: number; name: string; bytes: number}>();
   let closures = 0;
   for (const el of elems) {
@@ -283,13 +305,7 @@ function tombstonedListeners(
   }
   let best: {n: number; name: string; bytes: number} | null = null;
   for (const g of byFn.values()) if (best == null || g.n > best.n) best = g;
-  if (best == null || best.n < 100 || best.n < closures * 0.5) return null;
-  return {
-    entries: elems.length,
-    dead: best.n,
-    fn: best.name === '' ? '(anonymous)' : best.name,
-    bytes: best.bytes,
-  };
+  return best == null ? null : {best, closures};
 }
 
 /**

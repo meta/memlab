@@ -546,6 +546,10 @@ const GROUPS: Group[] = [
         'Unbounded or oversized caches in one snapshot.',
       ],
       [
+        'memlab_collection_census',
+        'Every collection with at least N entries at any depth, with an element split (null, holes, no-op wrappers, detached DOM, cancelled Scheduler tasks, top shapes) that flags rows at least 25% dead.',
+      ],
+      [
         'memlab_persistent_structures',
         'How many VERSIONS of a structurally-shared structure are retained (Immutable.js, Immer, RxJS) — detected by SHAPE, so it survives the minified class names a histogram cannot explain.',
       ],

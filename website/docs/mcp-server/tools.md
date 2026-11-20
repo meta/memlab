@@ -17,7 +17,7 @@ prints with `memlab_tools`.
 | [Retention](./tools/retention.md) | Who owns the growth / why is X retained? | 29 |
 | [Measurement artifacts](./tools/artifacts.md) | Is it real, or a measurement artifact? | 6 |
 | [Detached DOM and listeners](./tools/dom.md) | Detached DOM and event listeners | 4 |
-| [Collections and caches](./tools/collections.md) | Collections and caches | 12 |
+| [Collections and caches](./tools/collections.md) | Collections and caches | 13 |
 | [Strings and duplication](./tools/strings.md) | Strings and duplication | 8 |
 | [Inspect objects](./tools/inspect.md) | Inspect or find specific objects | 17 |
 | [Custom queries](./tools/ask.md) | None of the above — ask the heap directly | 4 |
