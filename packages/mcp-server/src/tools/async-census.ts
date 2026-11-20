@@ -18,6 +18,7 @@ import {
   errorResult,
   formatBytes,
   formatNumber,
+  heldByLabel,
   markdownTable,
   toolResult,
 } from '../utils.js';
@@ -100,6 +101,167 @@ export function ownerLabel(snapshot: IHeapSnapshot, node: IHeapNode): string {
   return `${route === 'dev-only' ? '[DEV-ONLY] ' : ''}${tail || '(root)'}`;
 }
 
+export interface AsyncFacts {
+  tasksLive: number;
+  tasksCancelled: number;
+  /** Queue array id -> counts, so the actual container is nameable. */
+  queues: Map<number, {live: number; cancelled: number; slots: number}>;
+  promisesPending: number;
+  promisesSettled: number;
+  longChains: Array<{node: IHeapNode; reactions: number}>;
+  promiseOwners: Map<string, number>;
+  timerClosures: Map<string, number>;
+}
+
+/** One pass over the nodes: the counts every section below is built from. */
+export function asyncCensusFacts(snapshot: IHeapSnapshot): AsyncFacts {
+  let tasksLive = 0;
+  let tasksCancelled = 0;
+  // Queue array id -> counts, so the actual container is nameable.
+  const queues = new Map<
+    number,
+    {live: number; cancelled: number; slots: number}
+  >();
+  let promisesPending = 0;
+  let promisesSettled = 0;
+  const longChains: Array<{node: IHeapNode; reactions: number}> = [];
+  const promiseOwners = new Map<string, number>();
+  const timerClosures = new Map<string, number>();
+
+  snapshot.nodes.forEach((node: IHeapNode) => {
+    if (node.id <= 3) return;
+
+    if (node.name === 'Promise' && node.type === 'object') {
+      // An unsettled promise still points at its reaction list; a settled
+      // one points at the result value.
+      let pending = false;
+      for (const edge of node.references) {
+        const t = edge.toNode;
+        if (t != null && t.name === 'system / PromiseReaction') {
+          pending = true;
+          break;
+        }
+      }
+      if (pending) promisesPending++;
+      else promisesSettled++;
+      if (pending) {
+        const reactions = promiseReactions(node).count;
+        if (reactions >= LONG_CHAIN_MIN) {
+          longChains.push({node, reactions});
+        }
+        for (const edge of node.referrers) {
+          const from = edge.fromNode;
+          if (from == null || from.id <= 3) continue;
+          if (String(edge.name_or_index) === '__proto__') continue;
+          const keys = [...shapeKeys(from)].sort();
+          if (keys.length === 0) continue;
+          const sig = `{${keys.slice(0, 6).join(', ')}}`;
+          promiseOwners.set(sig, (promiseOwners.get(sig) ?? 0) + 1);
+          break;
+        }
+      }
+      return;
+    }
+
+    if (node.type === 'object' && node.name === 'Object') {
+      const keys = shapeKeys(node);
+      let isTask = true;
+      for (const p of SCHEDULER_TASK_PROPS) {
+        if (!keys.has(p)) {
+          isTask = false;
+          break;
+        }
+      }
+      if (isTask) {
+        const cancelled = isCancelledTask(node);
+        if (cancelled) tasksCancelled++;
+        else tasksLive++;
+        for (const edge of node.referrers) {
+          const from = edge.fromNode;
+          if (from == null || from.name !== 'Array') continue;
+          const q = queues.get(from.id) ?? {
+            live: 0,
+            cancelled: 0,
+            slots: from.edge_count,
+          };
+          if (cancelled) q.cancelled++;
+          else q.live++;
+          queues.set(from.id, q);
+          break;
+        }
+      }
+      return;
+    }
+
+    // Timer callbacks: closures held by a scheduler/timeout wrapper.
+    if (node.type === 'closure') {
+      const n = node.name;
+      if (
+        n.startsWith('setTimeout') ||
+        n.startsWith('setInterval') ||
+        n.includes('scheduleDelayedCallback') ||
+        n.includes('requestIdleCallback')
+      ) {
+        timerClosures.set(n, (timerClosures.get(n) ?? 0) + 1);
+      }
+    }
+  });
+  return {
+    tasksLive,
+    tasksCancelled,
+    queues,
+    promisesPending,
+    promisesSettled,
+    longChains,
+    promiseOwners,
+    timerClosures,
+  };
+}
+
+/**
+ * The census as one line per signal (a mostly-cancelled scheduler queue, a
+ * long unsettled promise chain), for `memlab_sweep`; none when neither shows.
+ */
+export function asyncFlagLines(
+  snapshot: IHeapSnapshot,
+  f: AsyncFacts,
+): Array<{line: string; id: number; label: string; bytes: number}> {
+  const out: Array<{line: string; id: number; label: string; bytes: number}> =
+    [];
+  const total = f.tasksLive + f.tasksCancelled;
+  if (
+    f.tasksCancelled >= 10 &&
+    f.tasksCancelled >= total * CANCELLED_SHARE_WARN
+  ) {
+    let top: [number, {cancelled: number}] | null = null;
+    for (const q of f.queues) {
+      if (top == null || q[1].cancelled > top[1].cancelled) top = q;
+    }
+    const queue = top != null ? snapshot.getNodeById(top[0]) : null;
+    if (top != null && queue != null) {
+      const holder = heldByLabel(queue, 40);
+      out.push({
+        line: `@${top[0]} \`${holder}\` ${formatBytes(queue.retainedSize)}: ${formatNumber(f.tasksCancelled)} of ${formatNumber(total)} scheduler tasks are cancelled (callback null), ${formatNumber(top[1].cancelled)} of them in this queue → \`memlab_async_census\``,
+        id: top[0],
+        label: holder,
+        bytes: queue.retainedSize,
+      });
+    }
+  }
+  if (f.longChains.length > 0) {
+    const {node, reactions} = f.longChains.reduce((a, b) =>
+      b.reactions > a.reactions ? b : a,
+    );
+    out.push({
+      line: `@${node.id} unsettled Promise ${formatBytes(node.retainedSize)}: ${formatNumber(reactions)} reactions attached (${formatNumber(f.longChains.length)} promise(s) with ≥${LONG_CHAIN_MIN}), owner ${ownerLabel(snapshot, node)} → \`memlab_pending_promises\``,
+      id: node.id,
+      label: 'unsettled Promise',
+      bytes: node.retainedSize,
+    });
+  }
+  return out;
+}
+
 export function registerAsyncCensus(server: McpServer): void {
   server.tool(
     'memlab_async_census',
@@ -127,97 +289,16 @@ export function registerAsyncCensus(server: McpServer): void {
           );
         }
 
-        let tasksLive = 0;
-        let tasksCancelled = 0;
-        // Queue array id -> counts, so the actual container is nameable.
-        const queues = new Map<
-          number,
-          {live: number; cancelled: number; slots: number}
-        >();
-        let promisesPending = 0;
-        let promisesSettled = 0;
-        const longChains: Array<{node: IHeapNode; reactions: number}> = [];
-        const promiseOwners = new Map<string, number>();
-        const timerClosures = new Map<string, number>();
-
-        snapshot.nodes.forEach((node: IHeapNode) => {
-          if (node.id <= 3) return;
-
-          if (node.name === 'Promise' && node.type === 'object') {
-            // An unsettled promise still points at its reaction list; a settled
-            // one points at the result value.
-            let pending = false;
-            for (const edge of node.references) {
-              const t = edge.toNode;
-              if (t != null && t.name === 'system / PromiseReaction') {
-                pending = true;
-                break;
-              }
-            }
-            if (pending) promisesPending++;
-            else promisesSettled++;
-            if (pending) {
-              const reactions = promiseReactions(node).count;
-              if (reactions >= LONG_CHAIN_MIN) {
-                longChains.push({node, reactions});
-              }
-              for (const edge of node.referrers) {
-                const from = edge.fromNode;
-                if (from == null || from.id <= 3) continue;
-                if (String(edge.name_or_index) === '__proto__') continue;
-                const keys = [...shapeKeys(from)].sort();
-                if (keys.length === 0) continue;
-                const sig = `{${keys.slice(0, 6).join(', ')}}`;
-                promiseOwners.set(sig, (promiseOwners.get(sig) ?? 0) + 1);
-                break;
-              }
-            }
-            return;
-          }
-
-          if (node.type === 'object' && node.name === 'Object') {
-            const keys = shapeKeys(node);
-            let isTask = true;
-            for (const p of SCHEDULER_TASK_PROPS) {
-              if (!keys.has(p)) {
-                isTask = false;
-                break;
-              }
-            }
-            if (isTask) {
-              const cancelled = isCancelledTask(node);
-              if (cancelled) tasksCancelled++;
-              else tasksLive++;
-              for (const edge of node.referrers) {
-                const from = edge.fromNode;
-                if (from == null || from.name !== 'Array') continue;
-                const q = queues.get(from.id) ?? {
-                  live: 0,
-                  cancelled: 0,
-                  slots: from.edge_count,
-                };
-                if (cancelled) q.cancelled++;
-                else q.live++;
-                queues.set(from.id, q);
-                break;
-              }
-            }
-            return;
-          }
-
-          // Timer callbacks: closures held by a scheduler/timeout wrapper.
-          if (node.type === 'closure') {
-            const n = node.name;
-            if (
-              n.startsWith('setTimeout') ||
-              n.startsWith('setInterval') ||
-              n.includes('scheduleDelayedCallback') ||
-              n.includes('requestIdleCallback')
-            ) {
-              timerClosures.set(n, (timerClosures.get(n) ?? 0) + 1);
-            }
-          }
-        });
+        const {
+          tasksLive,
+          tasksCancelled,
+          queues,
+          promisesPending,
+          promisesSettled,
+          longChains,
+          promiseOwners,
+          timerClosures,
+        } = asyncCensusFacts(snapshot);
 
         const lines: string[] = ['## Pending async work', ''];
 

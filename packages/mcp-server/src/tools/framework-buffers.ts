@@ -26,13 +26,21 @@ import {
   heldByLabel,
 } from '../utils.js';
 
-interface BufferRow {
+export interface BufferRow {
   buffer: string;
   where: string;
   entries: number | null;
   bytes: number;
   note: string;
+  /** The container, when the row is one object. */
+  id?: number;
+  /** Set when the row is a lead rather than a standing cost. */
+  flag?: string;
 }
+
+// A `logs` array this long or this heavy is worth a look on its own.
+const BIG_LOG_ENTRIES = 10_000;
+const BIG_LOG_BYTES = 256 * 1024;
 
 const COLLECTIONS = new Set(['Map', 'Set', 'Array', 'WeakMap']);
 
@@ -313,7 +321,7 @@ export function sharedCapturedFunction(elems: IHeapNode[]): {
  * the app-specific probes. Each probe is minification-safe (module records,
  * globals, shapes) and reports "not present" rather than guessing.
  */
-function probeBuffers(
+export function probeBuffers(
   snapshot: IHeapSnapshot,
   probes: BufferProbe[],
 ): BufferRow[] {
@@ -402,6 +410,10 @@ function probeBuffers(
       entries: n > 0 ? n : null,
       bytes,
       note: 'a `logs` array; check its cap',
+      id: arr.id,
+      ...(n >= BIG_LOG_ENTRIES || bytes >= BIG_LOG_BYTES
+        ? {flag: 'oversized log'}
+        : {}),
     });
   }
   for (const {probe, node} of propertyHits) {
@@ -456,6 +468,7 @@ function probeBuffers(
       note: mostlyCancelled
         ? `${cancelledTasks.toLocaleString('en-US')} of ${schedulerTasks.toLocaleString('en-US')} are cancelled (callback null) and stay queued until they reach the top; Held counts those`
         : 'pending timers; see memlab_timers for what they capture',
+      ...(mostlyCancelled ? {flag: 'cancelled scheduler tasks'} : {}),
     });
   }
   for (const arr of longArrays) {
@@ -469,6 +482,8 @@ function probeBuffers(
       where: `${labeler.labelOf(arr)} (${heldByLabel(arr, 40)})`,
       entries: t.entries,
       bytes: t.bytes,
+      id: arr.id,
+      flag: 'cancelled-in-place listeners',
       note: noop
         ? `${t.dead.toLocaleString('en-US')} of ${t.entries.toLocaleString('en-US')} entries are wrappers around \`${t.fn}\`: cancelled in place and never spliced out, so the array grows with every register/unregister`
         : `${t.dead.toLocaleString('en-US')} of ${t.entries.toLocaleString('en-US')} entries wrap the same function \`${t.fn}\`; if it is a no-op, these are cancelled entries left in place`,
@@ -488,7 +503,10 @@ function probeBuffers(
       // A module registry is wide by design and reaches the whole app; count
       // only its own table, not everything behind it.
       const isRegistry = registryIds.has(g.id);
+      const perCall = perCallKeys(g, props) != null;
       rows.push({
+        id: g.id,
+        ...(perCall ? {flag: 'per-call keys'} : {}),
         buffer: isRegistry
           ? 'module registry table'
           : 'giant object (>5,000 own properties)',

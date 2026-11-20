@@ -17,6 +17,7 @@ import {
   describeElements,
   getSlotBytes,
   readRawElements,
+  type SlotBytes,
 } from '../heap-shapes.js';
 import {moduleRecords} from '../module-registry.js';
 import {oddballValue} from '../react-shapes.js';
@@ -41,7 +42,7 @@ import {
 const COLLECTIONS = new Set(['Array', 'Map', 'Set', 'WeakMap', 'WeakSet']);
 // Elements examined per collection; a larger one is sampled evenly.
 const SPLIT_CAP = 20_000;
-const DEAD_FLAG = 0.25;
+export const DEAD_FLAG = 0.25;
 
 /** What one collection's elements are, by signature. */
 export interface ElementSplit {
@@ -282,7 +283,7 @@ function elementsOf(node: IHeapNode): {
   return {elems, holes: all.length - elems.length, keys: null};
 }
 
-interface Row {
+export interface CensusRow {
   node: IHeapNode;
   entries: number;
   retained: number;
@@ -295,7 +296,10 @@ interface Row {
  * fewer edges than `minEntries` cannot be either, so most nodes cost one
  * comparison.
  */
-function findCollections(snapshot: IHeapSnapshot, minEntries: number): Row[] {
+export function findCollections(
+  snapshot: IHeapSnapshot,
+  minEntries: number,
+): CensusRow[] {
   const registries = moduleRegistryIds(snapshot);
   const records = new Set<number>();
   for (const rec of moduleRecords(snapshot).values()) {
@@ -339,7 +343,7 @@ function findCollections(snapshot: IHeapSnapshot, minEntries: number): Row[] {
       }
     }
   });
-  const rows: Row[] = [];
+  const rows: CensusRow[] = [];
   for (const node of found) {
     const {elems} = elementsOf(node);
     if (elems.length < minEntries || isDependencyList(node)) continue;
@@ -350,6 +354,22 @@ function findCollections(snapshot: IHeapSnapshot, minEntries: number): Row[] {
     rows.push({node, entries: elems.length, retained});
   }
   return rows;
+}
+
+/** The element split of one census row's collection. */
+export function splitOf(node: IHeapNode, slotBytes: SlotBytes): ElementSplit {
+  const raw = node.name === 'Array' ? readRawElements(node) : null;
+  const info = raw != null ? describeElements(raw, slotBytes) : null;
+  const {elems, holes, keys} = elementsOf(node);
+  return info != null
+    ? elementSplit(elems, info.holes + holes, info.span)
+    : elementSplit(
+        elems,
+        holes,
+        elems.length + holes,
+        node.name !== 'Object',
+        keys,
+      );
 }
 
 export function registerCollectionCensus(server: McpServer): void {
@@ -398,19 +418,7 @@ export function registerCollectionCensus(server: McpServer): void {
         const notes: string[] = [];
         let wideObject = false;
         const table = rows.slice(0, limit).map((r, i) => {
-          const raw = r.node.name === 'Array' ? readRawElements(r.node) : null;
-          const info = raw != null ? describeElements(raw, slotBytes) : null;
-          const {elems, holes, keys} = elementsOf(r.node);
-          const split =
-            info != null
-              ? elementSplit(elems, info.holes + holes, info.span)
-              : elementSplit(
-                  elems,
-                  holes,
-                  elems.length + holes,
-                  r.node.name !== 'Object',
-                  keys,
-                );
+          const split = splitOf(r.node, slotBytes);
           const holder = heldByLabel(r.node, 40);
           const dead = split.dead / Math.max(1, split.examined);
           if (dead >= DEAD_FLAG) {

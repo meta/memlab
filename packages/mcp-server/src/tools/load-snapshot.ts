@@ -1095,6 +1095,7 @@ let loadCostNoteEmitted = false;
 function nextStepMenu(): string[] {
   return [
     '**What do you want to know?**',
+    '- _Every first-pass lead in one call?_ → `memlab_sweep` (top retained with holder, dead collections, string families, framework buffers, async; ladder growth with `paths`)',
     '- _What is this heap made of?_ → `memlab_app_heap` (application data vs bundle source vs V8 machinery — run it before trusting any percentage)',
     '- _Anything obviously wrong?_ → `memlab_quick_diagnosis`, then `memlab_auto_investigate` for the deep dive',
     '- _Is X a leak?_ → `memlab_hypothesis`',

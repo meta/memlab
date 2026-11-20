@@ -71,6 +71,10 @@ const GROUPS: Group[] = [
         'Unsettled Promises ranked by reaction-chain length, tracked across a ladder by id or owner path — one never-settling promise gaining `.then`s per cycle — with the Blink task-attribution / soft-navigation memory each reaction keeps alive.',
       ],
       [
+        'memlab_sweep',
+        'Every first-pass lead in ONE call after loading: top retained with holder, dead collections, string families, flagged framework buffers, largest class by holder, async/Node flags, ladder growth with 2+ snapshots, and a ready-to-paste memlab_residual call.',
+      ],
+      [
         'memlab_app_heap',
         'START HERE on an unfamiliar app: splits the heap into application data vs bundle source vs V8 machinery. On one app this showed ~55% of the heap was JS bundle source, which reframed every number that followed.',
       ],

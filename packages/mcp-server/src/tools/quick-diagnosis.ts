@@ -34,6 +34,7 @@ import {
   getContentPreview,
   sanitizeForTable,
   heldByLabel,
+  suggestionsSuppressed,
 } from '../utils.js';
 import {splitClassKey} from './sequence-analysis.js';
 import {nodeServerFlagLines} from './node-server.js';
@@ -356,6 +357,11 @@ export function registerQuickDiagnosis(server: McpServer): void {
         }
 
         lines.push(...nodeServerFlagLines(snapshot, env));
+        if (!suggestionsSuppressed('memlab_quick_diagnosis')) {
+          lines.push(
+            '**Next:** `memlab_sweep` for every first-pass lead in one call (dead collections, framework buffers, async, class by holder, and a ready memlab_residual call).',
+          );
+        }
 
         const caveat = singleSnapshotCaveat();
         if (caveat != null) {

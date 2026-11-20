@@ -53,7 +53,7 @@ function nodeLabel(node: IHeapNode): string {
  * Per node, 1 when a production build would hold it too, or null when the
  * snapshot has no dev roots (everything counts).
  */
-function productionReach(snapshot: IHeapSnapshot): Uint8Array | null {
+export function productionReach(snapshot: IHeapSnapshot): Uint8Array | null {
   const devRoots = collectDevRoots(snapshot);
   return devRoots.byId.size > 0
     ? computeReachableWithoutDevRoots(snapshot, devRoots)
@@ -148,7 +148,9 @@ export function capacityStep(
  * duplicating its guards — the ceilings, the memory-headroom check and the
  * already-resident fast path all still apply.
  */
-async function loadSnapshotByPath(filePath: string): Promise<string | null> {
+export async function loadSnapshotByPath(
+  filePath: string,
+): Promise<string | null> {
   const already = findResidentByPath(filePath);
   if (already != null) return already.handle;
   const entry = getRegisteredTool('memlab_load_snapshot');

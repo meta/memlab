@@ -60,7 +60,10 @@ const SESSION_TOOLS = new Set([
  * take `snapshot` too. `memlab_detached_dom` refused it in 8 of 18 calls in
  * one study, each time right after a sibling tool had accepted it.
  */
-const OPTIONAL_MULTI_SNAPSHOT_TOOLS = new Set(['memlab_detached_dom']);
+const OPTIONAL_MULTI_SNAPSHOT_TOOLS = new Set([
+  'memlab_detached_dom',
+  'memlab_sweep',
+]);
 
 /** Keys that make one of those tools read other snapshots instead. */
 const LADDER_KEYS = ['run_dir', 'paths'];
