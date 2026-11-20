@@ -586,6 +586,10 @@ const GROUPS: Group[] = [
         'memlab_property_distribution',
         'Cardinality and top values of one property across instances.',
       ],
+      [
+        'memlab_field_fill',
+        'Every field of a record collection at once: % null, constant, empty, per-record copies vs shared, plus timestamp span / rate / age. Tells empty stubs and copied arrays from real content.',
+      ],
     ],
   },
   {

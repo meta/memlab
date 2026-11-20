@@ -462,6 +462,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_weakmap_entries` | Enumerate a WeakMap. |
 | `memlab_array_group_by` | Group an array’s elements by a property to see what is piling up. |
 | `memlab_property_distribution` | Cardinality and top values of one property across instances. |
+| `memlab_field_fill` | Every field of a record collection at once: % null, constant, empty, per-record copies vs shared, plus timestamp span / rate / age. Tells empty stubs and copied arrays from real content. |
 
 ### Strings and duplication
 
