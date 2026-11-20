@@ -40,6 +40,38 @@ interface LinkReport {
   captured: Array<{edge: string; id: number; name: string; detached: boolean}>;
 }
 
+/**
+ * Distinct links reachable from `head` through `nextEdges`, counted the way
+ * memlab_chain_walk counts them: each node once, a revisit marks the chain
+ * cyclic, and the walk stops at `maxLinks`.
+ */
+export function countChainLinks(
+  head: IHeapNode,
+  nextEdges: string[],
+  maxLinks = 10000,
+): {links: number; cyclic: boolean; truncated: boolean} {
+  const seen = new Set<number>();
+  let cyclic = false;
+  let truncated = false;
+  const stack: IHeapNode[] = [head];
+  while (stack.length > 0) {
+    const node = stack.pop() as IHeapNode;
+    if (seen.has(node.id)) {
+      cyclic = true;
+      continue;
+    }
+    if (seen.size >= maxLinks) {
+      truncated = true;
+      break;
+    }
+    seen.add(node.id);
+    for (const e of node.references) {
+      if (nextEdges.includes(String(e.name_or_index))) stack.push(e.toNode);
+    }
+  }
+  return {links: seen.size, cyclic, truncated};
+}
+
 export function registerChainWalk(server: McpServer): void {
   server.tool(
     'memlab_chain_walk',

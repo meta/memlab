@@ -29,8 +29,11 @@ import {moduleOfScope} from '../module-registry.js';
 import {resolveRunOrPaths} from './ladder.js';
 import {segmentArg} from '../run-manifest.js';
 import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
+import memlabHeapAnalysis from '@memlab/heap-analysis';
+import {ObjectGrowthTracker, formatObjectGrowth} from './object-growth.js';
 
 const {utils: memlabUtils} = memlabCore;
+const {getFullHeapFromFile} = memlabHeapAnalysis;
 
 /**
  * Class names that carry no information as an owner label. A signature built on
@@ -440,7 +443,8 @@ export function registerCollectionDiff(server: McpServer): void {
       'This is the discovery half of memlab_collection_trend, which is excellent but requires a locator you must already know — so every accumulating collection had to be found first by hand-tracing a retainer path, and the ones nobody thought to trace were never found at all. ' +
       'It is also the answer to the case the single-snapshot tools structurally cannot see: memlab_cache_analysis and memlab_growth_signals rank by SIZE on one rung, so they surface big-and-static collections and miss the small-but-unbounded one. This tool applies NO size floor — growth is the filter — because the store that matters most may hold 2 entries at the baseline. ' +
       'The signatures it emits are valid memlab_collection_trend locators: confirm a candidate, and later verify a fix, by pasting one straight in. ' +
-      'Loads each rung transiently in LIGHT mode (one graph resident at a time), so it is safe on ladders too large to hold in memory at once.',
+      'Loads each rung transiently in LIGHT mode (one graph resident at a time), so it is safe on ladders too large to hold in memory at once. ' +
+      'Pass include_objects:true to also list same-id objects of ANY class whose edge count or retained size grew at every rung (record buffers on plugin objects, linked-list holders with their chain length) — growth the Map/Set/Array view does not name.',
     {
       run_dir: z
         .string()
@@ -492,6 +496,27 @@ export function registerCollectionDiff(server: McpServer): void {
         .describe(
           'Order rows (after "grew at every rung") by estimated BYTES added (default) or by entries added. Bytes surface a cache of a few large entries — 61 base64 thumbnails — that an entry ranking buries under counters with thousands of tiny ones.',
         ),
+      include_objects: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          'Also list same-id objects (any class, not only collections) whose outgoing edge count or retained size grew at every rung: record buffers on plugin objects, providers, linked-list holders (with the `next`-chain length). Up to 40 rows by retained growth, each with holder, class, per-rung edges and retained size, and node id. Loads each rung FULLY (dominator pass, about twice the time of the default light load), still one graph at a time.',
+        ),
+      object_min_edge_growth: z
+        .number()
+        .optional()
+        .default(20)
+        .describe(
+          'include_objects: outgoing-edge growth that qualifies (default 20).',
+        ),
+      object_min_retained_kb: z
+        .number()
+        .optional()
+        .default(50)
+        .describe(
+          'include_objects: retained growth in KB that qualifies (default 50).',
+        ),
     },
     async ({
       run_dir,
@@ -503,6 +528,9 @@ export function registerCollectionDiff(server: McpServer): void {
       monotonic_only,
       max_file_size_mb,
       rank_by,
+      include_objects,
+      object_min_edge_growth,
+      object_min_retained_kb,
     }) => {
       try {
         const {paths: resolved, cyclesPerRung} = resolveRunOrPaths({
@@ -522,6 +550,12 @@ export function registerCollectionDiff(server: McpServer): void {
         }
         const labels: string[] = [];
         const perRung: Map<string, CollectionStat>[] = [];
+        const tracker = include_objects ? new ObjectGrowthTracker() : null;
+        const objectT = {
+          minEdges: object_min_edge_growth,
+          minRetained: object_min_retained_kb * 1024,
+        };
+        let objectLines: string[] = [];
         for (const p of resolved) {
           let local: string;
           let fetchedFrom: string | null = null;
@@ -547,12 +581,30 @@ export function registerCollectionDiff(server: McpServer): void {
               `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${cap} MB per-file safety limit. Raise it with max_file_size_mb: ${Math.ceil(sizeMB + 100)}.`,
             );
           }
-          const snapshot = await memlabUtils.getSnapshotFromFile(local, {
-            buildNodeIdIndex: true,
-            verbose: false,
-          });
+          const snapshot =
+            tracker != null
+              ? await getFullHeapFromFile(local)
+              : await memlabUtils.getSnapshotFromFile(local, {
+                  buildNodeIdIndex: true,
+                  verbose: false,
+                });
           labels.push(fetchedFrom ?? p.replace(/^.*\//, ''));
           perRung.push(censusCollections(snapshot));
+          if (tracker != null) {
+            tracker.addRung(snapshot);
+            if (perRung.length === resolved.length) {
+              const {rows, total, mismatchShare} = tracker.finish(
+                snapshot,
+                objectT,
+              );
+              objectLines = formatObjectGrowth(
+                rows,
+                total,
+                objectT,
+                mismatchShare,
+              );
+            }
+          }
         }
 
         reconcileModuleKeys(perRung);
@@ -570,6 +622,7 @@ export function registerCollectionDiff(server: McpServer): void {
             `No collection grew by ${formatNumber(min_growth)} or more entries across this ladder.`,
             '',
             '_That is a real negative for unbounded-collection growth specifically — it does not cover detached DOM, listener records, string accumulation or retained-size growth with a flat entry count. Lower `min_growth` to see smaller movers._',
+            ...objectLines,
           );
           return toolResult(lines.join('\n'), pathsHeader(labels));
         }
@@ -651,6 +704,7 @@ export function registerCollectionDiff(server: McpServer): void {
           '',
           '_Instances is the count of DISTINCT collections sharing a signature. When instances grow but the largest single collection does not, the OWNERS are accumulating, not the collection — a different fix (stop minting owners) from bounding one container._',
           '_Signatures are structural, not identities: two unrelated collections bound to the same-named field of the same-named class share a row. The `Instances` column is what exposes that._',
+          ...objectLines,
         );
         return toolResult(lines.join('\n'), pathsHeader(labels));
       } catch (error) {
