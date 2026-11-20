@@ -30,6 +30,7 @@ import {
   errorResult,
   toolResult,
   boundedDominatorRetainedSize,
+  heldByLabel,
 } from '../utils.js';
 import memlabCore from '@memlab/core';
 import type {ModuleProvenance} from '../dev-modules.js';
@@ -1063,8 +1064,18 @@ export function registerDetachedDom(server: McpServer): void {
             if (n === 0) return stats.ownerlessCount > 0 ? 'none' : '-';
             return stats.ownerlessCount > 0 ? `${shown} (+unowned)` : shown;
           };
+          // A dominator row names the owner's CLASS (`Array ×21`), which is
+          // the stable key across captures but not something to grep for; the
+          // edge that holds the owner is (`Context.EVENT_LISTENERS`).
+          const heldByOf = (stats: GroupStats): string => {
+            const first = stats.ownerIds.values().next();
+            if (first.done === true) return '-';
+            const owner = snapshot.getNodeById(first.value);
+            return owner == null ? '-' : heldByLabel(owner, 40);
+          };
           const headers = [
             groupLabel,
+            ...(isDominatorMode ? ['Held by'] : []),
             'Count',
             ...(baselineCounts != null ? ['At baseline', 'Δ since'] : []),
             ...(showDevOnly ? ['Dev-only'] : []),
@@ -1076,7 +1087,9 @@ export function registerDetachedDom(server: McpServer): void {
           ];
           const rightCols = new Set(
             headers.flatMap((h, i) =>
-              i > 0 && h !== 'Owner is' && h !== 'Example ID' ? [i] : [],
+              i > 0 && h !== 'Owner is' && h !== 'Example ID' && h !== 'Held by'
+                ? [i]
+                : [],
             ),
           );
           const labelShown = new Set<string>();
@@ -1096,6 +1109,7 @@ export function registerDetachedDom(server: McpServer): void {
             const shown = key.length > 60 ? key.slice(0, 57) + '...' : key;
             return [
               `${shown}${owners}`,
+              ...(isDominatorMode ? [heldByOf(stats)] : []),
               formatNumber(stats.count),
               ...(baselineCounts != null
                 ? (() => {
