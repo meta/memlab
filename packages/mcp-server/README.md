@@ -324,7 +324,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_realm_summary` | Page + worker snapshots side by side: app / bundle / code per realm, with shared Wasm modules and SharedArrayBuffers counted once. |
 | `memlab_co_holders` | Clusters of Maps/Sets/Arrays holding the same objects, with bytes freed by cutting one holder vs all of them. |
 | `memlab_realm_duplication` | Modules loaded in more than one realm (page + workers), with state bytes per realm and the duplicated total. |
-| `memlab_quick_diagnosis` | One call for summary + biggest objects + class histogram + duplicated strings. |
+| `memlab_quick_diagnosis` | One call for summary + biggest objects + class histogram + duplicated strings + string families (≥1 MB). |
 | `memlab_snapshot_summary` | Node/edge counts, totals and the standard statistics split (V8 heap: code, strings, JS arrays, system; native: typed arrays), including native memory with no node (`extra_native_bytes`). |
 | `memlab_class_histogram` | Counts and sizes per class; `name_pattern` answers "is class X present?" in one row. |
 | `memlab_largest_objects` | The single biggest retainers, ranked. |
@@ -468,7 +468,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_string_prefix_census` | Strings by PREFIX (`blob:`, `data:image/`, a key scheme) on every rung, from the sidecar index — seconds, not a full-graph walk per rung. |
 | `memlab_intern_opportunities` | What an intern pool would actually reclaim, grouped by property x parent shape. Start here for an interning decision. |
 | `memlab_duplicated_strings` | The raw per-value duplication table, plus the largest values regrouped by the object shape holding them: several duplicated fields of one shape are one object copied many times. |
-| `memlab_string_patterns` | Group strings by prefix to find families (URLs, ids, payloads). |
+| `memlab_string_patterns` | Group strings by prefix to find families (URLs, ids, payloads); `normalize:true` masks digits and names the top holders. |
 | `memlab_sliced_strings` | Substrings pinning huge parents. |
 | `memlab_duplicate_objects` | The same question for objects rather than strings. |
 | `memlab_search_strings` | Find a string value in the heap. |

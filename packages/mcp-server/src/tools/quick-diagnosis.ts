@@ -37,6 +37,7 @@ import {
 } from '../utils.js';
 import {splitClassKey} from './sequence-analysis.js';
 import {nodeServerFlagLines} from './node-server.js';
+import {formatStringFamilies, stringFamilyCensus} from '../string-families.js';
 
 export function registerQuickDiagnosis(server: McpServer): void {
   server.tool(
@@ -325,6 +326,9 @@ export function registerQuickDiagnosis(server: McpServer): void {
             '',
           );
         }
+
+        // --- Section 4b: String families (normalised prefix, ≥1 MB) ---
+        lines.push(...formatStringFamilies(stringFamilyCensus(snapshot)));
 
         // --- Section 5: String-to-Object Ratio Flag (Feedback #11) ---
         const stringCount = typeStats.get('string')?.count ?? 0;

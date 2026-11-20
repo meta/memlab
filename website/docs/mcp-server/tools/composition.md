@@ -30,7 +30,7 @@ in a session. Try them in the order listed.
 | `memlab_realm_summary` | Page + worker snapshots side by side: app / bundle / code per realm, with shared Wasm modules and SharedArrayBuffers counted once. |
 | `memlab_co_holders` | Clusters of Maps/Sets/Arrays holding the same objects, with bytes freed by cutting one holder vs all of them. |
 | `memlab_realm_duplication` | Modules loaded in more than one realm (page + workers), with state bytes per realm and the duplicated total. |
-| `memlab_quick_diagnosis` | One call for summary + biggest objects + class histogram + duplicated strings. |
+| `memlab_quick_diagnosis` | One call for summary + biggest objects + class histogram + duplicated strings + string families (≥1 MB). |
 | `memlab_snapshot_summary` | Node/edge counts, totals and the standard statistics split (V8 heap: code, strings, JS arrays, system; native: typed arrays), including native memory with no node (`extra_native_bytes`). |
 | `memlab_class_histogram` | Counts and sizes per class; `name_pattern` answers "is class X present?" in one row. |
 | `memlab_largest_objects` | The single biggest retainers, ranked. |

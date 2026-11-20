@@ -14,6 +14,11 @@ import {sizeInput, withSizeHint} from '../byte-size.js';
 import {getSnapshot, isLightSnapshot} from '../heap-state.js';
 import {withAnonymizedBanner} from '../anonymized-snapshot.js';
 import {
+  FAMILY_PREFIX_LEN,
+  formatStringFamilies,
+  stringFamilyCensus,
+} from '../string-families.js';
+import {
   formatBytes,
   formatNumber,
   markdownTable,
@@ -29,7 +34,7 @@ function extractPrefix(value: string, prefixLen: number): string {
 export function registerStringPatterns(server: McpServer): void {
   server.tool(
     'memlab_string_patterns',
-    'Group strings by common prefix and show aggregate counts and sizes. Instead of seeing 20 individual histogram entries for CSV strings that all start with the same header, see them grouped: "Strings matching prefix: 20 instances, 250 MB total." Useful for identifying families of related strings like API responses, repeated log messages, or duplicated data.',
+    'Group strings by common prefix and show aggregate counts and sizes. Instead of seeing 20 individual histogram entries for CSV strings that all start with the same header, see them grouped: "Strings matching prefix: 20 instances, 250 MB total." Useful for identifying families of related strings like API responses, repeated log messages, or duplicated data. Pass `normalize:true` for FAMILIES (digits masked, `data:` URLs by mime) of at least 1 MB with their top holder edges — e.g. 240 per-record `{"query_id":…` blobs as one 7 MB row.',
     {
       prefix_length: z
         .number()
@@ -55,11 +60,34 @@ export function registerStringPatterns(server: McpServer): void {
         .optional()
         .default(20)
         .describe('Maximum number of groups to return (default 20)'),
+      normalize: z
+        .boolean()
+        .optional()
+        .describe(
+          `Group into FAMILIES instead: the first ${FAMILY_PREFIX_LEN} chars with digit runs masked to #, \`data:\` URLs by mime, script source left out. Shows families of at least min_total_size (default 1 MB, or 0.5% of the heap if smaller) with count, flat-string self bytes (no cons/sliced double count), the largest member and the top 2 holder edges. prefix_length and min_count are ignored. The same section memlab_quick_diagnosis prints.`,
+        ),
     },
-    async ({prefix_length, min_count, min_total_size, limit}) => {
+    async ({prefix_length, min_count, min_total_size, limit, normalize}) => {
       try {
         const snapshot = getSnapshot({allowLight: true});
         const light = isLightSnapshot();
+        if (normalize === true) {
+          const census = stringFamilyCensus(snapshot, {
+            minBytes: min_total_size,
+            minHeapShare: min_total_size != null ? 0 : undefined,
+            limit,
+            holders: !light,
+          });
+          const lines = formatStringFamilies(census);
+          return toolResult(
+            withAnonymizedBanner(
+              snapshot,
+              lines.length > 0
+                ? lines.join('\n')
+                : `No string family reaches ${formatBytes(census.threshold)}.`,
+            ),
+          );
+        }
 
         const groups = new Map<
           string,

@@ -124,7 +124,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_quick_diagnosis',
-        'One call for summary + biggest objects + class histogram + duplicated strings.',
+        'One call for summary + biggest objects + class histogram + duplicated strings + string families (≥1 MB).',
       ],
       [
         'memlab_snapshot_summary',
@@ -598,7 +598,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_string_patterns',
-        'Group strings by prefix to find families (URLs, ids, payloads).',
+        'Group strings by prefix to find families (URLs, ids, payloads); `normalize:true` masks digits and names the top holders.',
       ],
       ['memlab_sliced_strings', 'Substrings pinning huge parents.'],
       [
