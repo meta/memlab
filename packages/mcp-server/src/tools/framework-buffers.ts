@@ -232,7 +232,16 @@ function arrayElements(arr: IHeapNode): IHeapNode[] {
   return out;
 }
 
-const NOOP_NAME = /^(emptyFunction|noop|nop|empty|_?noop\w*|\w*Noop)$/;
+/**
+ * Whether a function name is a shared no-op (`emptyFunction`, `noop`).
+ *
+ * A match turns the tombstone note from "if it is a no-op" into "cancelled in
+ * place", so only names that mean nothing else count: not `empty`, not
+ * `noopOnServer`, not `logNoop`, which may well do work.
+ */
+export function isNoopName(name: string): boolean {
+  return /^(emptyFunction|_?noop|nop)$/i.test(name);
+}
 
 /**
  * A listener array whose entries are wrappers that were cancelled in place.
@@ -436,7 +445,7 @@ function probeBuffers(
   for (const arr of longArrays) {
     const t = tombstonedListeners(arr);
     if (t == null) continue;
-    const noop = NOOP_NAME.test(t.fn);
+    const noop = isNoopName(t.fn);
     rows.push({
       buffer: 'listener array of cancelled wrappers',
       // The module path finds the scope; the array's own edge
