@@ -1063,6 +1063,21 @@ function residentLine(currentHandle: string): string {
     .join(', ')}.`;
 }
 
+/**
+ * With two or more captures resident, the first growth question is "which
+ * collections grew", and `memlab_collection_diff` answers it without being told
+ * any names. In an A/B study on 9 real snapshots it was called in 0 of 20
+ * with-memlab runs; the agents diffed by class instead, and missed growing
+ * module Maps and trace buffers that it lists in one 30-second call on the
+ * same ladder.
+ */
+function collectionDiffHint(): string | null {
+  const all = listSnapshots();
+  if (all.length < 2) return null;
+  const paths = JSON.stringify(all.map(m => m.filePath));
+  return `With ${all.length} snapshots resident, start growth discovery with \`memlab_collection_diff({paths: ${paths}})\` (order them oldest first): every Map/Set/Array that grew, named by owner.`;
+}
+
 /** See `menuEmitted`; same reasoning, for the load-cost calibration note. */
 let loadCostNoteEmitted = false;
 
@@ -1084,7 +1099,7 @@ function nextStepMenu(): string[] {
     '- _Anything obviously wrong?_ → `memlab_quick_diagnosis`, then `memlab_auto_investigate` for the deep dive',
     '- _Is X a leak?_ → `memlab_hypothesis`',
     '- _Who owns the growth?_ → `memlab_explain_delta` (needs a baseline loaded with `keep_previous:true`)',
-    '- _What grew across the ladder?_ → `memlab_leak_report` / `memlab_sequence_analysis`',
+    '- _What grew across the ladder?_ → `memlab_collection_diff` first (every Map/Set/Array that grew, named by owner, no names needed), then `memlab_leak_report` / `memlab_sequence_analysis`',
     // The five questions below are the ones people hand-write evals for. Each
     // has had a dedicated tool for some time and each was still being answered
     // by hand in a measured session, because nothing in the analysis path ever
@@ -1828,6 +1843,8 @@ export function registerLoadSnapshot(server: McpServer): void {
         lines.push(
           `${residentLine(meta.handle)}${listSnapshots().length > 1 ? ' Switch with memlab_snapshots.' : ''}`,
         );
+        const growthHint = collectionDiffHint();
+        if (growthHint != null) lines.push(growthHint);
 
         progress.phase(6, PHASES, 'running quick diagnosis');
         const {warnings, standing, standingKinds} = quickDiagnosis(
