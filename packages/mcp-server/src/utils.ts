@@ -1368,10 +1368,12 @@ export function heldByLabel(node: IHeapNode, maxLen = 48): string {
   for (const edge of node.referrers) {
     if (edge.type === 'weak' || edge.type === 'shortcut') continue;
     const from = edge.fromNode;
+    // Snapshot parsers can leave a node's name unset; never let that throw.
+    const fromName = from.name ?? '';
     const name = String(edge.name_or_index);
     let label: string | null = null;
     if (edge.type === 'property' && !/^\d+$/.test(name)) {
-      label = `${from.name}.${name}`;
+      label = `${fromName || '(anonymous)'}.${name}`;
     } else if (edge.type === 'context') {
       label = `closure var ${name}`;
     } else if (
@@ -1379,10 +1381,10 @@ export function heldByLabel(node: IHeapNode, maxLen = 48): string {
       name === 'context' &&
       from.type === 'closure'
     ) {
-      label = `closure ${from.name || '(anonymous)'}`;
+      label = `closure ${fromName || '(anonymous)'}`;
     } else if (edge.type === 'internal' && name === 'source') {
       // A script's source text: the file name is what the reader can act on.
-      label = `source of ${from.name.split(/[\\/]/).pop() || 'script'}`;
+      label = `source of ${fromName.split(/[\\/]/).pop() || 'script'}`;
     }
     if (label == null) continue;
     if (dom != null && from.id === dom.id) return cut(label, maxLen);
