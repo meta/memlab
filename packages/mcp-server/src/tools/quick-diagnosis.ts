@@ -33,20 +33,21 @@ import {
   envLabelOf,
   getContentPreview,
   sanitizeForTable,
+  heldByLabel,
 } from '../utils.js';
 import {splitClassKey} from './sequence-analysis.js';
 
 export function registerQuickDiagnosis(server: McpServer): void {
   server.tool(
     'memlab_quick_diagnosis',
-    'Combined diagnosis tool that returns snapshot summary, top objects by retained size, class histogram, and duplicated strings in a single call. Saves 3-4 round trips and reduces token overhead from repeated headers. Use this as the first analysis tool after memlab_load_snapshot for an immediate comprehensive overview. ' +
+    'Combined diagnosis tool that returns snapshot summary, top objects by retained size (with what holds each one), class histogram, and duplicated strings in a single call. Saves 3-4 round trips and reduces token overhead from repeated headers. Use this as the first analysis tool after memlab_load_snapshot for an immediate comprehensive overview. ' +
       'By DEFAULT every section runs in a single O(N) pass (the class histogram reports retained size as a lower/upper-bound range rather than the exact dominator-deduped value), so it is safe on large heaps. Pass `exact_retained_size:true` ONLY when the user explicitly wants exact per-class retained sizes — that adds a per-class dominator walk that can stall or OOM the server on snapshots with millions of nodes.',
     {
       top_objects: z
         .number()
         .optional()
-        .default(10)
-        .describe('Number of largest objects to include (default 10)'),
+        .default(20)
+        .describe('Number of largest objects to include (default 20)'),
       top_classes: z
         .number()
         .optional()
@@ -126,13 +127,21 @@ export function registerQuickDiagnosis(server: McpServer): void {
           top_objects,
         );
 
-        const objHeaders = ['ID', 'Name', 'Type', 'Retained', 'Preview'];
+        const objHeaders = [
+          'ID',
+          'Name',
+          'Type',
+          'Retained',
+          'Held by',
+          'Preview',
+        ];
         const objRightCols = new Set([3]);
         const objRows = largest.map(n => [
           `@${n.id}`,
           truncateNodeName(n.name, n.type, n.self_size, 50),
           n.type,
           formatBytes(n.retainedSize),
+          heldByLabel(n, 40),
           getContentPreview(n, 40, 3),
         ]);
         lines.push(

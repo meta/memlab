@@ -24,12 +24,13 @@ import {
   markdownTable,
   errorResult,
   getContentPreview,
+  heldByLabel,
 } from '../utils.js';
 
 export function registerLargestObjects(server: McpServer): void {
   server.tool(
     'memlab_largest_objects',
-    'Find the top N objects by retained size in the loaded heap snapshot. Filters out internal/meta objects. Use node_type to filter to a specific type (e.g., "object", "closure") or exclude_types to remove noisy types (e.g., "string"). Shows a content preview for each node. By default it collapses multiple views of the SAME dominator subtree (e.g. Client → Request → … → Map all at one retained size on a single in-flight request) into one representative row so the list is not dominated by ~20 duplicate rows; pass collapse_subtrees:false to see every node.',
+    'Find the top N objects by retained size in the loaded heap snapshot. Filters out internal/meta objects. Use node_type to filter to a specific type (e.g., "object", "closure") or exclude_types to remove noisy types (e.g., "string"). Shows what holds each node (`Held by`: the edge from its dominator, e.g. `Object.modulesTimeMap`) and a content preview. By default it collapses multiple views of the SAME dominator subtree (e.g. Client → Request → … → Map all at one retained size on a single in-flight request) into one representative row so the list is not dominated by ~20 duplicate rows; pass collapse_subtrees:false to see every node.',
     {
       limit: z
         .number()
@@ -167,6 +168,7 @@ export function registerLargestObjects(server: McpServer): void {
           'Type',
           'Self Size',
           'Retained Size',
+          'Held by',
           'Preview',
         ];
         const rightCols = new Set([3, 4]);
@@ -181,6 +183,7 @@ export function registerLargestObjects(server: McpServer): void {
             n.type,
             formatBytes(n.self_size),
             formatBytes(n.retainedSize),
+            heldByLabel(n),
             mergeNote + getContentPreview(n, 60, 4),
           ];
         });
@@ -222,6 +225,7 @@ export function registerLargestObjects(server: McpServer): void {
           {
             objects: groups.map(g => ({
               ...nodeRef(g.node),
+              held_by: heldByLabel(g.node, 200),
               merged_views: g.mergedCount,
             })),
             pagination: {

@@ -1345,6 +1345,57 @@ export function nearestNamedOwner(
 }
 
 /**
+ * What holds a row of a top-by-retained-size table, as a short greppable label.
+ *
+ * Those rows used to show only the object's own property names, so the module
+ * timing map read as `Object {CometMetaManager.react, …}`: the node was on
+ * screen, but nothing said it was `modulesTimeMap`.
+ *
+ * - The edge from the node's immediate dominator keeps the retained bytes
+ *   alive, so it wins: `Owner.prop`, or `closure var x` for a variable
+ *   captured in a closure.
+ * - A node with no single owner (dominated by the root) names its first strong
+ *   holder and counts the others, e.g. `closure var interaction (+4)`; a
+ *   closure scope names a closure that shares it (`closure log (+1)`), and a
+ *   script's source string names its file (`source of server.js`).
+ * - Otherwise, the nearest named owner a few hops up, or `-`.
+ */
+export function heldByLabel(node: IHeapNode, maxLen = 48): string {
+  const dom = node.dominatorNode;
+  const cut = (l: string, room: number) =>
+    l.length > room ? l.slice(0, room - 1) + '…' : l;
+  const labels: string[] = [];
+  for (const edge of node.referrers) {
+    if (edge.type === 'weak' || edge.type === 'shortcut') continue;
+    const from = edge.fromNode;
+    const name = String(edge.name_or_index);
+    let label: string | null = null;
+    if (edge.type === 'property' && !/^\d+$/.test(name)) {
+      label = `${from.name}.${name}`;
+    } else if (edge.type === 'context') {
+      label = `closure var ${name}`;
+    } else if (
+      edge.type === 'internal' &&
+      name === 'context' &&
+      from.type === 'closure'
+    ) {
+      label = `closure ${from.name || '(anonymous)'}`;
+    } else if (edge.type === 'internal' && name === 'source') {
+      // A script's source text: the file name is what the reader can act on.
+      label = `source of ${from.name.split(/[\\/]/).pop() || 'script'}`;
+    }
+    if (label == null) continue;
+    if (dom != null && from.id === dom.id) return cut(label, maxLen);
+    if (!labels.includes(label)) labels.push(label);
+  }
+  if (labels.length > 0) {
+    const more = labels.length > 1 ? ` (+${labels.length - 1})` : '';
+    return cut(labels[0], maxLen - more.length) + more;
+  }
+  return cut(nearestNamedOwner(node, {maxHops: 4})?.label ?? '-', maxLen);
+}
+
+/**
  * V8 emits a WeakMap entry as one synthetic edge on the backing table:
  *
  *   `26 / part of key (Foo @644221) -> value (Bar @644219) pair in WeakMap (table @3212981)`
