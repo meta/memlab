@@ -23,6 +23,7 @@ import {
   formatNumber,
   markdownTable,
   toolResult,
+  heldByLabel,
 } from '../utils.js';
 
 interface BufferRow {
@@ -211,6 +212,73 @@ function wideTableNote(table: IHeapNode, props: number, base: string): string {
   );
 }
 
+/** Element targets of an array, from the node or its `elements` store. */
+function arrayElements(arr: IHeapNode): IHeapNode[] {
+  const out: IHeapNode[] = [];
+  let backing: IHeapNode | null = null;
+  for (const e of arr.references) {
+    if (e.type === 'element') out.push(e.toNode);
+    else if (String(e.name_or_index) === 'elements') backing = e.toNode;
+  }
+  if (backing != null) {
+    for (const e of backing.references) {
+      if (e.type === 'element') out.push(e.toNode);
+    }
+  }
+  return out;
+}
+
+const NOOP_NAME = /^(emptyFunction|noop|nop|empty|_?noop\w*|\w*Noop)$/;
+
+/**
+ * A listener array whose entries are wrappers that were cancelled in place.
+ *
+ * A common remover does not splice its wrapper out of the array: it swaps the
+ * wrapped function for a shared no-op (`localFunc = emptyFunction`), so every
+ * register/unregister cycle leaves a permanent entry. Comet's
+ * `EVENT_LISTENERS.beforeunload` held 4,418 such wrappers of 4,443. Each one
+ * is a closure, so the signature is: most of the array's closures capture the
+ * SAME function object in their scope.
+ */
+function tombstonedListeners(
+  arr: IHeapNode,
+): {entries: number; dead: number; fn: string; bytes: number} | null {
+  const elems = arrayElements(arr);
+  if (elems.length < 100) return null;
+  // Bail out early on arrays that are not arrays of functions.
+  if (elems.slice(0, 20).filter(n => n.type === 'closure').length < 10) {
+    return null;
+  }
+  const byFn = new Map<number, {n: number; name: string; bytes: number}>();
+  let closures = 0;
+  for (const el of elems) {
+    if (el.type !== 'closure') continue;
+    closures++;
+    const ctx = el.getReferenceNode('context');
+    if (ctx == null) continue;
+    const seen = new Set<number>();
+    for (const e of ctx.references) {
+      if (e.type !== 'context' || e.toNode.type !== 'closure') continue;
+      const fn = e.toNode;
+      if (seen.has(fn.id)) continue;
+      seen.add(fn.id);
+      const g = byFn.get(fn.id) ?? {n: 0, name: fn.name, bytes: 0};
+      g.n++;
+      g.bytes += el.retainedSize;
+      byFn.set(fn.id, g);
+    }
+  }
+  let best: {n: number; name: string; bytes: number} | null = null;
+  for (const g of byFn.values()) if (best == null || g.n > best.n) best = g;
+  if (best == null || best.n < 100 || best.n < closures * 0.5) return null;
+  return {
+    entries: elems.length,
+    dead: best.n,
+    fn: best.name === '' ? '(anonymous)' : best.name,
+    bytes: best.bytes,
+  };
+}
+
 /**
  * Buffers that recur across apps: generic ones found by name or shape, plus
  * the app-specific probes. Each probe is minification-safe (module records,
@@ -228,6 +296,7 @@ function probeBuffers(
   for (const p of probes) if (p.property != null) byProperty.set(p.property, p);
   const propertyHits: Array<{probe: BufferProbe; node: IHeapNode}> = [];
   const giant: IHeapNode[] = [];
+  const longArrays: IHeapNode[] = [];
   let timingRecords = 0;
   let timingBytes = 0;
   let resourceRecords = 0;
@@ -238,6 +307,7 @@ function probeBuffers(
   snapshot.nodes.forEach((n: IHeapNode) => {
     if (/^(Window|DedicatedWorkerGlobalScope) /.test(n.name)) globals.push(n);
     if (n.type === 'object' && n.edge_count > 5000) giant.push(n);
+    if (n.name === 'Array' && n.edge_count >= 100) longArrays.push(n);
     for (const e of n.references) {
       if (e.type !== 'property') continue;
       const name = String(e.name_or_index);
@@ -359,6 +429,22 @@ function probeBuffers(
         : 'pending timers; see memlab_timers for what they capture',
     });
   }
+  for (const arr of longArrays) {
+    const t = tombstonedListeners(arr);
+    if (t == null) continue;
+    const noop = NOOP_NAME.test(t.fn);
+    rows.push({
+      buffer: 'listener array of cancelled wrappers',
+      // The module path finds the scope; the array's own edge
+      // (`Object.beforeunload`) says which event it is.
+      where: `${labeler.labelOf(arr)} (${heldByLabel(arr, 40)})`,
+      entries: t.entries,
+      bytes: t.bytes,
+      note: noop
+        ? `${t.dead.toLocaleString('en-US')} of ${t.entries.toLocaleString('en-US')} entries are wrappers around \`${t.fn}\`: cancelled in place and never spliced out, so the array grows with every register/unregister`
+        : `${t.dead.toLocaleString('en-US')} of ${t.entries.toLocaleString('en-US')} entries wrap the same function \`${t.fn}\`; if it is a no-op, these are cancelled entries left in place`,
+    });
+  }
   const registryIds = moduleRegistryIds(snapshot);
   giant
     .map(g => {
@@ -395,7 +481,7 @@ function probeBuffers(
 export function registerFrameworkBuffers(server: McpServer): void {
   server.tool(
     'memlab_framework_buffers',
-    'Size the framework buffers that recur in every hunt on the same stack, in ONE call, minification-safe. Generic probes: in-memory `logs` arrays, module timing records, a lazy-loader resource registry, the React Scheduler task queue, module registry tables and objects with more than 5,000 own properties. ' +
+    'Size the framework buffers that recur in every hunt on the same stack, in ONE call, minification-safe. Generic probes: in-memory `logs` arrays, module timing records, a lazy-loader resource registry, the React Scheduler task queue (with its cancelled tasks), listener arrays whose entries were cancelled in place (wrappers around one shared no-op), module registry tables and objects with more than 5,000 own properties (with keys that carry a per-call counter). ' +
       'App-specific buffers (a telemetry queue, an error history, a trace store) come from a probe file: JSON `{"probes": [{"buffer", "note", and one of "module" | "global" | "property"}]}`, read from `config_path` or the MEMLAB_FRAMEWORK_BUFFERS environment variable. ' +
       'Each row has its entry count, held bytes (the larger of what the container dominates and what its entries retain) and what it is for. A buffer that is absent is omitted rather than reported as zero.',
     {
