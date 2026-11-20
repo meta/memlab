@@ -354,7 +354,8 @@ export function entriesRetainedOf(
       if (e.value) targets.push(e.value);
     }
   } else if (node.name === 'Set' || node.name === 'WeakSet') {
-    targets.push(...enumerateSetElements(node));
+    // Not a spread: a Set of 100k+ elements overflows the call stack.
+    for (const el of enumerateSetElements(node)) targets.push(el);
   } else if (node.name === 'Array') {
     for (const edge of node.references) {
       if (edge.type === 'element' && edge.toNode.id > 3) {
