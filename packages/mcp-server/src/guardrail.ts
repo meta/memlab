@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import {
   snapshotParam,
   takesSnapshotParam,
+  snapshotRefConflict,
   withSnapshotRef,
 } from './snapshot-ref.js';
 import {trackSdkTool} from './toolsets.js';
@@ -29,7 +30,7 @@ import {
   activeElapsedMs,
   ScanTimeoutError,
 } from './analysis-budget.js';
-import {toolResult} from './utils.js';
+import {errorResult, toolResult} from './utils.js';
 import {markdownToJson, terseText} from './terse-output.js';
 import {getRegisteredTool, recordToolHandler} from './tool-registry.js';
 import {loadRunManifest} from './run-manifest.js';
@@ -537,6 +538,9 @@ export function installAnalysisGuardrail(server: McpServer): void {
             typeof (params as {snapshot?: unknown}).snapshot === 'string'
               ? (params as {snapshot: string}).snapshot
               : null;
+          const conflict =
+            ref != null ? snapshotRefConflict(params as object) : null;
+          if (conflict != null) return errorResult(new Error(conflict));
           const result = await runWithProgress(
             makeProgressReporter(extra, name.replace(/^memlab_/, '')),
             () =>

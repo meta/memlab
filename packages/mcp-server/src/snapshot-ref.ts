@@ -53,12 +53,39 @@ const SESSION_TOOLS = new Set([
   'memlab_start_job',
 ]);
 
+/**
+ * Single-snapshot tools that also have an OPTIONAL multi-snapshot mode: a
+ * `baseline` to compare against, or a ladder through `run_dir` / `paths`.
+ * Without those they read the active snapshot like any other tool, so they
+ * take `snapshot` too. `memlab_detached_dom` refused it in 8 of 18 calls in
+ * one study, each time right after a sibling tool had accepted it.
+ */
+const OPTIONAL_MULTI_SNAPSHOT_TOOLS = new Set(['memlab_detached_dom']);
+
+/** Keys that make one of those tools read other snapshots instead. */
+const LADDER_KEYS = ['run_dir', 'paths'];
+
 export function takesSnapshotParam(
   name: string,
   shape: Record<string, unknown>,
 ): boolean {
   if (SESSION_TOOLS.has(name)) return false;
+  if (OPTIONAL_MULTI_SNAPSHOT_TOOLS.has(name)) return true;
   return !MULTI_SNAPSHOT_KEYS.some(k => k in shape);
+}
+
+/**
+ * Why `snapshot` cannot apply to this call, or `null` when it can: a ladder
+ * reads its own rungs, so a `snapshot` next to `run_dir` / `paths` would be
+ * silently ignored.
+ */
+export function snapshotRefConflict(params: object): string | null {
+  const set = LADDER_KEYS.filter(k => {
+    const v = (params as Record<string, unknown>)[k];
+    return v != null && v !== '' && !(Array.isArray(v) && v.length === 0);
+  });
+  if (set.length === 0) return null;
+  return `\`snapshot\` picks the one snapshot this call reads, and \`${set.join('` / `')}\` makes it read a ladder instead. Pass one or the other.`;
 }
 
 export function snapshotParam() {

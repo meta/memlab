@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import memlabCore from '@memlab/core';
 import {z} from 'zod';
+import {fromResultParam, resolveSavedNodeIds} from '../result-handles.js';
 import {getSnapshot, getSnapshotMetadata} from '../heap-state.js';
 import {
   devRouteNote,
@@ -194,6 +195,7 @@ export function registerTraceAll(server: McpServer): void {
         .array(z.number())
         .optional()
         .describe('Trace exactly these node ids.'),
+      from_result: fromResultParam(),
       framework_filter: z
         .boolean()
         .optional()
@@ -245,7 +247,8 @@ export function registerTraceAll(server: McpServer): void {
     async ({
       class_name,
       shape,
-      node_ids,
+      node_ids: listedIds,
+      from_result,
       framework_filter,
       limit,
       exact_bytes,
@@ -256,6 +259,13 @@ export function registerTraceAll(server: McpServer): void {
     }) => {
       try {
         const snapshot = getSnapshot();
+        if (from_result != null && listedIds != null && listedIds.length > 0) {
+          return errorResult(
+            new Error('Pass node_ids or from_result, not both.'),
+          );
+        }
+        const node_ids =
+          from_result != null ? resolveSavedNodeIds(from_result) : listedIds;
         const selectors = [
           class_name != null,
           shape != null && shape.length > 0,
@@ -264,7 +274,7 @@ export function registerTraceAll(server: McpServer): void {
         if (selectors !== 1) {
           return errorResult(
             new Error(
-              'Pass exactly one of class_name / shape / node_ids — combining them would make the reported population ambiguous.',
+              'Pass exactly one of class_name / shape / node_ids (or from_result) — combining them would make the reported population ambiguous.',
             ),
           );
         }

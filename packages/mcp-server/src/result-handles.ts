@@ -13,6 +13,7 @@ import {
   getSavedResult,
   listSavedResults,
 } from './heap-state.js';
+import {z} from 'zod';
 
 /**
  * Read a saved result (from `memlab_eval`'s `save_as` / `helpers.save`) as a
@@ -34,6 +35,16 @@ import {
  * Accepts the shapes a result realistically has: an array of numbers, an array
  * of `{id}` objects, or an object with an `ids`/`node_ids` array.
  */
+/** The `from_result` parameter: a saved id set in place of `node_ids`. */
+export function fromResultParam() {
+  return z
+    .string()
+    .optional()
+    .describe(
+      'Read the node ids from a result saved by memlab_eval ({save_as} / helpers.save) instead of listing them in `node_ids`.',
+    );
+}
+
 export function resolveSavedNodeIds(name: string): number[] {
   const currentHandle = getCurrentHandle();
   const saved = getSavedResult(name);

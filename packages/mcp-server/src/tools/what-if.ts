@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import memlabCore from '@memlab/core';
 import {z} from 'zod';
+import {fromResultParam, resolveSavedNodeIds} from '../result-handles.js';
 import {isContext} from '../context-analysis.js';
 import {getSnapshot, getSnapshotMetadata} from '../heap-state.js';
 import {
@@ -185,6 +186,7 @@ export function registerWhatIf(server: McpServer): void {
         .describe(
           'Explicit node ids to free (from any tool that reports ids).',
         ),
+      from_result: fromResultParam(),
       typename: z
         .string()
         .optional()
@@ -228,7 +230,8 @@ export function registerWhatIf(server: McpServer): void {
         ),
     },
     async ({
-      node_ids,
+      node_ids: listedIds,
+      from_result,
       class_name,
       typename,
       shape,
@@ -239,6 +242,13 @@ export function registerWhatIf(server: McpServer): void {
     }) => {
       try {
         const snapshot = getSnapshot();
+        if (from_result != null && listedIds != null && listedIds.length > 0) {
+          return errorResult(
+            new Error('Pass node_ids or from_result, not both.'),
+          );
+        }
+        const node_ids =
+          from_result != null ? resolveSavedNodeIds(from_result) : listedIds;
         const selectors = [
           node_ids != null && node_ids.length > 0,
           class_name != null,
@@ -249,7 +259,7 @@ export function registerWhatIf(server: McpServer): void {
         if (selectors === 0) {
           return errorResult(
             new Error(
-              'Pass node_ids, class_name, typename, shape or scope_of to select what to free.',
+              'Pass node_ids (or from_result), class_name, typename, shape or scope_of to select what to free.',
             ),
           );
         }
