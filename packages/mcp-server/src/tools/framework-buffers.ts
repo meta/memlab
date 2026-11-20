@@ -233,6 +233,8 @@ function probeBuffers(
   let resourceRecords = 0;
   let resourceBytes = 0;
   let schedulerTasks = 0;
+  let cancelledTasks = 0;
+  let cancelledBytes = 0;
   snapshot.nodes.forEach((n: IHeapNode) => {
     if (/^(Window|DedicatedWorkerGlobalScope) /.test(n.name)) globals.push(n);
     if (n.type === 'object' && n.edge_count > 5000) giant.push(n);
@@ -260,6 +262,14 @@ function probeBuffers(
       propTo(n, 'expirationTime') != null
     ) {
       schedulerTasks++;
+      // `unstable_cancelCallback` only nulls the callback; the task stays in
+      // its heap until it reaches the top. Any callback that is not a function
+      // is a cancelled task.
+      const cb = propTo(n, 'callback');
+      if (cb != null && cb.type !== 'closure') {
+        cancelledTasks++;
+        cancelledBytes += n.retainedSize;
+      }
     }
   });
 
@@ -335,12 +345,18 @@ function probeBuffers(
     });
   }
   if (schedulerTasks > 0) {
+    // A queue of mostly cancelled tasks is the finding, not its pending
+    // timers: Comet's timerQueue held 12,605 cancelled tasks of 13,207.
+    const mostlyCancelled =
+      cancelledTasks >= 100 && cancelledTasks >= schedulerTasks * 0.5;
     rows.push({
       buffer: 'scheduler task queue',
       where: 'React Scheduler task records',
       entries: schedulerTasks,
-      bytes: 0,
-      note: 'pending timers; see memlab_timers for what they capture',
+      bytes: mostlyCancelled ? cancelledBytes : 0,
+      note: mostlyCancelled
+        ? `${cancelledTasks.toLocaleString('en-US')} of ${schedulerTasks.toLocaleString('en-US')} are cancelled (callback null) and stay queued until they reach the top; Held counts those`
+        : 'pending timers; see memlab_timers for what they capture',
     });
   }
   const registryIds = moduleRegistryIds(snapshot);
