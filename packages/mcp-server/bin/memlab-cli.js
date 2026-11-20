@@ -66,7 +66,34 @@ function resolveServerPath() {
       return c;
     }
   }
-  return candidates[0];
+  // Nothing built yet: name the path this layout would build, so `doctor`
+  // points at the right place. Only the packaged layout keeps this script in
+  // bin/; anywhere else it is the install root.
+  return isPackagedLayout() ? candidates[0] : candidates[1];
+}
+
+function isPackagedLayout() {
+  return path.basename(HERE) === 'bin';
+}
+
+/**
+ * What to do when no server is built. `npm run build-pkg` only means something
+ * in the package checkout. In an install root, whatever installed the server
+ * builds it there, and leaves its build log next to this script.
+ */
+function missingServerFix() {
+  const set = 'or set MEMLAB_MCP_SERVER to a built dist/index.js.';
+  if (isPackagedLayout()) {
+    return `build the package (\`npm run build-pkg\`), ${set}`;
+  }
+  const logs = ['build-errors.log', 'probe.log']
+    .map(f => path.join(HERE, f))
+    .filter(f => fs.existsSync(f));
+  const why =
+    logs.length > 0
+      ? `the build into ${HERE} did not finish; see ${logs.join(' and ')}.`
+      : `nothing has built the server into ${HERE} yet.`;
+  return `${why} Rerun the installer that builds it there (for a plugin, reconnect the MCP server), ${set}`;
 }
 
 /**
@@ -362,8 +389,7 @@ async function doctor(serverPath, json) {
     console.log(lines.join('\n'));
   };
   if (!report.server_present) {
-    report.fix =
-      'build the package (`npm run build-pkg`), or set MEMLAB_MCP_SERVER to a built dist/index.js.';
+    report.fix = missingServerFix();
     print();
     return 1;
   }
