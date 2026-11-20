@@ -168,35 +168,39 @@ function entriesOf(node: IHeapNode): number {
  * a table with the counted keys, so keys are grouped by the separator before
  * the number and a group counts only when its numbers are DENSE: 12,537 keys
  * numbered up to 12,026 is a counter; 23,249 keys up to 2,046,346 is ids.
+ *
+ * Density is judged on the longest dense run from the smallest number up, not
+ * on the group's maximum: one stray `__mod__2046346` among 12,537 counted keys
+ * must not hide the counter. The run is the largest k such that the k
+ * smallest numbers all fit in 0..4k, and `count`/`highest` describe that run.
  */
 export function perCallKeys(
   table: IHeapNode,
   props: number,
 ): {count: number; example: string; highest: number} | null {
-  const bySep = new Map<
-    string,
-    {count: number; example: string; highest: number}
-  >();
+  const bySep = new Map<string, Array<{n: number; key: string}>>();
   for (const e of table.references) {
     if (e.type !== 'property') continue;
     const key = String(e.name_or_index);
     const m = /(__|[_:#.-])(\d+)$/.exec(key);
     if (m == null) continue;
-    const n = Number(m[2]);
-    const g = bySep.get(m[1]) ?? {count: 0, example: key, highest: -1};
-    g.count++;
-    if (n > g.highest) {
-      g.highest = n;
-      g.example = key;
-    }
-    bySep.set(m[1], g);
+    const keys = bySep.get(m[1]) ?? [];
+    keys.push({n: Number(m[2]), key});
+    bySep.set(m[1], keys);
   }
   let best: {count: number; example: string; highest: number} | null = null;
-  for (const g of bySep.values()) {
+  for (const keys of bySep.values()) {
+    keys.sort((a, b) => a.n - b.n);
+    let run = 0;
+    for (let k = 1; k <= keys.length; k++) {
+      if (keys[k - 1].n <= k * 4) run = k;
+    }
     // A handful of numbered keys is ordinary naming (`h1`, `step_2`).
-    if (g.count < 1000 && g.count < props * 0.2) continue;
-    if (g.highest > g.count * 4) continue;
-    if (best == null || g.count > best.count) best = g;
+    if (run === 0 || (run < 1000 && run < props * 0.2)) continue;
+    if (best == null || run > best.count) {
+      const last = keys[run - 1];
+      best = {count: run, example: last.key, highest: last.n};
+    }
   }
   return best;
 }
