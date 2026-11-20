@@ -35,6 +35,7 @@ import {
   collectDevRoots,
   computeReachableWithoutDevRoots,
 } from './dev-artifacts.js';
+import {renderGrowthAnchors} from './growth-anchors.js';
 
 interface OwnerStats {
   selfBytes: number;
@@ -171,7 +172,8 @@ export function registerExplainDelta(server: McpServer): void {
     'memlab_explain_delta',
     'Explain WHERE a heap grew between two loaded snapshots, attributed by dominator (who owns the new bytes) rather than by class (what the new bytes are). ' +
       '"Object grew by 99,418 instances" does not tell you what to fix; "the bytes hanging off CometStyleXSheet grew by 12 MB" does. Every node\'s SELF size is attributed to its immediate dominator\'s class and the two attributions are differenced, so the numbers partition the heap and add up — unlike a per-class sum of retained sizes, which double-counts nested objects and can exceed the heap. ' +
-      'V8 engine owners (compiled code, bytecode, feedback, code flushing) are summed in one line, and known measurement-artifact owners (CDP inspector, a11y caches, captured Error stacks) are flagged, so neither is read as an application regression. Both snapshots must be resident: load them with keep_previous:true.',
+      'V8 engine owners (compiled code, bytecode, feedback, code flushing) are summed in one line, and known measurement-artifact owners (CDP inspector, a11y caches, captured Error stacks) are flagged, so neither is read as an application regression. Both snapshots must be resident: load them with keep_previous:true. ' +
+      '`group_by: "anchor"` instead names the pre-existing INSTANCE each new object hangs from (its holder and path), for growth that a class row cannot place.',
     {
       baseline_handle: z
         .string()
@@ -206,8 +208,9 @@ export function registerExplainDelta(server: McpServer): void {
       limit: z
         .number()
         .optional()
-        .default(20)
-        .describe('Maximum owners to report per direction (default 20).'),
+        .describe(
+          'Maximum owners to report per direction (default 20). With group_by "anchor": rows in total (default and cap 25).',
+        ),
       min_delta_bytes: sizeInput()
         .optional()
         .default(65536)
@@ -237,6 +240,12 @@ export function registerExplainDelta(server: McpServer): void {
         .describe(
           'Count memory only a dev build holds (reachable solely through a dev root or dev edge: Fast Refresh, React `_debug*`, devtools). Default false: the owners and the headline delta are production-only, with the raw total beside it.',
         ),
+      group_by: z
+        .enum(['owner', 'anchor'])
+        .optional()
+        .describe(
+          'Default "owner": self size by immediate dominator CLASS. "anchor": take every object absent from the baseline (by node id; both snapshots must come from one page session), walk its dominator chain up to the nearest dominator that already existed in the baseline, and group by that anchor INSTANCE — one row per anchor with its @id, holder, shortest-path label, new-object count, new self and retained bytes, and top 3 new classes (at most 25 rows). Names WHERE growth hangs rather than what class it is.',
+        ),
     },
     async ({
       baseline_handle,
@@ -248,6 +257,7 @@ export function registerExplainDelta(server: McpServer): void {
       include_artifacts,
       include_engine,
       include_dev,
+      group_by,
     }) => {
       try {
         // `??` alone keeps an empty string, which then fails as "snapshot not
@@ -364,6 +374,23 @@ export function registerExplainDelta(server: McpServer): void {
           }
         }
 
+        if (group_by === 'anchor') {
+          return toolResult(
+            renderGrowthAnchors(
+              baselineSnapshot,
+              target,
+              {baseline: baselineRef, target: targetHandle},
+              {
+                limit: Math.min(limit ?? 25, 25),
+                minBytes: min_delta_bytes,
+                reached: include_dev ? null : productionReach(target),
+                includeEngine: include_engine,
+                includeArtifacts: include_artifacts,
+              },
+            ),
+          );
+        }
+
         const reachA = include_dev ? null : productionReach(baselineSnapshot);
         const reachB = include_dev ? null : productionReach(target);
         // Both or neither: a production-only side against a raw side would
@@ -427,11 +454,11 @@ export function registerExplainDelta(server: McpServer): void {
         const grew = usable
           .filter(r => r.delta > 0)
           .sort((x, y) => y.delta - x.delta)
-          .slice(0, limit);
+          .slice(0, limit ?? 20);
         const shrank = usable
           .filter(r => r.delta < 0)
           .sort((x, y) => x.delta - y.delta)
-          .slice(0, limit);
+          .slice(0, limit ?? 20);
 
         if (grew.length === 0 && shrank.length === 0) {
           lines.push(
