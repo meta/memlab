@@ -52,6 +52,7 @@ function node(
 
 const heap = fakeSnapshot([
   node(1, '(root)', 99999, {type: 'synthetic'}),
+  node(47, '(Strong root list)', 70000, {type: 'synthetic', self_size: 0}),
   node(5, 'Map', 3000),
   node(7, 'Map', 9000),
   node(9, 'MapIterator', 50000),
@@ -102,6 +103,15 @@ test('applies every filter and skips the synthetic roots', () => {
   ]);
 });
 
+test('lists the root categories only when synthetic nodes are asked for', () => {
+  expect(findObjects(heap, {}, 10).objects.map(o => o.type)).not.toContain(
+    'synthetic',
+  );
+  const roots = findObjects(heap, {nodeType: 'synthetic'}, 10);
+  expect(roots.matchCount).toBe(1);
+  expect(roots.objects.map(o => o.name)).toEqual(['(Strong root list)']);
+});
+
 test('keeps only the top matches, largest retained size first', () => {
   const result = findObjects(heap, {}, 3);
   expect(result.matchCount).toBe(6);
@@ -131,6 +141,9 @@ test(
     // the 3,000-entry probe retains its array and every string in it
     expect(sizes[0]).toBeGreaterThan(3000 * 16);
     expect(sizes[2]).toBeLessThan(sizes[1]);
+    // a query without a node type lists objects, not V8's root categories
+    const top = findObjects(snapshot, {}, 50);
+    expect(top.objects.filter(o => o.type === 'synthetic')).toEqual([]);
   },
   timeout,
 );
