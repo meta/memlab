@@ -155,6 +155,63 @@ function entriesOf(node: IHeapNode): number {
 }
 
 /**
+ * Keys of a wide table that end in a per-call counter (`…__4633`, `…_12026`).
+ *
+ * A table keyed once per module is a fixed cost paid at load. One keyed once per
+ * CALL grows for as long as the page runs, and the width alone does not tell
+ * the two apart: Comet's `modulesTimeMap` had 27,938 keys, 12,517 of them
+ * `__requireModule__<Module>__<n>` with n counting up to 12,026, and was
+ * reported as static load cost.
+ *
+ * Module ids embedded in keys end in digits too (`cr:2046346`), and can share
+ * a table with the counted keys, so keys are grouped by the separator before
+ * the number and a group counts only when its numbers are DENSE: 12,537 keys
+ * numbered up to 12,026 is a counter; 23,249 keys up to 2,046,346 is ids.
+ */
+export function perCallKeys(
+  table: IHeapNode,
+  props: number,
+): {count: number; example: string; highest: number} | null {
+  const bySep = new Map<
+    string,
+    {count: number; example: string; highest: number}
+  >();
+  for (const e of table.references) {
+    if (e.type !== 'property') continue;
+    const key = String(e.name_or_index);
+    const m = /(__|[_:#.-])(\d+)$/.exec(key);
+    if (m == null) continue;
+    const n = Number(m[2]);
+    const g = bySep.get(m[1]) ?? {count: 0, example: key, highest: -1};
+    g.count++;
+    if (n > g.highest) {
+      g.highest = n;
+      g.example = key;
+    }
+    bySep.set(m[1], g);
+  }
+  let best: {count: number; example: string; highest: number} | null = null;
+  for (const g of bySep.values()) {
+    // A handful of numbered keys is ordinary naming (`h1`, `step_2`).
+    if (g.count < 1000 && g.count < props * 0.2) continue;
+    if (g.highest > g.count * 4) continue;
+    if (best == null || g.count > best.count) best = g;
+  }
+  return best;
+}
+
+/** The note for a wide table, naming per-call keys when it has them. */
+function wideTableNote(table: IHeapNode, props: number, base: string): string {
+  const c = perCallKeys(table, props);
+  if (c == null) return base;
+  return (
+    `${c.count.toLocaleString('en-US')} of ${props.toLocaleString('en-US')} keys end in a per-call counter ` +
+    `(\`${c.example}\`, up to ${c.highest.toLocaleString('en-US')}): it grows with every call, ` +
+    'not once per module, so check what removes those keys'
+  );
+}
+
+/**
  * Buffers that recur across apps: generic ones found by name or shape, plus
  * the app-specific probes. Each probe is minification-safe (module records,
  * globals, shapes) and reports "not present" rather than guessing.
@@ -307,9 +364,13 @@ function probeBuffers(
         where: labeler.labelOf(g),
         entries: props,
         bytes: isRegistry ? registryTableBytes(g) : g.retainedSize,
-        note: isRegistry
-          ? 'one entry per module; module state is attributed by memlab_module_attribution'
-          : 'a prototype or table this wide is static cost paid at load',
+        note: wideTableNote(
+          g,
+          props,
+          isRegistry
+            ? 'one entry per module; module state is attributed by memlab_module_attribution'
+            : 'a prototype or table this wide is static cost paid at load',
+        ),
       });
     });
   return rows;
