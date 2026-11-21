@@ -339,6 +339,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_retainer_diff` | Did the population grow along the same retention path, or did a NEW owner appear? The question a count diff cannot answer. |
 | `memlab_identity_diff` | Same objects, or just the same count? Matches a population across two captures by CONTENT — churn and retention need different fixes. |
 | `memlab_next_measurement` | What the loaded snapshots cannot support, and which capture would fix it. Run it before writing a conclusion. |
+| `memlab_coverage_check` | Before the final report: the leads tools surfaced this session that the draft never names, largest first, and not_problems whose "bounded"/"expected" reason the lead contradicts. |
 | `memlab_app_config` | Read the feature flags the app was actually running with, out of the capture — "was the fix even enabled here?" without circular inference. |
 | `memlab_gate_fingerprint` | Which experiment ARM a capture is in, when the gate is server-side-scoped and `memlab_app_config` has no flag to read — reads the arm from a population the other arm does not build. |
 | `memlab_metric` | Record a measurement under a name and keep it ACROSS sessions — the only way a number measured today survives to be compared next week. |

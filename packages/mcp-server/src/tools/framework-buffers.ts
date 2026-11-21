@@ -13,6 +13,7 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import fs from 'fs';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
+import {flagKind, recordLead} from '../lead-registry.js';
 import {cachedPathLabeler, shapeFamilyOf} from '../heap-families.js';
 import {moduleRecords, moduleScopeVars} from '../module-registry.js';
 import {entriesRetainedOf} from './cache-analysis.js';
@@ -554,6 +555,17 @@ export function registerFrameworkBuffers(server: McpServer): void {
         const rows = probeBuffers(snapshot, probes).sort(
           (a, b) => b.bytes - a.bytes,
         );
+        for (const r of rows) {
+          recordLead(snapshot, {
+            label: r.where,
+            ids: r.id != null ? [r.id] : [],
+            bytes: r.bytes,
+            kind: flagKind(r.flag ?? ''),
+            why: `${r.buffer}: ${r.note}`,
+            source: 'framework_buffers',
+            ...(r.id == null ? {check: 'memlab_framework_buffers()'} : {}),
+          });
+        }
         const probeNote =
           probeError != null
             ? `⚠ Probe file not used (${probeError}); generic probes only.`

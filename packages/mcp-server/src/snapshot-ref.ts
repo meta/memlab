@@ -51,6 +51,7 @@ const SESSION_TOOLS = new Set([
   'memlab_job_status',
   'memlab_batch',
   'memlab_start_job',
+  'memlab_coverage_check',
 ]);
 
 /**

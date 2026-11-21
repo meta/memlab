@@ -24,6 +24,7 @@ import {
   toolResult,
 } from '../utils.js';
 import {countEntries} from './collection-trend.js';
+import {recordLead} from '../lead-registry.js';
 import {cachedModuleScopes} from './module-attribution.js';
 import {moduleOfScope} from '../module-registry.js';
 import {resolveRunOrPaths} from './ladder.js';
@@ -611,6 +612,16 @@ export function registerCollectionDiff(server: McpServer): void {
         let rows = buildRows(perRung, min_growth, rank_by);
         if (monotonic_only) rows = rows.filter(r => r.monotonic);
         const shown = rows.slice(0, limit);
+        for (const r of shown.slice(0, 15)) {
+          recordLead(null, {
+            label: r.moduleLabel ?? r.sig,
+            bytes: r.bytesDelta,
+            kind: 'growing',
+            why: `entries ${r.series.map(v => formatNumber(v)).join('→')}${r.monotonic ? ', up every rung' : ''}`,
+            source: 'collection_diff',
+            check: `memlab_collection_trend({locators:["${r.locator}"]})`,
+          });
+        }
         const perCycle = cycles != null && cycles > 0;
 
         const lines: string[] = [

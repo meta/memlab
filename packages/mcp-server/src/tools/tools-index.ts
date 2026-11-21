@@ -180,6 +180,10 @@ const GROUPS: Group[] = [
         'What the loaded snapshots cannot support, and which capture would fix it. Run it before writing a conclusion.',
       ],
       [
+        'memlab_coverage_check',
+        'Before the final report: the leads tools surfaced this session that the draft never names, largest first, and not_problems whose "bounded"/"expected" reason the lead contradicts.',
+      ],
+      [
         'memlab_app_config',
         'Read the feature flags the app was actually running with, out of the capture — "was the fix even enabled here?" without circular inference.',
       ],

@@ -12,6 +12,7 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {tickAnalysis} from '../analysis-budget.js';
 import {classifyArtifact, isEngineClass} from '../artifact-classes.js';
 import {cachedPathLabeler} from '../heap-families.js';
+import {recordLead} from '../lead-registry.js';
 import {
   formatBytes,
   formatNumber,
@@ -335,6 +336,19 @@ export function renderGrowthAnchors(
           40,
         );
   };
+  for (const r of rows) {
+    const node = nodeAt(r.anchor);
+    const atRoot = r.via != null || node.type === 'synthetic';
+    recordLead(target, {
+      ...(atRoot
+        ? {label: r.via ?? '(root)', path: r.via ?? ''}
+        : {node, label: holder(node)}),
+      bytes: r.self,
+      kind: 'growing',
+      why: `+${formatNumber(r.nodes)} objects new since ${labels.baseline} (${formatBytes(r.self)} self)`,
+      source: 'growth_anchors',
+    });
+  }
   const table = markdownTable(
     [
       'Anchor',

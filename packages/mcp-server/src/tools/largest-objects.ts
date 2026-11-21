@@ -14,6 +14,7 @@ import {z} from 'zod';
 import {nodeRef, structuredResult} from '../structured.js';
 import {offsetParam, openPageFooter} from '../pagination.js';
 import {getSnapshot} from '../heap-state.js';
+import {recordLead} from '../lead-registry.js';
 import {
   isNodeWorthInspecting,
   filterLargestObjects,
@@ -154,6 +155,14 @@ export function registerLargestObjects(server: McpServer): void {
           all = collapser.rows.slice(0, want + 1);
         }
         const groups = all.slice(start, want);
+        for (const {node} of groups) {
+          recordLead(snapshot, {
+            node,
+            kind: 'large',
+            why: 'top retained',
+            source: 'largest_objects',
+          });
+        }
         // A next page past MAX_COLLAPSE_OFFSET would be refused.
         const pastDepth =
           collapse_subtrees && all.length > want && want > MAX_COLLAPSE_OFFSET;

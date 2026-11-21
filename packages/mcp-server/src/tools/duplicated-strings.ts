@@ -14,6 +14,7 @@ import {z} from 'zod';
 import {pageInfo, structuredResult} from '../structured.js';
 import {offsetParam, pageLines, paginate} from '../pagination.js';
 import {getSnapshot} from '../heap-state.js';
+import {recordLead} from '../lead-registry.js';
 import {withAnonymizedBanner} from '../anonymized-snapshot.js';
 import {
   flattenString,
@@ -423,6 +424,17 @@ export function registerDuplicatedStrings(server: McpServer): void {
           0,
         );
 
+        for (const d of duplicated.slice(0, 10)) {
+          if (d.actionability === 'harness') continue;
+          recordLead(snapshot, {
+            label: `"${d.value.slice(0, 40)}"${d.field_context != null ? ` ${d.field_context}` : ''}`,
+            ids: d.example_node_ids.slice(0, 1),
+            bytes: d.total_size,
+            kind: 'duplicate',
+            why: `${formatNumber(d.count)} copies of one string, ${formatBytes(d.potential_savings)} to save`,
+            source: 'duplicated_strings',
+          });
+        }
         const lines = duplicated.map((d, i) => {
           const val =
             d.value.length > 80 ? d.value.slice(0, 80) + '...' : d.value;

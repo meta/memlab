@@ -13,6 +13,7 @@ import type {IHeapEdge, IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {resolveSavedNodeIds} from '../result-handles.js';
 import {getSnapshot} from '../heap-state.js';
+import {recordLead} from '../lead-registry.js';
 import {
   errorResult,
   formatBytes,
@@ -543,6 +544,16 @@ export function registerResidual(server: McpServer): void {
         const plan = buildPlan(snapshot, explained);
         const res = computeResidual(snapshot, plan);
         const c = census(snapshot, res, limit);
+        for (const {node, left} of c.top.slice(0, 15)) {
+          const why = `${formatBytes(left)} left after the explained cuts`;
+          recordLead(snapshot, {
+            node,
+            bytes: left,
+            kind: 'residual',
+            why,
+            source: 'residual',
+          });
+        }
         const K = plan.labels.length;
         const labelRows = plan.labels.map((l, i) => [
           l,
