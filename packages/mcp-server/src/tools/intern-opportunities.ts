@@ -30,6 +30,11 @@ import {
 } from './dev-artifacts.js';
 import {buildStringIndex} from '../string-index.js';
 import {
+  SNAPSHOT_STRING_LIMIT,
+  identityKeyCut,
+  identityKeyText,
+} from '../string-identity.js';
+import {
   classifyNonProductionString,
   isHarnessToolManifestShape,
 } from '../artifact-classes.js';
@@ -1148,10 +1153,11 @@ export function registerInternOpportunities(server: McpServer): void {
             `### \`.${g.propertyName}\` on \`${g.parentShape.length > 60 ? g.parentShape.slice(0, 57) + '…}' : g.parentShape}\` — ${formatBytes(g.savingsIfInterned)} savings`,
           );
           for (const s of g.topStrings) {
-            const val =
-              s.value.length > 60 ? s.value.slice(0, 60) + '…' : s.value;
+            const text = identityKeyText(s.value);
+            const val = text.length > 60 ? text.slice(0, 60) + '…' : text;
+            const cut = identityKeyCut(s.value);
             lines.push(
-              `- "${val}" × ${formatNumber(s.count)} copies (${formatBytes(s.size)})`,
+              `- "${val}" × ${formatNumber(s.count)} copies (${formatBytes(s.size)})${cut != null ? ` — ~${formatNumber(cut.fullLength)} chars, cut at ${formatNumber(SNAPSHOT_STRING_LIMIT)} by the snapshot: copies match on length and first ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars only` : ''}`,
             );
           }
           lines.push('');

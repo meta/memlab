@@ -14,6 +14,7 @@ import {z} from 'zod';
 import {loadRunManifest} from '../run-manifest.js';
 import {resolveLadderPaths} from './ladder.js';
 import {linearFit} from './ladder-probe.js';
+import {SNAPSHOT_STRING_LIMIT} from '../string-identity.js';
 import {
   ensureSidecar,
   normalizeClassName,
@@ -47,12 +48,18 @@ const STRING_TYPES = new Set([
   'sliced string',
 ]);
 
+/**
+ * `cut`: a value under the prefix is at the snapshot's 1,024-char cut, so it
+ * can stand for strings of many lengths and `distinct` is a lower bound.
+ */
+type PrefixRow = {count: number; distinct: number; bytes: number; cut: boolean};
+
 export function prefixCounts(
   index: SnapshotIndex,
   prefixes: readonly string[],
-): Map<string, {count: number; distinct: number; bytes: number}> {
-  const out = new Map(
-    prefixes.map(p => [p, {count: 0, distinct: 0, bytes: 0}]),
+): Map<string, PrefixRow> {
+  const out = new Map<string, PrefixRow>(
+    prefixes.map(p => [p, {count: 0, distinct: 0, bytes: 0, cut: false}]),
   );
   // One value can appear under several string types (flat, cons, sliced);
   // distinct counts values, not class keys.
@@ -63,11 +70,8 @@ export function prefixCounts(
     const value = key.slice(sep + 2);
     for (const p of prefixes) {
       if (!value.startsWith(p)) continue;
-      const row = out.get(p) as {
-        count: number;
-        distinct: number;
-        bytes: number;
-      };
+      const row = out.get(p) as PrefixRow;
+      if (value.length >= SNAPSHOT_STRING_LIMIT) row.cut = true;
       row.count += count;
       values.get(p)?.add(value);
       row.bytes += bytes;
@@ -184,10 +188,15 @@ export function registerStringPrefixCensus(server: McpServer): void {
             fit == null
               ? '—'
               : `${fit.slope >= 0 ? '+' : ''}${fit.slope.toFixed(3)}`,
-            last != null ? formatNumber(last.distinct) : '—',
+            last != null
+              ? `${last.cut ? '≥' : ''}${formatNumber(last.distinct)}`
+              : '—',
             last != null ? formatBytes(last.bytes) : '—',
           ];
         });
+        const anyCut =
+          lastAt >= 0 &&
+          [...(perRung[lastAt]?.values() ?? [])].some(r => r.cut);
         return toolResult(
           [
             `## Strings by prefix across ${rungPaths.length} rung(s)`,
@@ -203,6 +212,12 @@ export function registerStringPrefixCensus(server: McpServer): void {
               rows,
             ),
             '',
+            ...(anyCut
+              ? [
+                  `**≥ Distinct** is a lower bound: the snapshot keeps only the first ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars of a string. Strings of different lengths that share that text count as one value here.`,
+                  '',
+                ]
+              : []),
             `_${formatNumber(rungPaths.length - parsed - failures.length)} of ${formatNumber(rungPaths.length)} rung(s) answered from a sidecar index; ${formatNumber(parsed)} parsed (light) and indexed now._`,
             ...(failures.length > 0
               ? ['', 'Unreadable rungs:', ...failures.map(f => `- ${f}`)]

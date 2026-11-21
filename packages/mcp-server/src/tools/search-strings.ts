@@ -18,6 +18,7 @@ import {
   errorResult,
   toolResult,
 } from '../utils.js';
+import {estimatedFullLength, isSnapshotCut} from '../string-identity.js';
 
 export function registerSearchStrings(server: McpServer): void {
   server.tool(
@@ -261,7 +262,15 @@ export function registerSearchStrings(server: McpServer): void {
           return [
             `@${m.nodeId}`,
             `"${preview.replace(/\n/g, '\\n').replace(/\|/g, '\\|')}"`,
-            formatNumber(m.stringValue.length),
+            // A flat string past the snapshot's 1,024-char cut: its length
+            // comes from the self size, not the text.
+            isSnapshotCut({
+              name: m.nodeName,
+              self_size: m.selfSize,
+              type: m.nodeType,
+            })
+              ? `~${formatNumber(estimatedFullLength(m.nodeName, m.selfSize))} (cut at 1,024)`
+              : formatNumber(m.stringValue.length),
             formatBytes(m.selfSize),
             light ? 'n/a (light)' : formatBytes(m.retainedSize),
           ];

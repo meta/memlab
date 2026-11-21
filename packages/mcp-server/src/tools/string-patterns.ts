@@ -25,6 +25,11 @@ import {
   errorResult,
   toolResult,
 } from '../utils.js';
+import {
+  SNAPSHOT_STRING_LIMIT,
+  estimatedFullLength,
+  isSnapshotCut,
+} from '../string-identity.js';
 
 function extractPrefix(value: string, prefixLen: number): string {
   if (value.length <= prefixLen) return value;
@@ -98,6 +103,7 @@ export function registerStringPatterns(server: McpServer): void {
             min_len: number;
             max_len: number;
             example_ids: number[];
+            cut: boolean;
           }
         >();
 
@@ -108,13 +114,19 @@ export function registerStringPatterns(server: McpServer): void {
           if (node.id <= 3) return;
 
           const prefix = extractPrefix(node.name, prefix_length);
+          // Past the snapshot's 1,024-char cut, the length is the self size's.
+          const cut = isSnapshotCut(node);
+          const len = cut
+            ? estimatedFullLength(node.name, node.self_size)
+            : node.name.length;
           const existing = groups.get(prefix);
           if (existing) {
             existing.count++;
             existing.total_self_size += node.self_size;
             existing.total_retained_size += node.retainedSize;
-            existing.min_len = Math.min(existing.min_len, node.name.length);
-            existing.max_len = Math.max(existing.max_len, node.name.length);
+            existing.min_len = Math.min(existing.min_len, len);
+            existing.max_len = Math.max(existing.max_len, len);
+            if (cut) existing.cut = true;
             if (existing.example_ids.length < 3) {
               existing.example_ids.push(node.id);
             }
@@ -123,8 +135,9 @@ export function registerStringPatterns(server: McpServer): void {
               count: 1,
               total_self_size: node.self_size,
               total_retained_size: node.retainedSize,
-              min_len: node.name.length,
-              max_len: node.name.length,
+              min_len: len,
+              max_len: len,
+              cut,
               example_ids: [node.id],
             });
           }
@@ -162,9 +175,10 @@ export function registerStringPatterns(server: McpServer): void {
           const displayPrefix =
             prefix.length > 60 ? prefix.slice(0, 60) + '…' : prefix;
           const lenRange =
-            g.min_len === g.max_len
+            (g.cut ? '~' : '') +
+            (g.min_len === g.max_len
               ? formatNumber(g.min_len)
-              : `${formatNumber(g.min_len)}-${formatNumber(g.max_len)}`;
+              : `${formatNumber(g.min_len)}-${formatNumber(g.max_len)}`);
           return [
             displayPrefix,
             formatNumber(g.count),
@@ -178,7 +192,10 @@ export function registerStringPatterns(server: McpServer): void {
         return toolResult(
           withAnonymizedBanner(
             snapshot,
-            `String patterns (prefix_length=${prefix_length}, ${formatNumber(filtered.length)} groups matching filters, showing ${rows.length})\n\n${markdownTable(headers, rows, rightCols)}`,
+            `String patterns (prefix_length=${prefix_length}, ${formatNumber(filtered.length)} groups matching filters, showing ${rows.length})\n\n${markdownTable(headers, rows, rightCols)}` +
+              (sorted.some(([, g]) => g.cut)
+                ? `\n\n**~ Len Range** comes from self size: the snapshot keeps only the first ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars of a string. Strings that share that text are copies only if their lengths match.`
+                : ''),
           ),
         );
       } catch (err) {

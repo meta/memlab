@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {getSnapshot, getSnapshotEnv} from '../heap-state.js';
 import {formatBytes, formatNumber, errorResult, toolResult} from '../utils.js';
 import {nodeServerFindings} from './node-server.js';
+import {identityKeyText, stringIdentityKey} from '../string-identity.js';
 
 type Severity = 'critical' | 'warning' | 'info';
 
@@ -57,8 +58,8 @@ export function registerCheckHealth(server: McpServer): void {
             stringNodeCount++;
             totalStringSize += node.self_size;
             if (node.name !== 'system / SlicedString') {
-              const key =
-                node.name.length > 100 ? node.name.slice(0, 100) : node.name;
+              // The whole value, never a prefix: a shared prefix is not a copy.
+              const key = stringIdentityKey(node);
               const entry = stringCounts.get(key);
               if (entry) {
                 entry.count++;
@@ -125,7 +126,8 @@ export function registerCheckHealth(server: McpServer): void {
           .filter(([, s]) => s.count >= 100 && s.totalSize >= 5 * 1024 * 1024)
           .sort((a, b) => b[1].totalSize - a[1].totalSize)
           .slice(0, 3);
-        for (const [val, stats] of heavyDups) {
+        for (const [key, stats] of heavyDups) {
+          const val = identityKeyText(key);
           const display = val.length > 50 ? val.slice(0, 50) + '...' : val;
           findings.push({
             severity: 'warning',

@@ -18,6 +18,12 @@ import zlib from 'zlib';
 import crypto from 'crypto';
 import {execFileSync} from 'child_process';
 import {isCheckpointRef, resolveCheckpointRef} from '../checkpoints.js';
+import {
+  SNAPSHOT_STRING_LIMIT,
+  identityKeyCut,
+  identityKeyText,
+  stringIdentityKey,
+} from '../string-identity.js';
 import {recordEviction, timedLoad} from '../perf-stats.js';
 import {minifiedWarning} from '../minified.js';
 import {z} from 'zod';
@@ -933,8 +939,10 @@ function quickDiagnosis(
 
     // Count flat-string duplication only. Sliced strings (type 'sliced
     // string') share a parent's storage, so they aren't independent dupes.
+    // Keyed on the whole value (plus the size of a name cut at 1,024 chars),
+    // never a prefix: a shared prefix is not a copy.
     if (node.type === 'string') {
-      const key = node.name.length > 100 ? node.name.slice(0, 100) : node.name;
+      const key = stringIdentityKey(node);
       stringCounts.set(key, (stringCounts.get(key) ?? 0) + 1);
     }
 
@@ -968,9 +976,13 @@ function quickDiagnosis(
       .filter(([val, count]) => count >= 1000 && !isNoisyDupKey(val))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3);
-    for (const [val, count] of highDups) {
+    for (const [key, count] of highDups) {
+      const val = identityKeyText(key);
       const display = val.length > 40 ? val.slice(0, 40) + '…' : val;
-      standing.push(`⚠ "${display}" duplicated ${formatNumber(count)} times`);
+      const cut = identityKeyCut(key);
+      standing.push(
+        `⚠ "${display}" duplicated ${formatNumber(count)} times${cut != null ? ` (same ~${formatNumber(cut.fullLength)}-char length and first ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars; the rest is not in the snapshot)` : ''}`,
+      );
       standingKinds.add('duplicated strings');
     }
   }

@@ -32,6 +32,7 @@ import {
 import {memoryPressureNotice} from './memory-pressure.js';
 import {snapshotsReadInScope} from './read-scope.js';
 import {compactMarkdownTable} from './terse-output.js';
+import {estimatedFullLength, isSnapshotCut} from './string-identity.js';
 export {ScanTimeoutError, makeScanBudget};
 
 export interface NodeSummary {
@@ -947,6 +948,10 @@ export function collectBackingSlots(node: IHeapNode): BackingSlot[] {
  * `slices: 'marker'` it is rendered as `‹slice›` instead, which keeps two stack
  * frames that differ only in their sliced URL apart when grouping. The walk
  * stops at `maxLen` characters rather than flattening a multi-megabyte rope.
+ *
+ * `cutParts` counts the flat parts the SNAPSHOT cut at 1,024 characters and
+ * `missingChars` estimates what they lost (from their self sizes): with
+ * either non-zero the text is not the whole value, whatever `maxLen` allows.
  */
 export const SLICE_MARKER = '‹slice›';
 
@@ -961,10 +966,14 @@ export function flattenString(
   approximate: boolean;
   slicedParents: number[];
   broken: boolean;
+  cutParts: number;
+  missingChars: number;
 } {
   let value = '';
   let truncated = false;
   let broken = false;
+  let cutParts = 0;
+  let missingChars = 0;
   const slicedParents: number[] = [];
   const stack: IHeapNode[] = [node];
   let steps = 0;
@@ -1018,6 +1027,11 @@ export function flattenString(
       continue;
     }
     if (n.type === 'string') {
+      if (isSnapshotCut(n)) {
+        cutParts++;
+        missingChars +=
+          estimatedFullLength(n.name, n.self_size) - n.name.length;
+      }
       const room = maxLen - value.length;
       if (n.name.length > room) {
         value += n.name.slice(0, room);
@@ -1039,6 +1053,8 @@ export function flattenString(
     approximate: slicedParents.length > 0,
     slicedParents,
     broken,
+    cutParts,
+    missingChars,
   };
 }
 

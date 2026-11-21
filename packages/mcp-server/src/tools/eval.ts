@@ -53,6 +53,10 @@ import {
 } from '../react-shapes.js';
 import {readElements as readElementsInfo} from '../heap-shapes.js';
 import {
+  SNAPSHOT_STRING_LIMIT,
+  estimatedFullLength,
+} from '../string-identity.js';
+import {
   getCurrentHandle,
   getSavedResult,
   getSnapshot,
@@ -1704,7 +1708,7 @@ export function registerEval(server: McpServer): void {
             'rootPathAvoidingDev(nodeOrId)->[{id,name,type,edge}]|null (shortest GC-root path using no React DEV/Fast Refresh/devtools edge; null = the node does not exist in a production build; throws if the analysis budget runs out first), ' +
             "fiberHooks(componentName, {limit?, onlyPending?, aggregate?})->[{fiber, hooks:[{index, statefulOrdinal, kind, memoizedState, pending, lastRenderedState, bailout}]}] (a component's hook list in order; statefulOrdinal counts only useState/useReducer, so it maps to the Nth such call in source; `pending` is null when nothing is queued, else [{value, count}]; `onlyPending` keeps only hooks (and fibers) with something queued; `aggregate` instead returns [{hookIndex, statefulOrdinal, kind, value, count, fibers}] summed over every fiber), " +
             "fiberOf(nodeOrId)->fiberId|null (a DOM node's `__reactFiber$…` fiber, or the node itself if it is a fiber), componentName(nodeOrId)->string|null, hooks(nodeOrId)->[same rows as fiberHooks]|null (one fiber's hooks), memoCacheSlots(nodeOrId, {limit?})->[{block, slot, id, value}]|null (React Compiler cache: `updateQueue.memoCache.data[block][slot]`, the slots that keep a compiled component's stale closures and elements alive; [] when the fiber has no cache; small integers emit no edge and are not listed), " +
-            'stringValue(nodeOrId, {maxLen?, slices?: "parent"|"marker"})->string (text of a flat, `(concatenated string)` or `(sliced string)` node; a slice is returned as its whole parent because the snapshot records no offset, or as `‹slice›` with slices:"marker"), ' +
+            'stringValue(nodeOrId, {maxLen?, slices?: "parent"|"marker"})->string (text of a flat, `(concatenated string)` or `(sliced string)` node; a slice is returned as its whole parent because the snapshot records no offset, or as `‹slice›` with slices:"marker"; a flat string longer than 1,024 chars comes back cut at 1,024, so compare self_size too), ' +
             'props(nodeOrId)->{prop: scalar | {ref,name,type}} & getProp(nodeOrId, name) & shapeSignature(nodeOrId, {maxStringLen?}) (content signature for dedup checks), ' +
             'shapeKeys(nodeOrId)->Set<string> & ownProps(nodeOrId) & hasShape(nodeOrId, [names], {exact?,exclude?}) (own JS properties ONLY — USE THESE FOR SHAPE MATCHING; props() falls back to an internal-edge walk and injects length/map/__via/__note, which makes a props()-based shape test silently return zero matches), ' +
             'rootPath(nodeOrId, {maxHops?, skipDev?})->[{id,name,type,edge}] (GC-root path, root first — the retainer_trace walk, callable inside an eval; skipDev:true walks the production path instead when the shortest one crosses a React DEV/Fast Refresh/devtools edge — same shape, same hop cap and collapsing, never throws: with no production path it returns the dev path), ' +
@@ -2883,18 +2887,31 @@ export async function runEval({
 
     // The text of a flat, concatenated or sliced string; '' for a non-string.
     // A slice comes back as its whole parent (the snapshot records no offset).
+    // The first text the snapshot cut at 1,024 chars earns one warning: its
+    // `.length` is not the string's length, and equal texts are not equal
+    // strings (keying base64 thumbnails on `s.length` once found "28
+    // byte-identical copies" that were different images).
+    let cutWarned = false;
     const stringValue = (
       nodeOrId: number | {id: number},
       opts: {maxLen?: number; slices?: 'parent' | 'marker'} = {},
     ): string => {
       const node = resolveNode(nodeOrId);
       if (node == null || !node.isString) return '';
-      return flattenString(
+      const flat = flattenString(
         node,
         opts.maxLen ?? 10_000,
         undefined,
         opts.slices ?? 'parent',
-      ).value;
+      );
+      if (flat.cutParts > 0 && !cutWarned) {
+        cutWarned = true;
+        consoleOutput.push(
+          `[warn] helpers.stringValue(${node.id}) returned ${formatNumber(flat.value.length)} chars of a ~${formatNumber(node.type === 'string' ? estimatedFullLength(node.name, node.self_size) : flat.value.length + flat.missingChars)}${node.type !== 'string' && flat.truncated ? '+' : ''}-char string: the snapshot keeps only the first ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars of each flat string (self_size ${formatNumber(node.self_size)} B). ` +
+            'The returned `.length` is not the string length, and two equal returns are not equal strings: group by text AND self_size, and say that only the first 1,024 chars are known to match.',
+        );
+      }
+      return flat.value;
     };
 
     // Correctly enumerate Map/WeakMap entries and Set elements via the shared
@@ -6066,7 +6083,7 @@ function describeEnvLines(): string[] {
     '- Standard JS built-ins (Array, Object, Map, Set, JSON, Math, RegExp, …). No require/process/fs/network.',
     '',
     '## Collection / shape / index helpers (prefer these over hand-rolling)',
-    '- `helpers.stringValue(nodeOrId, {maxLen=10000, slices="parent"}) -> string` — text of any string node. Flattens `(concatenated string)` ropes and reads a `(sliced string)` as its whole parent (the snapshot records no slice offset); `slices: "marker"` renders `‹slice›` instead, for grouping. `toStringNode().stringValue` returns `<sliced string of @id>` for a slice and throws on a broken rope.',
+    '- `helpers.stringValue(nodeOrId, {maxLen=10000, slices="parent"}) -> string` — text of any string node. Flattens `(concatenated string)` ropes and reads a `(sliced string)` as its whole parent (the snapshot records no slice offset); `slices: "marker"` renders `‹slice›` instead, for grouping. The snapshot keeps only the first 1,024 chars of a flat string, so a longer one comes back cut (with a warning): its `.length` is not the string length, and equal texts are the same string only if `self_size` matches too. `toStringNode().stringValue` returns `<sliced string of @id>` for a slice and throws on a broken rope.',
     '- `helpers.mapEntries(mapId, limit=1000) -> [{key, value}]` and `helpers.setElements(setId, limit=1000) -> [brief]` — CORRECT Map/Set/WeakMap enumeration. Handles browser `internal`-typed backing slots and SMI-value gaps (naive `type === "element"` filtering or positional `[i],[i+1]` pairing silently returns 0 / mispairs). Each brief is a plain summary `{id, name, type, self_size, retained_size, string}`, NOT a node: `.references` on it is undefined. A call that hits its limit prints a warning.',
     '- `helpers.mapEntryNodes(mapId, limit?) -> [{keyNode, valueNode}]` and `helpers.setElementNodes(setId, limit?) -> [node]` — the same enumeration returning NODES (`.references`, `.self_size`, `.id` work; `valueNode` is null for an SMI value), with no default cap. Use these to count entries or walk into them.',
     "- `helpers.props(nodeOrId) -> {prop: scalar | {ref, name, type}}` and `helpers.getProp(nodeOrId, name)` — read an object's own properties without the `for (const e of n.references) …` boilerplate. Number-valued props surface as a ref to a `smi number`/`heap number` node; their actual numeric value is not in the snapshot format. ⚠️ **`props()` is for INSPECTION, not for SHAPE MATCHING** — on a node with no `property` edges it falls back to a named internal/shortcut/hidden edge walk and adds `length`/`map`/`__via`/`__note`, so a shape test written against `Object.keys(props(id))` returns ZERO matches on objects that plainly have the shape. Use the next line for that.",

@@ -26,6 +26,12 @@ import {
 } from '../utils.js';
 import {classifyNonProductionString} from '../artifact-classes.js';
 import {buildStringIndex, stringIndexIsCached} from '../string-index.js';
+import {
+  SNAPSHOT_STRING_LIMIT,
+  cutPrefixGroups,
+  identityKeyCut,
+  identityKeyText,
+} from '../string-identity.js';
 
 const ROPE_PREFIX_CHARS = 120;
 
@@ -88,6 +94,27 @@ function concatenatedFamilies(
     '\n\n_Grouped by the first ' +
     `${ROPE_PREFIX_CHARS} characters; \`‹slice›\` marks a sliced substring. Read one in full with \`memlab_get_string\` or \`helpers.stringValue(id)\`._`
   );
+}
+
+/**
+ * What a row of a string the snapshot cut can and cannot claim: its copies
+ * share a length and their first 1,024 characters, nothing more; and when
+ * other lengths share the prefix, the prefix is that many distinct values.
+ */
+export function cutNote(
+  shown: number,
+  cut: {
+    full_length: number;
+    prefix_size_groups: number;
+    prefix_strings: number;
+  },
+): string {
+  const head =
+    `⚠ cut by the snapshot: shown ${formatNumber(shown)} of ~${formatNumber(cut.full_length)} chars (V8 keeps the first ${formatNumber(SNAPSHOT_STRING_LIMIT)}). ` +
+    `These copies match on length and first ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars; the rest is not in the snapshot.`;
+  return cut.prefix_size_groups > 1
+    ? `${head} ${formatNumber(cut.prefix_strings)} strings share this prefix in ${formatNumber(cut.prefix_size_groups)} different lengths, so they are at least ${formatNumber(cut.prefix_size_groups)} distinct values, not copies of one.`
+    : head;
 }
 
 const OWNER_VALUES = 200;
@@ -187,8 +214,10 @@ function owningStructures(
     .sort((a, b) => b[1].savings - a[1].savings)
     .slice(0, limit);
   if (top.length === 0) return '';
-  const clip = (v: string) =>
-    (v.length > 40 ? `${v.slice(0, 40)}…` : v).replace(/\s+/g, ' ');
+  const clip = (key: string) => {
+    const v = identityKeyText(key);
+    return (v.length > 40 ? `${v.slice(0, 40)}…` : v).replace(/\s+/g, ' ');
+  };
   return (
     `\n\n### Duplicated values by owning structure (${formatNumber(top.length)})\n\n` +
     top
@@ -270,11 +299,29 @@ export function registerDuplicatedStrings(server: McpServer): void {
               (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0),
           );
         const page = paginate(ranked, offset, limit);
-        const duplicated = page.items.map(([value, stats]) => {
+        // Keys of strings the snapshot cut carry their self size: a row is
+        // one length, and the note says how many lengths share its prefix.
+        const prefixGroups = page.items.some(
+          ([key]) => key.length > SNAPSHOT_STRING_LIMIT,
+        )
+          ? cutPrefixGroups(stringMap)
+          : null;
+        const duplicated = page.items.map(([key, stats]) => {
           const per_copy_size =
             stats.count > 0 ? stats.totalSize / stats.count : 0;
           const potential_savings = (stats.count - 1) * per_copy_size;
+          const value = identityKeyText(key);
+          const cut = identityKeyCut(key);
+          const shared = cut != null ? prefixGroups?.get(cut.text) : undefined;
           return {
+            cut:
+              cut == null
+                ? null
+                : {
+                    full_length: cut.fullLength,
+                    prefix_size_groups: shared?.groups ?? 1,
+                    prefix_strings: shared?.strings ?? stats.count,
+                  },
             value: value.length > 200 ? value.substring(0, 200) + '...' : value,
             count: stats.count,
             total_size: stats.totalSize,
@@ -395,7 +442,7 @@ export function registerDuplicatedStrings(server: McpServer): void {
             d.potential_savings > 0
               ? `, savings: ${formatBytes(d.potential_savings)}`
               : '';
-          return `${page.offset + i + 1}. "${val}" x ${d.count} copies, ${d.total_size_formatted} total${savingsLabel}${actionLabel}${nodeIdsPart}${context}`;
+          return `${page.offset + i + 1}. "${val}" x ${d.count} copies, ${d.total_size_formatted} total${savingsLabel}${actionLabel}${nodeIdsPart}${context}${d.cut != null ? `\n   ${cutNote(Math.min(val.length, 80), d.cut)}` : ''}`;
         });
         // Cached failure payloads: duplicated JSON-ish strings carrying an
         // explicit failure/error marker. These are both wasted memory and a
@@ -484,6 +531,12 @@ export function registerDuplicatedStrings(server: McpServer): void {
               potential_savings: d.potential_savings,
               actionability: d.actionability,
               example_node_ids: d.example_node_ids,
+              ...(d.cut != null
+                ? {
+                    full_length: d.cut.full_length,
+                    note: cutNote(Math.min(d.value.length, 200), d.cut),
+                  }
+                : {}),
             })),
             pagination: pageInfo(page),
           },

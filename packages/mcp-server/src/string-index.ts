@@ -10,6 +10,7 @@
 
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {getEvalScratch} from './heap-state.js';
+import {stringIdentityKey} from './string-identity.js';
 
 /**
  * Per-value string duplication stats: how many copies, what they cost, and a
@@ -27,6 +28,12 @@ export interface StringDupStats {
 }
 
 export interface StringIndex {
+  /**
+   * Keyed by {@link stringIdentityKey}: the text, plus the self size for a
+   * name the snapshot cut at 1,024 characters, so strings of different
+   * lengths that merely share that prefix are never counted as copies. Read
+   * the text with `identityKeyText`.
+   */
   byValue: Map<string, StringDupStats>;
   /** True when `devOnlyCount` is populated. */
   hasDevOnly: boolean;
@@ -95,9 +102,7 @@ export function buildStringIndex(
     // Sliced strings share a parent's storage, so they are not independent
     // duplicates and counting them would overstate any interning win.
     if (node.name === 'system / SlicedString') return;
-    const strNode = node.toStringNode();
-    if (!strNode) return;
-    const value = strNode.stringValue;
+    const value = stringIdentityKey(node);
     const devOnly = isDevOnly != null && isDevOnly(node);
     const entry = byValue.get(value);
     if (entry) {

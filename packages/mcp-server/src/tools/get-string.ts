@@ -16,14 +16,25 @@ import {
   flattenString,
   formatBytes,
   formatNodeInline,
+  formatNumber,
   errorResult,
   toolResult,
 } from '../utils.js';
+import {
+  SNAPSHOT_STRING_LIMIT,
+  estimatedFullLength,
+} from '../string-identity.js';
 
 function resolveStringValue(
   node: IHeapNode,
   maxLen: number,
-): {value: string; truncated: boolean; encoding: string} {
+): {
+  value: string;
+  truncated: boolean;
+  encoding: string;
+  cutParts: number;
+  missingChars: number;
+} {
   const flat = flattenString(node, maxLen);
   const isRope =
     node.type === 'concatenated string' ||
@@ -53,6 +64,8 @@ function resolveStringValue(
   return {
     value: flat.value,
     truncated: flat.truncated,
+    cutParts: flat.cutParts,
+    missingChars: flat.missingChars,
     encoding: notes.length > 0 ? `${kind}; ${notes.join('; ')}` : kind,
   };
 }
@@ -178,6 +191,21 @@ export function registerGetString(server: McpServer): void {
         lines.push(
           `**Length:** ${resolved.value.length}${resolved.truncated ? ` (truncated from longer value, use max_length to see more)` : ''} characters`,
         );
+        if (resolved.cutParts > 0) {
+          // The snapshot itself holds only the first 1,024 characters of each
+          // flat part; no max_length recovers the rest.
+          // First sentence under 120 chars: terse output keeps only that.
+          const full =
+            node.type === 'string'
+              ? `~${formatNumber(estimatedFullLength(node.name, node.self_size))}`
+              : `~${formatNumber(resolved.value.length + resolved.missingChars)}${resolved.truncated ? '+' : ''}`;
+          lines.push(
+            (resolved.cutParts === 1 && node.type === 'string'
+              ? `**⚠ Cut by the snapshot:** ${full} chars long; only the first ${formatNumber(SNAPSHOT_STRING_LIMIT)} are in the snapshot.`
+              : `**⚠ Cut by the snapshot:** ${formatNumber(resolved.cutParts)} flat part(s) cut at ${formatNumber(SNAPSHOT_STRING_LIMIT)} chars; full length ${full}, the gaps are not in the snapshot.`) +
+              ' Equal text is the same value only if the self sizes match too, and even then only the first 1,024 chars are known to match.',
+          );
+        }
         lines.push('');
 
         lines.push('**Value:**');
