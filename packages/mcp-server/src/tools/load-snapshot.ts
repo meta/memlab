@@ -973,7 +973,9 @@ function quickDiagnosis(
     );
   } else {
     const highDups = [...stringCounts.entries()]
-      .filter(([val, count]) => count >= 1000 && !isNoisyDupKey(val))
+      .filter(
+        ([key, count]) => count >= 1000 && !isNoisyDupKey(identityKeyText(key)),
+      )
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3);
     for (const [key, count] of highDups) {
