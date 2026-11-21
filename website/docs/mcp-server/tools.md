@@ -12,7 +12,7 @@ prints with `memlab_tools`.
 
 | Group | Answers | Tools |
 | --- | --- | --- |
-| [Heap composition](./tools/composition.md) | What is this heap actually made of? | 42 |
+| [Heap composition](./tools/composition.md) | What is this heap actually made of? | 43 |
 | [Growth and leaks](./tools/growth.md) | Is anything growing — and is it a leak? | 38 |
 | [Retention](./tools/retention.md) | Who owns the growth / why is X retained? | 30 |
 | [Measurement artifacts](./tools/artifacts.md) | Is it real, or a measurement artifact? | 6 |

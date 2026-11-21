@@ -99,6 +99,10 @@ const GROUPS: Group[] = [
         'The recurring framework buffers in one call: log arrays, module timing records, lazy-loader registry, scheduler queue, registry tables, giant objects, plus app-specific buffers from a probe file.',
       ],
       [
+        'memlab_diagnostic_buffers',
+        "The app's own instrumentation, which reads as 'bounded': error histories grouped by exact message+stack with what a dedupe frees, the Performance timeline by entry type (resource timing above the default 250), and telemetry queues; per rung with `paths`. Isolated-world buffers are left out.",
+      ],
+      [
         'memlab_capture',
         'Take fresh snapshots of a live page AND its dedicated workers (a page snapshot never contains them). Skips threads blocked in Atomics.wait instead of hanging.',
       ],
