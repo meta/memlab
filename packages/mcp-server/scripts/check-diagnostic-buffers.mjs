@@ -96,6 +96,9 @@ test('identical message+stack entries are one group; dedupe frees the repeats', 
   assert.match(g.topMessage, /^Converting to a string/);
   // Two repeats of one 1,000-byte record.
   assert.equal(g.dupRecords, 2000);
+  // The repeats share the message and stack instances: deduping frees none
+  // of that text.
+  assert.equal(g.dupText, 0);
 });
 
 test('copies of equal content in separate strings still count as repeats', () => {
@@ -130,6 +133,32 @@ test('a concatenated string keys by its whole content', () => {
   ]);
   assert.equal(stringKey(cons), 'abcd');
   assert.equal(stringKey(null), '');
+});
+
+test('slices and the rest of a deep concatenation key by node identity', () => {
+  const parent = str('at a (x.js:1:2)\nat b (y.js:3:4)');
+  const slice = () =>
+    node('(sliced string)', 'sliced string', [['internal', 'parent', parent]], {
+      self_size: 32,
+    });
+  const [s1, s2] = [slice(), slice()];
+  // Same size and parent, unknown offsets: not the same text.
+  assert.notEqual(stringKey(s1), stringKey(s2));
+  assert.equal(stringKey(s1), stringKey(s1));
+  const deep = n => {
+    let cur = str('tail');
+    for (let i = 0; i < n; i++) {
+      cur = node('(concatenated string)', 'concatenated string', [
+        ['internal', 'first', str('p')],
+        ['internal', 'second', cur],
+      ]);
+    }
+    return cur;
+  };
+  const [d1, d2] = [deep(80), deep(80)];
+  assert.match(stringKey(d1), /<rest @\d+/);
+  assert.notEqual(stringKey(d1), stringKey(d2));
+  assert.equal(stringKey(deep(3)), 'ppptail');
 });
 
 test('error-like and performance-entry records', () => {

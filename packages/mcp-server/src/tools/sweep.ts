@@ -501,7 +501,7 @@ function laterSections(
       const skipIds = new Set(leads.flatMap(l => l.ids ?? []));
       return numbered(
         SEC.diag,
-        diagnosticBuffersSweepSection(s, {cap: caps.extra, skipIds}),
+        diagnosticBuffersSweepSection(s, {cap: caps.extra, skipIds, leads}),
       );
     }
     case 'finished':

@@ -13,6 +13,7 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
 import {cachedPathLabeler} from '../heap-families.js';
+import {SWEEP_SECTION, type SweepLead} from '../lead-registry.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {
   errorResult,
@@ -75,6 +76,9 @@ const MIN_PERF_COPIES = 100;
 const MIN_BYTES = 16 * 1024;
 // V8 records at most this many characters of a string's content.
 const NAME_CAP = 1024;
+// Pieces of a concatenated string `stringKey` reads before keying the rest by
+// node identity.
+const STRING_KEY_PIECES = 64;
 
 export function isTelemetryName(text: string): boolean {
   return TELEMETRY_RE.test(text) || LOG_SEGMENT_RE.test(text);
@@ -116,13 +120,22 @@ function sampleElements(arr: IHeapNode, k: number): IHeapNode[] {
  * characters of a string, so two stacks that differ past that point read the
  * same; a capped piece adds its byte size to the key, which keeps them apart
  * (an exact copy has the same size).
+ *
+ * Where the content is not in the snapshot, the key falls back to node
+ * identity, so only the same instance matches: a sliced string (the snapshot
+ * has its parent but not its offset), and the pieces left when a deep
+ * concatenation hits the walk limit.
  */
 export function stringKey(node: IHeapNode | null): string {
   if (node == null) return '';
   if (!node.isString) return `@${node.type}`;
   const parts: string[] = [];
   const stack: IHeapNode[] = [node];
-  for (let guard = 0; stack.length > 0 && guard < 64; guard++) {
+  for (let guard = 0; stack.length > 0; guard++) {
+    if (guard >= STRING_KEY_PIECES) {
+      parts.push(`<rest ${stack.map(p => `@${p.id}`).join(',')}>`);
+      break;
+    }
     const s = stack.pop() as IHeapNode;
     if (s.type === 'concatenated string') {
       for (const k of ['second', 'first']) {
@@ -130,8 +143,7 @@ export function stringKey(node: IHeapNode | null): string {
         if (part != null) stack.push(part);
       }
     } else if (s.type === 'sliced string') {
-      const parent = s.getReferenceNode('parent')?.id;
-      parts.push(`<slice ${s.self_size} of @${parent}>`);
+      parts.push(`<slice @${s.id}>`);
     } else {
       const capped = s.name.length >= NAME_CAP;
       parts.push(capped ? `${s.name}#${s.self_size}` : s.name);
@@ -156,6 +168,9 @@ export function errorGroups(errors: IHeapNode[]): {
 } {
   const exact = new Set<string>();
   const byMessage = new Map<string, {n: number; keys: Set<string>}>();
+  // String instances already counted: repeats that share one message or stack
+  // instance free none of its text.
+  const textSeen = new Set<number>();
   let dupRecords = 0;
   let dupText = 0;
   for (const err of errors) {
@@ -163,9 +178,12 @@ export function errorGroups(errors: IHeapNode[]): {
     const stack = err.getReferenceNode('stack', 'property');
     const key = `${stringKey(msg)}\u0000${stringKey(stack)}`;
     // Every entry after the first of its group is what a dedupe frees.
-    if (exact.has(key)) {
-      dupRecords += err.retainedSize;
-      dupText += (msg?.retainedSize ?? 0) + (stack?.retainedSize ?? 0);
+    const repeat = exact.has(key);
+    if (repeat) dupRecords += err.retainedSize;
+    for (const text of [msg, stack]) {
+      if (text == null || textSeen.has(text.id)) continue;
+      textSeen.add(text.id);
+      if (repeat) dupText += text.retainedSize;
     }
     exact.add(key);
     const short = shorten(msg?.isString ? msg.name : '(no message)', 60);
@@ -323,13 +341,15 @@ export function diagnosticBuffers(snapshot: IHeapSnapshot): {
     }
     return true;
   };
-  const push = (n: IHeapNode, row: Omit<DiagRow, 'id' | 'bytes' | 'key'>) =>
-    rows.push({
-      ...row,
-      id: n.id,
-      bytes: n.retainedSize,
-      key: `${row.kind}|${row.holder}`,
-    });
+  // The per-rung key: the retainer path alone. The holder text can change
+  // between rungs (a held-by label's ' (+N)' count), which would break the
+  // series for a buffer that exists at every rung.
+  const pathKey = (n: IHeapNode) => labeler.labelOf(n);
+  const push = (
+    n: IHeapNode,
+    row: Omit<DiagRow, 'id' | 'bytes' | 'key'>,
+    key = `${row.kind}|${pathKey(n)}`,
+  ) => rows.push({...row, id: n.id, bytes: n.retainedSize, key});
 
   for (const arr of errorArrays) {
     const errors = arrayElements(arr).filter(isErrorLike);
@@ -355,14 +375,21 @@ export function diagnosticBuffers(snapshot: IHeapSnapshot): {
   for (const perf of perfs) {
     const {entries, row} = timeline(perf);
     if (entries < 50 && perf.retainedSize < MIN_BYTES) continue;
-    claim(perf, '');
-    push(perf, {
-      kind: 'perf timeline',
-      holder: `Performance (native timeline${timelines++ > 0 ? ` #${timelines}` : ''})`,
-      entries,
-      detail: row.detail ?? '',
-      types: row.types,
-    });
+    if (claim(perf, `Performance timeline of ${formatNumber(entries)}`)) {
+      continue;
+    }
+    const holder = `Performance (native timeline${timelines++ > 0 ? ` #${timelines}` : ''})`;
+    push(
+      perf,
+      {
+        kind: 'perf timeline',
+        holder,
+        entries,
+        detail: row.detail ?? '',
+        types: row.types,
+      },
+      `perf timeline|${holder}`,
+    );
   }
   for (const arr of perfArrays) {
     const recs = arrayElements(arr).filter(isPerfRecord);
@@ -420,12 +447,18 @@ export function diagnosticBuffers(snapshot: IHeapSnapshot): {
     const owner = g[0].q.dominatorNode;
     if (g.length === 1 || owner == null) {
       for (const {q, n, why} of g) {
-        push(q, {
-          kind: 'telemetry queue',
-          holder: holderOf(q),
-          entries: n,
-          detail: why,
-        });
+        // Keyed by the owner like a group row, so the series holds when a
+        // sibling queue qualifies at a later rung.
+        push(
+          q,
+          {
+            kind: 'telemetry queue',
+            holder: holderOf(q),
+            entries: n,
+            detail: why,
+          },
+          `telemetry queue|${pathKey(owner ?? q)}`,
+        );
       }
       continue;
     }
@@ -443,7 +476,7 @@ export function diagnosticBuffers(snapshot: IHeapSnapshot): {
       entries: g.reduce((sum, x) => sum + x.n, 0),
       // Siblings in the dominator tree: their retained sizes add up.
       bytes: g.reduce((sum, x) => sum + x.q.retainedSize, 0),
-      key: `telemetry queue|${holder}`,
+      key: `telemetry queue|${pathKey(owner)}`,
       detail: `${g.length} collections under one owner (${parts.join(', ')}${g.length > 4 ? ', …' : ''})`,
     });
   }
@@ -552,18 +585,29 @@ export function diagnosticBuffersSweepSection(
     earlier?: DiagRow[][];
     cap?: number;
     skipIds?: ReadonlySet<number>;
+    /** Collects a lead per shown row. */
+    leads?: SweepLead[];
   } = {},
 ): string[] {
   const {rows, excluded} = diagnosticBuffers(snapshot);
   const kept = rows.filter(r => opts.skipIds?.has(r.id) !== true);
   // Every row already printed elsewhere in the sweep: no empty table.
   if (kept.length === 0) return [];
+  const cap = opts.cap ?? 6;
   const body = renderDiagnosticBuffers(
     {rows: kept, excluded},
-    opts.cap ?? 6,
+    cap,
     opts.earlier ?? [],
   );
   if (body.length === 0) return [];
+  for (const r of kept.slice(0, cap)) {
+    opts.leads?.push({
+      label: `${r.kind}: ${r.holder}`,
+      bytes: r.bytes,
+      section: SWEEP_SECTION.diag,
+      ids: [r.id],
+    });
+  }
   return [
     '## Diagnostic buffers (error histories, Performance timeline, telemetry)',
     '',
