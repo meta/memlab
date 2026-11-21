@@ -23,6 +23,7 @@ import {
   markdownTable,
   toolResult,
 } from '../utils.js';
+import {realmPinLines, unevaluatedLines} from './node-server-pins.js';
 
 /**
  * Node.js server state the generic tools do not name: extra `vm` realms,
@@ -302,7 +303,8 @@ export function registerNodeServer(server: McpServer): void {
   server.tool(
     'memlab_node_server',
     'Node.js server state in one call: the realm (NativeContext) count, `require.cache` entries ranked by what their `exports` retain (module-scope state such as a startup-only config schema), a census of IncomingMessage / ServerResponse / Socket / Timeout with lifecycle flags, the completed requests still reachable, and the objects carrying AsyncLocalStorage stores (`<symbol kResourceStore>`) with the routes those stores belong to. ' +
-      'Node copies the current store into every async resource it creates, so a socket or interval first opened inside a request keeps that request alive for its own lifetime.',
+      'Node copies the current store into every async resource it creates, so a socket or interval first opened inside a request keeps that request alive for its own lifetime. ' +
+      'When the heap has them, also: who strongly holds each extra `vm` realm (the Map and key, e.g. one realm per route in a manifest cache), and scripts loaded but never evaluated (every closure a top-level module factory, none from a module body), with the bytes freed without them.',
     {
       limit: z
         .number()
@@ -318,11 +320,15 @@ export function registerNodeServer(server: McpServer): void {
         const started = Date.now();
         const facts = nodeServerFacts(snapshot);
         const cache = facts.cache.filter(c => c.retained > 0);
+        const pinLines = realmPinLines(snapshot, limit);
+        const unevaluated = unevaluatedLines(snapshot, limit);
         if (
           cache.length === 0 &&
           facts.census.size === 0 &&
           facts.holders.length === 0 &&
-          facts.promiseHolders === 0
+          facts.promiseHolders === 0 &&
+          pinLines.length === 0 &&
+          unevaluated.length === 0
         ) {
           return toolResult(
             `No Node.js server state found: no require.cache entries, HTTP/socket/timer objects or AsyncLocalStorage stores. ${formatNumber(facts.realmCount)} realm(s): \`memlab_native_contexts\`.`,
@@ -330,6 +336,7 @@ export function registerNodeServer(server: McpServer): void {
         }
         const lines: string[] = ['# Node.js server state', ''];
         if (facts.realmCount > 1) lines.push(realmLine(facts), '');
+        lines.push(...pinLines, ...unevaluated);
 
         if (cache.length > 0) {
           const total = cache.reduce((s, c) => s + c.retained, 0);

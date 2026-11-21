@@ -112,7 +112,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_node_server',
-        'Node.js server heaps: `require.cache` entries ranked by what their exports retain, IncomingMessage / ServerResponse / Socket / Timeout counts with lifecycle flags, and the sockets and timers carrying AsyncLocalStorage request stores, with their routes.',
+        'Node.js server heaps: `require.cache` entries ranked by what their exports retain, IncomingMessage / ServerResponse / Socket / Timeout counts with lifecycle flags, and the sockets and timers carrying AsyncLocalStorage request stores, with their routes; who strongly holds each extra `vm` realm (Map and key), and chunks loaded but never evaluated.',
       ],
       [
         'memlab_realm_summary',
