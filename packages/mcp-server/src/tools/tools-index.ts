@@ -606,6 +606,10 @@ const GROUPS: Group[] = [
         'memlab_field_fill',
         'Every field of a record collection at once: % null, constant, empty, per-record copies vs shared, plus timestamp span / rate / age. Tells empty stubs and copied arrays from real content.',
       ],
+      [
+        'memlab_finished_state',
+        'Objects whose own status says FINISHED (traceStatus SUCCESS, completed:true, aborted, UPLOAD_PENDING, empty observers) but that still own big buffers, by holder; with 2+ snapshots, whether the buffer still grows.',
+      ],
     ],
   },
   {

@@ -226,7 +226,7 @@ const AGE_BUCKETS: Array<[string, number]> = [
   ['>1d', Infinity],
 ];
 
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   const s = ms / 1000;
   if (s < 120) return `${s.toFixed(1)} s`;
   if (s < 7200) return `${(s / 60).toFixed(1)} min`;

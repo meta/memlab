@@ -467,6 +467,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_array_group_by` | Group an array’s elements by a property to see what is piling up. |
 | `memlab_property_distribution` | Cardinality and top values of one property across instances. |
 | `memlab_field_fill` | Every field of a record collection at once: % null, constant, empty, per-record copies vs shared, plus timestamp span / rate / age. Tells empty stubs and copied arrays from real content. |
+| `memlab_finished_state` | Objects whose own status says FINISHED (traceStatus SUCCESS, completed:true, aborted, UPLOAD_PENDING, empty observers) but that still own big buffers, by holder; with 2+ snapshots, whether the buffer still grows. |
 
 ### Strings and duplication
 
