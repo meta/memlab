@@ -468,6 +468,10 @@ const GROUPS: Group[] = [
         'Retained React elements and fibers by component: fibers mounted / alternate / detached, elements by holder (mounted tree, closure, update queue, dev debug field…); per-rung growth with `run_dir`.',
       ],
       [
+        'memlab_fiber_census',
+        'What the mounted React tree is made of per list item: rendered vs collapsed/virtualized items by subtree size, and each heavy child type per rendered item ("44 per item × 32 items"), with removal bytes; per-snapshot deltas with `paths`.',
+      ],
+      [
         'memlab_error_callsites',
         'Where retained Error objects were created, from the stack frames V8 captured (survives a truncated `.stack`); groups by top frames, names the JSX site of React `_debugStack` Errors.',
       ],
