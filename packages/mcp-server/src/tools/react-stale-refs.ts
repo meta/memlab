@@ -159,7 +159,11 @@ export type CapturedHit = {
 /**
  * Detached DOM elements held as variables in a closure's own scope and the
  * scope around it (the hook's render scope). Module scope is not searched:
- * a module variable is not specific to one cleanup.
+ * a module variable is not specific to one cleanup. A closure's `context` is
+ * the scope it was created in, so when the effect callback captures nothing
+ * the climb starts at the hook's scope and its `previous` is the module's.
+ * The module scope is the context whose `previous` is not a function Context
+ * (the NativeContext or a ScriptContext), and the climb stops there.
  */
 export function capturedDetached(
   closure: IHeapNode,
@@ -168,6 +172,8 @@ export function capturedDetached(
   const out: CapturedHit[] = [];
   let ctx = edgeTo(closure, 'context');
   for (let depth = 0; depth < maxDepth && isContextNode(ctx); depth++) {
+    const previous = edgeTo(ctx, 'previous');
+    if (!isContextNode(previous)) break;
     for (const e of ctx.references) {
       const t = e.toNode;
       if (
@@ -178,7 +184,7 @@ export function capturedDetached(
         out.push({context: ctx, variable: String(e.name_or_index), target: t});
       }
     }
-    ctx = edgeTo(ctx, 'previous');
+    ctx = previous;
   }
   return out;
 }

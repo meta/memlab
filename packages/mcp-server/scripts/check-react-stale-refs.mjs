@@ -127,6 +127,13 @@ function feed() {
   g.link(ctx, el, 'el', 'context');
   g.link(ctx, parent, 'previous', 'internal');
   g.link(parent, g.node('Object'), 'ref', 'context');
+  // useSurvey's scope sits in the module's scope, which holds its own
+  // detached element; the module scope's `previous` is the NativeContext.
+  const moduleCtx = g.node('system / Context');
+  g.link(parent, moduleCtx, 'previous', 'internal');
+  g.link(moduleCtx, g.node('system / NativeContext'), 'previous', 'internal');
+  const moduleEl = g.node('Detached HTMLSpanElement', 'native');
+  g.link(moduleCtx, moduleEl, 'cachedNode', 'context');
   const info = g.node('system / ScopeInfo');
   g.link(parent, info, 'scope_info', 'internal');
   g.link(info, g.node('ref', 'string'), 0, 'hidden');
@@ -193,6 +200,21 @@ test('only detached DOM in the scope chain is captured', () => {
   assert.equal(hits.length, 1);
   assert.equal(hits[0].variable, 'el');
   assert.equal(hits[0].target.id, f.el.id);
+});
+
+test('the climb stops at module scope', () => {
+  const f = feed();
+  // A cleanup created in the hook body that captures nothing of its own:
+  // its context is useSurvey's scope, whose `previous` is the module's.
+  const bare = f.g.node('', 'closure');
+  f.g.link(bare, f.parent, 'context', 'internal');
+  assert.deepEqual(capturedDetached(bare), []);
+  assert.deepEqual(capturedDetached(bare, 5), []);
+  const deep = capturedDetached(f.cleanup, 5);
+  assert.deepEqual(
+    deep.map(h => h.variable),
+    ['el'],
+  );
 });
 
 test('ScopeInfo names the hook, an anonymous scope gives null', () => {
