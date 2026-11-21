@@ -79,6 +79,8 @@ test('sections take turns, largest first, top-retained rows last', () => {
     {label: 'growth', bytes: 3e5, ids: [5], section: 11},
     {label: 'stale React ref', bytes: 2e5, ids: [6], section: 7},
     {label: 'async queue', bytes: 4e5, ids: [7], section: 10},
+    // React lists are not cuts.
+    {label: 'React list: Feed', bytes: 9e9, ids: [8], section: 8},
   ];
   const got = entries(residualCall(leads, 10)).map(e => e.label);
   assert.deepEqual(got, [

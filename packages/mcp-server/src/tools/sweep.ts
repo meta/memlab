@@ -18,7 +18,7 @@ import {
   listSnapshots,
 } from '../heap-state.js';
 import {cachedPathLabeler} from '../heap-families.js';
-import {recordSweepLeads} from '../lead-registry.js';
+import {recordSweepLeads, SWEEP_SECTION as SEC} from '../lead-registry.js';
 import {getSlotBytes} from '../heap-shapes.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {stringFamilyCensus} from '../string-families.js';
@@ -171,7 +171,7 @@ function topRetained(s: IHeapSnapshot, caps: Caps, leads: Lead[]): string[] {
         label: holder,
         bytes: node.retainedSize,
         ids: [node.id],
-        section: 1,
+        section: SEC.top,
       });
     }
     return [
@@ -233,7 +233,7 @@ function collections(s: IHeapSnapshot, caps: Caps, leads: Lead[]): string[] {
         label: holder,
         bytes: r.retained,
         ids: [r.node.id],
-        section: 2,
+        section: SEC.dead,
       });
     }
   }
@@ -260,7 +260,7 @@ function strings(s: IHeapSnapshot, caps: Caps, leads: Lead[]): string[] {
       leads.push({
         label: `strings ${f.count <= 50 ? clip(f.key, 24) : edge}`,
         bytes: f.bytes,
-        section: 3,
+        section: SEC.strings,
         ...(f.count <= 50 ? {ids: [f.exampleId]} : {edge}),
       });
     }
@@ -309,7 +309,7 @@ function buffers(s: IHeapSnapshot, caps: Caps, leads: Lead[]): string[] {
           label: `${r.flag}: ${r.where.replace(/[()]/g, '').split(/[.: ]/).pop()}`,
           bytes: r.bytes,
           ids: [r.id],
-          section: 4,
+          section: SEC.buffers,
         });
       const entries =
         r.entries != null ? `${formatNumber(r.entries)} entries, ` : '';
@@ -465,7 +465,12 @@ function classByHolder(s: IHeapSnapshot, caps: Caps): string[] {
 function asyncAndNode(s: IHeapSnapshot, env: string, leads: Lead[]): string[] {
   const flags = asyncFlagLines(s, asyncCensusFacts(s));
   for (const f of flags) {
-    leads.push({label: f.label, bytes: f.bytes, ids: [f.id], section: 10});
+    leads.push({
+      label: f.label,
+      bytes: f.bytes,
+      ids: [f.id],
+      section: SEC.async,
+    });
   }
   const node = [
     ...nodeServerFlagLines(s, env).filter(l => l.startsWith('- ')),
@@ -495,24 +500,27 @@ function laterSections(
     case 'diag': {
       const skipIds = new Set(leads.flatMap(l => l.ids ?? []));
       return numbered(
-        5,
+        SEC.diag,
         diagnosticBuffersSweepSection(s, {cap: caps.extra, skipIds}),
       );
     }
     case 'finished':
-      return numbered(6, finishedStateSweepSection(s, {cap: caps.extra}));
+      return numbered(
+        SEC.finished,
+        finishedStateSweepSection(s, {cap: caps.extra}),
+      );
     case 'stale': {
       const found: StaleReactLead[] = [];
       const lines = reactStaleRefsSweepSection(s, {
         cap: caps.extra,
-        section: 7,
+        section: SEC.stale,
         leads: found,
       });
       leads.push(...found);
       return lines;
     }
     case 'lists':
-      return numbered(8, fiberCensusSweepSection(s));
+      return numbered(SEC.lists, fiberCensusSweepSection(s));
   }
 }
 
@@ -561,7 +569,7 @@ async function ladder(
           label: holder,
           bytes: 0,
           ids: [Number(id)],
-          section: 11,
+          section: SEC.growth,
         });
       }
       const at = anchor.includes('(root)')
@@ -590,7 +598,12 @@ async function ladder(
   for (const r of rows.slice(0, caps.growth)) {
     const last = r.retained.length - 1;
     const delta = r.retained[last] - r.retained[0];
-    leads.push({label: r.holder, bytes: delta, ids: [r.id], section: 11});
+    leads.push({
+      label: r.holder,
+      bytes: delta,
+      ids: [r.id],
+      section: SEC.growth,
+    });
     growth.push(
       `- @${r.id} ${clip(r.name, 30)} ${tick(r.holder)} edges ${r.edges.map(formatNumber).join('→')}, ` +
         `retained ${r.retained.map(formatBytes).join('→')} (+${formatBytes(delta)})` +
@@ -623,7 +636,20 @@ export function residualCall(leads: Lead[], cap: number): string | null {
   // One lead per section in turn, largest first, ladder growth first and the
   // top-retained rows last, so no one section fills the call.
   const bySection = new Map<number, Lead[]>();
-  for (const sec of [11, 2, 4, 7, 10, 3, 1]) bySection.set(sec, []);
+  // React lists (§8) are not cuts: a list parent retains the whole list.
+  for (const sec of [
+    SEC.growth,
+    SEC.dead,
+    SEC.buffers,
+    SEC.stale,
+    SEC.async,
+    SEC.finished,
+    SEC.diag,
+    SEC.strings,
+    SEC.top,
+  ]) {
+    bySection.set(sec, []);
+  }
   for (const l of leads) bySection.get(l.section)?.push(l);
   const queues = [...bySection.values()].map(q =>
     q.sort((a, b) => b.bytes - a.bytes),

@@ -39,6 +39,7 @@ const {
   isQuestionable,
   checkCall,
   coverageReport,
+  dedupe,
 } = await import(pathToFileURL(tool).href);
 const {recordLead, recordSweepLeads, allLeads, clearLeads} = await import(
   pathToFileURL(path.join(dist, 'lead-registry.js')).href
@@ -243,6 +244,64 @@ test('sweep leads map sections to kinds', () => {
       ['cancelled scheduler tasks: x', 'dead'],
       ['strings Object.__ref', 'duplicate'],
     ],
+  );
+});
+
+test('new sweep sections map to kinds; growth and async keep theirs', () => {
+  clearLeads();
+  const fake = {getNodeById: () => null};
+  recordSweepLeads(fake, [
+    {label: 'error history: x', bytes: 5, ids: [2001], section: 5},
+    {label: 'trace finished', bytes: 5, ids: [2002], section: 6},
+    {label: 'Unit cleanup el', bytes: 5, ids: [2003], section: 7},
+    {label: 'React list: Feed', bytes: 0, ids: [2004], section: 8},
+    {label: 'async flag', bytes: 5, ids: [2005], section: 10},
+    {label: 'grew', bytes: 5, ids: [2006], section: 11},
+  ]);
+  assert.deepEqual(
+    allLeads().map(l => l.kind),
+    ['large', 'finished', 'dead', 'large', 'finished', 'growing'],
+  );
+});
+
+test('a snapshot whose book was evicted or cleared gets a new book', () => {
+  clearLeads();
+  const snaps = Array.from({length: 17}, () => ({getNodeById: () => null}));
+  snaps.forEach((s, i) =>
+    recordLead(s, {kind: 'large', why: 'w', source: 't', ids: [i + 1]}),
+  );
+  // 16 books are kept: the first snapshot's book is gone.
+  assert.equal(allLeads().length, 16);
+  recordLead(snaps[0], {kind: 'large', why: 'w', source: 't', ids: [99]});
+  assert.ok(allLeads().some(l => l.ids[0] === 99));
+  clearLeads();
+  recordLead(snaps[1], {kind: 'large', why: 'w', source: 't', ids: [98]});
+  assert.deepEqual(
+    allLeads().map(l => l.ids[0]),
+    [98],
+  );
+});
+
+test('dedupe does not write into the registry leads', () => {
+  clearLeads();
+  const s1 = {getNodeById: () => null};
+  const s2 = {getNodeById: () => null};
+  const l = {
+    kind: 'large',
+    why: 'w',
+    source: 't',
+    path: 'module:WebLoom.pendingTraces',
+  };
+  recordLead(s1, {...l, ids: [1], bytes: 10});
+  recordLead(s2, {...l, ids: [2], bytes: 5});
+  for (let i = 0; i < 3; i++) {
+    const rows = dedupe(allLeads());
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].ids, [1, 2]);
+  }
+  assert.deepEqual(
+    allLeads().map(x => x.ids),
+    [[1], [2]],
   );
 });
 

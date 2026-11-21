@@ -172,7 +172,9 @@ export function dedupe(leads: RecordedLead[]): Row[] {
           : `@${l.ids[0] ?? l.label}`; // ids hold across one session's rungs
     const old = by.get(key);
     // Every member's ids still match the draft; the largest one leads.
-    if (old == null) by.set(key, {...l, more: 0});
+    // Own copy of `ids`: `l` is the registry's lead, and the merges below
+    // append to the row's array.
+    if (old == null) by.set(key, {...l, ids: [...l.ids], more: 0});
     else if (l.bytes > old.bytes) {
       by.set(key, {...l, ids: [...l.ids, ...old.ids], more: old.more + 1});
     } else {

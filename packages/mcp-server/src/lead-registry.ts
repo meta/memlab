@@ -59,7 +59,9 @@ const bookOf = new WeakMap<IHeapSnapshot, Book>();
 
 function bookFor(s: IHeapSnapshot | null): Book {
   const known = s != null ? bookOf.get(s) : books.find(b => b.handle === '');
-  if (known != null) return known;
+  // An evicted or cleared book stays in the WeakMap: writing to it would lose
+  // the lead, since `allLeads` reads only `books`. Start a new one.
+  if (known != null && books.includes(known)) return known;
   const handle =
     s == null
       ? ''
@@ -132,16 +134,48 @@ export function clearLeads(): void {
 export const flagKind = (flag: string): LeadKind =>
   /cancel/.test(flag) ? 'dead' : /per-call/.test(flag) ? 'growing' : 'large';
 
+/**
+ * memlab_sweep's section numbers, shared by the sweep (leads, residual call)
+ * and the kinds below, so a renumbering cannot leave either behind.
+ */
+export const SWEEP_SECTION = {
+  top: 1,
+  dead: 2,
+  strings: 3,
+  buffers: 4,
+  diag: 5,
+  finished: 6,
+  stale: 7,
+  lists: 8,
+  classes: 9,
+  async: 10,
+  growth: 11,
+  residual: 12,
+} as const;
+
+/** A lead a sweep section hands back for the residual call and coverage. */
+export interface SweepLead {
+  label: string;
+  bytes: number;
+  section: number;
+  ids?: number[];
+  edge?: string;
+}
+
 const SWEEP_KIND: Record<number, [LeadKind, string]> = {
-  1: ['large', 'sweep top retained'],
-  2: ['dead', 'collection ≥25% dead entries'],
-  3: ['duplicate', 'string family'],
-  6: ['finished', 'async flag'],
-  7: ['growing', 'grew across the ladder'],
+  [SWEEP_SECTION.top]: ['large', 'sweep top retained'],
+  [SWEEP_SECTION.dead]: ['dead', 'collection ≥25% dead entries'],
+  [SWEEP_SECTION.strings]: ['duplicate', 'string family'],
+  [SWEEP_SECTION.diag]: ['large', 'diagnostic buffer'],
+  [SWEEP_SECTION.finished]: ['finished', 'finished, still owns a buffer'],
+  [SWEEP_SECTION.stale]: ['dead', 'React state holding dead UI'],
+  [SWEEP_SECTION.lists]: ['large', 'React list'],
+  [SWEEP_SECTION.async]: ['finished', 'async flag'],
+  [SWEEP_SECTION.growth]: ['growing', 'grew across the ladder'],
 };
 
 /**
- * memlab_sweep's leads (its section-8 list): call once per sweep, after the
+ * memlab_sweep's leads (every section's): call once per sweep, after the
  * sections ran, with the swept snapshot.
  */
 export function recordSweepLeads(
@@ -156,7 +190,8 @@ export function recordSweepLeads(
 ): void {
   for (const l of leads) {
     // Section 4 labels start with the buffer's flag.
-    const flag = l.section === 4 ? l.label.split(':')[0] : '';
+    const flag =
+      l.section === SWEEP_SECTION.buffers ? l.label.split(':')[0] : '';
     const [kind, why] =
       flag !== ''
         ? [flagKind(flag), flag]
