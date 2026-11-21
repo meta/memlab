@@ -374,10 +374,11 @@ export interface UnevaluatedScript {
 const MIN_FACTORIES = 10;
 
 /**
- * Scripts whose closures are all top-level module factories (context = the
- * NativeContext, held by an array element or a Map entry) and none from a
- * function that ran (context = a function Context): loaded, never evaluated.
- * `freedLimit` caps the reachability walks for the freed bytes.
+ * Scripts whose closures are all top-level (context = the NativeContext), at
+ * least 95% of them module factories (held by an array element or a Map
+ * entry), and none from a function that ran (context = a function Context):
+ * loaded, never evaluated. `freedLimit` caps the reachability walks for the
+ * freed bytes; 0 skips them (and the full-heap walk) and leaves `freed` at 0.
  */
 export function unevaluatedScripts(
   snapshot: IHeapSnapshot,
@@ -439,7 +440,8 @@ export function unevaluatedScripts(
         r.factories >= 0.95 * r.members.length,
     )
     .sort((x, y) => y.sourceBytes - x.sourceBytes);
-  if (hits.length === 0) return [];
+  // The sweep passes 0: skip the full-heap reachability walk it would not use.
+  if (hits.length === 0 || freedLimit <= 0) return hits;
   const reach = strongReach(snapshot);
   for (const r of hits.slice(0, freedLimit)) {
     const cut = new Uint8Array(snapshot.nodes.length);
@@ -491,7 +493,9 @@ export function unevaluatedLines(
         .map(h => [
           `${scriptLabel(h.script, 60)} @${h.script.id}`,
           formatBytes(h.sourceBytes),
-          `${formatNumber(h.members.length)} (all factories, 0 inner)`,
+          h.factories === h.members.length
+            ? `${formatNumber(h.members.length)} (all factories, 0 inner)`
+            : `${formatNumber(h.members.length)} (${formatNumber(h.factories)} factories, 0 inner)`,
           registeredLabel(h),
           h.array == null ? '-' : `@${h.array.id} ${heldByLabel(h.array, 36)}`,
           formatBytes(h.freed),
@@ -499,7 +503,7 @@ export function unevaluatedLines(
       new Set([1, 2, 5]),
     ),
     '',
-    '_Every closure from these scripts is a top-level module factory: none has a function Context, so no factory ran (a module body that ran leaves closures over its scope). Registered = slots in a module-factory Map; 0 = no factory Map holds them (with Turbopack: another chunk registered those module ids first). Freed = self bytes no longer strongly reachable without the script and its factories. Check what imports the chunk before removing it._',
+    '_Every closure from these scripts was created at top level (its Context is the NativeContext), and at least 95% are module factories held by an array or a module-factory Map. None has a function Context, so no factory ran (a module body that ran leaves closures over its scope). Registered = slots in a module-factory Map; 0 = no factory Map holds them (with Turbopack: another chunk registered those module ids first). Freed = self bytes no longer strongly reachable without the script and its factories. Check what imports the chunk before removing it._',
     '',
   ];
 }
