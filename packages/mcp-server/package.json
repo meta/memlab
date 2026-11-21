@@ -1,6 +1,6 @@
 {
   "name": "@memlab/mcp-server",
-  "version": "2.509.0",
+  "version": "2.510.0",
   "license": "MIT",
   "description": "MCP server for MemLab heap snapshot analysis — gives AI coding assistants tools to explore JavaScript heap snapshots, find memory leaks, and identify optimization opportunities",
   "author": "Liang Gong <lgong@meta.com>",
@@ -63,7 +63,7 @@
     "test-pkg": "node scripts/check-tool-docs.mjs && node scripts/check-tool-index.mjs && node scripts/sync-tool-catalog.mjs --check && node scripts/check-version-sync.mjs",
     "sync-catalog": "node scripts/sync-tool-catalog.mjs",
     "test-fixtures": "node scripts/check-fixtures.mjs",
-    "test-units": "node scripts/check-byte-size.mjs && node scripts/check-pagination.mjs && node scripts/check-format-utils.mjs && node scripts/check-slope-stats.mjs && node scripts/check-run-samples.mjs && node scripts/check-known-families.mjs && node scripts/check-shape-families.mjs && node scripts/check-terse-output.mjs && node scripts/check-round-index.mjs && node scripts/check-activity-report.mjs && node scripts/check-probe-set-code.mjs && node scripts/check-dom-names.mjs && node scripts/check-held-by.mjs && node scripts/check-per-call-keys.mjs && node scripts/check-noop-name.mjs && node scripts/check-node-server.mjs && node scripts/check-string-families.mjs && node scripts/check-collection-census.mjs && node scripts/check-growth-anchors.mjs && node scripts/check-object-growth.mjs && node scripts/check-residual.mjs && node scripts/check-field-fill.mjs && node scripts/check-code-diff.mjs && node scripts/check-sweep.mjs && node scripts/check-full-string-identity.mjs && node scripts/check-node-server-pins.mjs",
+    "test-units": "node scripts/check-byte-size.mjs && node scripts/check-pagination.mjs && node scripts/check-format-utils.mjs && node scripts/check-slope-stats.mjs && node scripts/check-run-samples.mjs && node scripts/check-known-families.mjs && node scripts/check-shape-families.mjs && node scripts/check-terse-output.mjs && node scripts/check-round-index.mjs && node scripts/check-activity-report.mjs && node scripts/check-probe-set-code.mjs && node scripts/check-dom-names.mjs && node scripts/check-held-by.mjs && node scripts/check-per-call-keys.mjs && node scripts/check-noop-name.mjs && node scripts/check-node-server.mjs && node scripts/check-string-families.mjs && node scripts/check-collection-census.mjs && node scripts/check-growth-anchors.mjs && node scripts/check-object-growth.mjs && node scripts/check-residual.mjs && node scripts/check-field-fill.mjs && node scripts/check-code-diff.mjs && node scripts/check-sweep.mjs && node scripts/check-full-string-identity.mjs && node scripts/check-node-server-pins.mjs && node scripts/check-react-stale-refs.mjs",
     "publish-patch": "npm publish",
     "clean-pkg": "rm -rf ./dist && rm -rf ./node_modules && rm -f ./tsconfig.tsbuildinfo"
   },

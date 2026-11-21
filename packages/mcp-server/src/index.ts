@@ -194,6 +194,7 @@ import {
   registerSweepDigest,
 } from './tools/round-digest.js';
 import {registerReactOwners} from './tools/react-owners.js';
+import {registerReactStaleRefs} from './tools/react-stale-refs.js';
 import {registerReactUpdateQueues} from './tools/react-update-queues.js';
 import {registerIdSpaceAudit} from './tools/id-space-audit.js';
 import {SERVER_VERSION} from './server-version.js';
@@ -380,6 +381,7 @@ registerAnonymizeSnapshot(server);
 registerRoundDigest(server);
 registerSweepDigest(server);
 registerReactOwners(server);
+registerReactStaleRefs(server);
 registerReactUpdateQueues(server);
 registerIdSpaceAudit(server);
 

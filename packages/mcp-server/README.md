@@ -398,6 +398,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | Tool | Use it when |
 | --- | --- |
 | `memlab_react_owners` | Name the React COMPONENT behind a population of plain `Object`s. Fibers and hooks are all `Object` in a production bundle, so every class-name heuristic — including `helpers.owner` — walks past them. |
+| `memlab_react_stale_refs` | Live React state pointing at dead UI: effect cleanups on MOUNTED fibers that captured now-detached DOM (grouped by component and variable, with hook scope and module), and Map/Set/object registries holding scope instances, DOM nodes or fibers of UNMOUNTED components, with bytes freed by deleting them. |
 | `memlab_population_vs_owners` | STRUCTURAL or ACCUMULATING? One record per live owner is a baseline; many records per owner is a leak. |
 | `memlab_chain_walk` | Walk a repeated linked structure (`.next` update queues, `.prev` closure chains, LRU lists) and report how deep it goes — use this instead of a hand-written loop, which cannot tell a cycle from a hop cap. |
 | `memlab_module_attribution` | Attribute bytes to the MODULE that owns them, by walking dominators up to the nearest module-registry export. |
