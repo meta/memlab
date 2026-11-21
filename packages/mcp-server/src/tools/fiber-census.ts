@@ -581,16 +581,22 @@ export function renderGroup(g: ListGroup, withBytes: boolean): string[] {
   return out;
 }
 
-/** Compact sweep section: top list groups and their heavy children. */
+/** Lists shorter than this stay out of memlab_sweep. */
+const SWEEP_MIN_ITEMS = 20;
+
+/** Compact sweep section: top list groups (20+ items) and their heavy children. */
 export function fiberCensusSweepSection(snapshot: IHeapSnapshot): string[] {
   const c = fiberCensus(snapshot, {lists: 2, rows: 5});
-  if (c.groups.length === 0) return [];
+  // A short list (a handful of panels or rows) is rarely the story; the
+  // full tool still shows it.
+  const groups = c.groups.filter(g => g.items >= SWEEP_MIN_ITEMS);
+  if (groups.length === 0) return [];
   const out = [
     '## React lists (fiber census)',
     '',
     `- ${formatNumber(c.mounted)} mounted fibers; removal bytes per row → \`memlab_fiber_census\``,
   ];
-  for (const g of c.groups) out.push('', ...renderGroup(g, false));
+  for (const g of groups) out.push('', ...renderGroup(g, false));
   return [...out, ''];
 }
 

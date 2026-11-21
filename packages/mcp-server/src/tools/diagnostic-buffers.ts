@@ -556,6 +556,8 @@ export function diagnosticBuffersSweepSection(
 ): string[] {
   const {rows, excluded} = diagnosticBuffers(snapshot);
   const kept = rows.filter(r => opts.skipIds?.has(r.id) !== true);
+  // Every row already printed elsewhere in the sweep: no empty table.
+  if (kept.length === 0) return [];
   const body = renderDiagnosticBuffers(
     {rows: kept, excluded},
     opts.cap ?? 6,

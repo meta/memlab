@@ -18,6 +18,7 @@ import {
   listSnapshots,
 } from '../heap-state.js';
 import {cachedPathLabeler} from '../heap-families.js';
+import {recordSweepLeads} from '../lead-registry.js';
 import {getSlotBytes} from '../heap-shapes.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {stringFamilyCensus} from '../string-families.js';
@@ -37,6 +38,7 @@ import {
   truncateNodeName,
 } from '../utils.js';
 import {asyncCensusFacts, asyncFlagLines} from './async-census.js';
+import {diagnosticBuffersSweepSection} from './diagnostic-buffers.js';
 import {
   DEAD_FLAG,
   findCollections,
@@ -50,10 +52,17 @@ import {
   moduleRegistryIds,
   probeBuffers,
 } from './framework-buffers.js';
+import {fiberCensusSweepSection} from './fiber-census.js';
+import {finishedStateSweepSection} from './finished-state.js';
 import {renderGrowthAnchors} from './growth-anchors.js';
 import {cachedModuleScopes} from './module-attribution.js';
 import {nodeServerFlagLines} from './node-server.js';
+import {nodeServerPinsSweepSection} from './node-server-pins.js';
 import {formatObjectGrowth, ObjectGrowthTracker} from './object-growth.js';
+import {
+  reactStaleRefsSweepSection,
+  type StaleReactLead,
+} from './react-stale-refs.js';
 import type {NumberRow} from './residual.js';
 
 /**
@@ -74,7 +83,8 @@ const CAPS = {
   growth: 10,
   anchors: 8,
   cuts: 10,
-  budget: 12_000,
+  extra: 5,
+  budget: 14_000,
 };
 type Caps = typeof CAPS;
 const capsFor = (detail: 'leads' | 'full'): Caps =>
@@ -83,7 +93,7 @@ const capsFor = (detail: 'leads' | 'full'): Caps =>
     : (Object.fromEntries(
         Object.entries(CAPS).map(([k, v]) => [
           k,
-          k === 'budget' ? 30_000 : v * 2,
+          k === 'budget' ? 34_000 : v * 2,
         ]),
       ) as Caps);
 
@@ -418,7 +428,7 @@ function classByHolder(s: IHeapSnapshot, caps: Caps): string[] {
     g.set(key, r);
   });
   const out = [
-    '## 5. Largest class by holder (by self size) → `memlab_property_distribution` / `memlab_find_nodes_by_class`',
+    '## 9. Largest class by holder (by self size) → `memlab_property_distribution` / `memlab_find_nodes_by_class`',
     '',
   ];
   for (const [k, v] of picks) {
@@ -455,20 +465,64 @@ function classByHolder(s: IHeapSnapshot, caps: Caps): string[] {
 function asyncAndNode(s: IHeapSnapshot, env: string, leads: Lead[]): string[] {
   const flags = asyncFlagLines(s, asyncCensusFacts(s));
   for (const f of flags) {
-    leads.push({label: f.label, bytes: f.bytes, ids: [f.id], section: 6});
+    leads.push({label: f.label, bytes: f.bytes, ids: [f.id], section: 10});
   }
-  const node = nodeServerFlagLines(s, env).filter(l => l.startsWith('- '));
+  const node = [
+    ...nodeServerFlagLines(s, env).filter(l => l.startsWith('- ')),
+    ...nodeServerPinsSweepSection(s, env),
+  ];
   const lines = [...flags.map(f => `- ${f.line}`), ...node];
   return lines.length === 0
     ? []
-    : ['## 6. Async and Node.js server', '', ...lines, ''];
+    : ['## 10. Async and Node.js server', '', ...lines, ''];
+}
+
+/** Numbers a section built elsewhere: `## Title` -> `## 5. Title`. */
+export function numbered(n: number, lines: string[]): string[] {
+  if (lines.length === 0) return lines;
+  const [head, ...rest] = lines;
+  return [head.replace(/^## (?:\d+\. )?/, `## ${n}. `), ...rest];
+}
+
+/** Sections 5-8: buffers that outlived their use, and React state. */
+function laterSections(
+  s: IHeapSnapshot,
+  caps: Caps,
+  leads: Lead[],
+  section: 'diag' | 'finished' | 'stale' | 'lists',
+): string[] {
+  switch (section) {
+    case 'diag': {
+      const skipIds = new Set(leads.flatMap(l => l.ids ?? []));
+      return numbered(
+        5,
+        diagnosticBuffersSweepSection(s, {cap: caps.extra, skipIds}),
+      );
+    }
+    case 'finished':
+      return numbered(6, finishedStateSweepSection(s, {cap: caps.extra}));
+    case 'stale': {
+      const found: StaleReactLead[] = [];
+      const lines = reactStaleRefsSweepSection(s, {
+        cap: caps.extra,
+        section: 7,
+        leads: found,
+      });
+      leads.push(...found);
+      return lines;
+    }
+    case 'lists':
+      return numbered(8, fiberCensusSweepSection(s));
+  }
 }
 
 /** `| a | b |` -> cells. */
-const cells = (row: string) =>
+export const cells = (row: string) =>
   row
     .replace(/^\|\s*|\s*\|$/g, '')
-    .split(/\s+\|\s+/)
+    // Padded (`a | b`) and compact (`a|b`, terse sessions) tables; `\|` is a
+    // pipe inside a cell.
+    .split(/\s*(?<!\\)\|\s*/)
     .map(c => c.trim());
 
 type Rung = (fn: (s: IHeapSnapshot) => void) => Promise<void>;
@@ -507,7 +561,7 @@ async function ladder(
           label: holder,
           bytes: 0,
           ids: [Number(id)],
-          section: 7,
+          section: 11,
         });
       }
       const at = anchor.includes('(root)')
@@ -525,7 +579,7 @@ async function ladder(
   // different class on another rung mean separate sessions.
   if (formatObjectGrowth([], 0, t, mismatchShare).length > 0) {
     return [
-      `## 7. Growth across ${n} snapshots`,
+      `## 11. Growth across ${n} snapshots`,
       '',
       `- **Not compared by id:** ${(mismatchShare * 100).toFixed(0)}% of the node ids these snapshots share name a different class, so they are separate sessions (a reload, another tab or build). Compare by class instead → \`memlab_diff_snapshots\` / \`memlab_explain_delta\``,
       '',
@@ -536,7 +590,7 @@ async function ladder(
   for (const r of rows.slice(0, caps.growth)) {
     const last = r.retained.length - 1;
     const delta = r.retained[last] - r.retained[0];
-    leads.push({label: r.holder, bytes: delta, ids: [r.id], section: 7});
+    leads.push({label: r.holder, bytes: delta, ids: [r.id], section: 11});
     growth.push(
       `- @${r.id} ${clip(r.name, 30)} ${tick(r.holder)} edges ${r.edges.map(formatNumber).join('→')}, ` +
         `retained ${r.retained.map(formatBytes).join('→')} (+${formatBytes(delta)})` +
@@ -545,7 +599,7 @@ async function ladder(
   }
   if (growth.length === 0 && anchors.length === 0) return [];
   return [
-    `## 7. Growth across ${n} snapshots (oldest first; ids from the last)`,
+    `## 11. Growth across ${n} snapshots (oldest first; ids from the last)`,
     '',
     ...(growth.length > 0
       ? [
@@ -564,12 +618,12 @@ async function ladder(
   ];
 }
 
-/** Section 8: the residual call that cuts the top leads, ready to paste. */
+/** Section 12: the residual call that cuts the top leads, ready to paste. */
 export function residualCall(leads: Lead[], cap: number): string | null {
   // One lead per section in turn, largest first, ladder growth first and the
   // top-retained rows last, so no one section fills the call.
   const bySection = new Map<number, Lead[]>();
-  for (const sec of [7, 2, 4, 6, 3, 1]) bySection.set(sec, []);
+  for (const sec of [11, 2, 4, 7, 10, 3, 1]) bySection.set(sec, []);
   for (const l of leads) bySection.get(l.section)?.push(l);
   const queues = [...bySection.values()].map(q =>
     q.sort((a, b) => b.bytes - a.bytes),
@@ -600,21 +654,21 @@ export function residualCall(leads: Lead[], cap: number): string | null {
 export function registerSweep(server: McpServer): void {
   server.tool(
     'memlab_sweep',
-    'The one call to make after memlab_load_snapshot: every first-pass lead in ONE compact report. Runs the sweep the best manual investigations followed, each section capped and omitted when empty: (1) top ~30 retained objects (strings and code excluded) with holder, marked when held directly by the GC root, a global or a module; (2) collections with ≥500 entries flagged at least 25% dead, plus the largest; (3) string families; (4) flagged framework buffers (per-call keys, cancelled scheduler tasks, cancelled-in-place listener arrays, oversized logs); (5) the largest class by self size, and heap numbers, grouped by holder `Class.edge`; (6) async flags and Node.js server flags; (7) with 2+ snapshots (`paths`, or several resident): same-id objects that grew at every rung and growth anchors; (8) a ready-to-paste memlab_residual call that cuts the top leads, to look at the long tail. ' +
-      'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 12 KB by default; `detail:"full"` raises every cap (about 30 KB). Section timings are in the footer.',
+    'The one call to make after memlab_load_snapshot: every first-pass lead in ONE compact report. Runs the sweep the best manual investigations followed, each section capped and omitted when empty: (1) top ~30 retained objects (strings and code excluded) with holder, marked when held directly by the GC root, a global or a module; (2) collections with ≥500 entries flagged at least 25% dead, plus the largest; (3) string families; (4) flagged framework buffers (per-call keys, cancelled scheduler tasks, cancelled-in-place listener arrays, oversized logs); (5) diagnostic buffers: error histories with repeated errors, the Performance timeline, telemetry queues; (6) finished traces, streams and uploads that still own their buffers; (7) React state holding dead UI: effect cleanups capturing detached DOM, registries keyed to unmounted fibers; (8) React lists: rendered items vs virtualized shells and per-item child counts; (9) the largest class by self size, and heap numbers, grouped by holder `Class.edge`; (10) async flags and Node.js server flags, including vm realms held per cache key and scripts loaded but never evaluated; (11) with 2+ snapshots (`paths`, or several resident): same-id objects that grew at every rung and growth anchors; (12) a ready-to-paste memlab_residual call that cuts the top leads, to look at the long tail. ' +
+      'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 14 KB by default; `detail:"full"` raises every cap (about 34 KB). Section timings are in the footer.',
     {
       paths: z
         .array(z.string())
         .optional()
         .describe(
-          'Snapshot paths, OLDEST FIRST. Sections 1-6 run on the LAST one, which becomes the active snapshot (so its @ids can be drilled); with 2 or more, section 7 compares them. Without it, the active snapshot is swept, and section 7 uses the other resident snapshots, in load order.',
+          'Snapshot paths, OLDEST FIRST. Sections 1-10 run on the LAST one, which becomes the active snapshot (so its @ids can be drilled); with 2 or more, section 11 compares them. Without it, the active snapshot is swept, and section 11 uses the other resident snapshots, in load order.',
         ),
       detail: z
         .enum(['leads', 'full'])
         .optional()
         .default('leads')
         .describe(
-          '"leads" (default, about 12 KB) or "full" (larger caps, about 30 KB).',
+          '"leads" (default, about 14 KB) or "full" (larger caps, about 34 KB).',
         ),
     },
     async ({paths, detail}) => {
@@ -673,12 +727,22 @@ export function registerSweep(server: McpServer): void {
         const lines = [
           `# Sweep: ${meta?.fileName ?? 'snapshot'} (${formatNumber(s.nodes.length)} nodes, ${formatBytes(total)}, ${envLabelOf({env})})`,
           '',
-          '_Leads, not verdicts: each line names @id, holder, bytes, why, and the tool to drill with. One snapshot shows standing sizes, not rates. Not covered: detached DOM and React fibers (`memlab_detached_dom`)._',
+          '_Leads, not verdicts: each line names @id, holder, bytes, why, and the tool to drill with. One snapshot shows standing sizes, not rates. Detached DOM trees themselves: `memlab_detached_dom`._',
           '',
           ...(await timed('top', () => topRetained(s, caps, leads))),
           ...(await timed('collections', () => collections(s, caps, leads))),
           ...(await timed('strings', () => strings(s, caps, leads))),
           ...(await timed('buffers', () => buffers(s, caps, leads))),
+          ...(await timed('diag', () => laterSections(s, caps, leads, 'diag'))),
+          ...(await timed('finished', () =>
+            laterSections(s, caps, leads, 'finished'),
+          )),
+          ...(await timed('react', () =>
+            laterSections(s, caps, leads, 'stale'),
+          )),
+          ...(await timed('lists', () =>
+            laterSections(s, caps, leads, 'lists'),
+          )),
           ...(await timed('classes', () => classByHolder(s, caps))),
           ...(await timed('async', () => asyncAndNode(s, env, leads))),
         ];
@@ -696,10 +760,11 @@ export function registerSweep(server: McpServer): void {
           );
         }
         const call = residualCall(leads, caps.cuts);
+        recordSweepLeads(s, leads);
         const tail: string[] = [];
         if (call != null) {
           tail.push(
-            '## 8. Next step: cut the leads above and look at what is left',
+            '## 12. Next step: cut the leads above and look at what is left',
             '',
             '```',
             call,

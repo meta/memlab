@@ -10,7 +10,8 @@
 
 /**
  * Unit tests for `memlab_sweep` (tools/sweep.ts): the direct-holder mark of
- * a top-retained row, and the residual call built from the leads.
+ * a top-retained row, the residual call built from the leads, section
+ * numbering, and the table-row split used by the ladder section.
  *
  *   npm run build-pkg && npm run test-units
  *
@@ -75,12 +76,16 @@ test('sections take turns, largest first, top-retained rows last', () => {
     {label: 'dead array', bytes: 1e5, ids: [3], section: 2},
     {label: 'dead map', bytes: 5e5, ids: [4], section: 2},
     {label: 'strings Object.src', bytes: 2e6, edge: 'Object.src', section: 3},
-    {label: 'growth', bytes: 3e5, ids: [5], section: 7},
+    {label: 'growth', bytes: 3e5, ids: [5], section: 11},
+    {label: 'stale React ref', bytes: 2e5, ids: [6], section: 7},
+    {label: 'async queue', bytes: 4e5, ids: [7], section: 10},
   ];
   const got = entries(residualCall(leads, 10)).map(e => e.label);
   assert.deepEqual(got, [
     'growth',
     'dead map',
+    'stale React ref',
+    'async queue',
     'strings Object.src',
     'top big',
     'dead array',
@@ -92,7 +97,7 @@ test('an edge lead becomes an edge entry, ids a node_ids entry', () => {
   const call = residualCall(
     [
       {label: 'strings Object.src', bytes: 2, edge: 'Object.src', section: 3},
-      {label: 'queue', bytes: 1, ids: [7], section: 6},
+      {label: 'queue', bytes: 1, ids: [7], section: 10},
     ],
     10,
   );
@@ -157,4 +162,27 @@ test('fields of one record type fold into one row; counts are summed', () => {
     ['FiberNode', 'actualDuration,treeBaseDuration', 109380],
     ['FiberNode', 'lanes', 47512],
   ]);
+});
+
+test('numbered: renumbers a section built elsewhere, leaves empty alone', () => {
+  const {numbered} = sweep;
+  assert.deepEqual(numbered(5, []), []);
+  assert.deepEqual(numbered(5, ['## Diagnostic buffers', '', '- a']), [
+    '## 5. Diagnostic buffers',
+    '',
+    '- a',
+  ]);
+  assert.deepEqual(numbered(7, ['## 9. React state', '']), [
+    '## 7. React state',
+    '',
+  ]);
+});
+
+test('cells: padded and compact (terse) table rows split the same way', () => {
+  const {cells} = sweep;
+  const want = ['Map @12', 'closure var x', 'a.b', '3', '1 KB'];
+  assert.deepEqual(cells('| Map @12 | closure var x | a.b | 3 | 1 KB |'), want);
+  assert.deepEqual(cells('|Map @12|closure var x|a.b|3|1 KB|'), want);
+  // An escaped pipe stays inside its cell.
+  assert.deepEqual(cells('|a \\| b|c|'), ['a \\| b', 'c']);
 });

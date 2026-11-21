@@ -72,7 +72,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_sweep',
-        'Every first-pass lead in ONE call after loading: top retained with holder, dead collections, string families, flagged framework buffers, largest class by holder, async/Node flags, ladder growth with 2+ snapshots, and a ready-to-paste memlab_residual call.',
+        'Every first-pass lead in ONE call after loading: top retained with holder, dead collections, string families, flagged framework buffers, diagnostic buffers, finished state still holding buffers, React state holding dead UI, React list composition, largest class by holder, async/Node flags, ladder growth with 2+ snapshots, and a ready-to-paste memlab_residual call.',
       ],
       [
         'memlab_app_heap',
