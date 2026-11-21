@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
+import {SWEEP_SECTION, type SweepLead} from '../lead-registry.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {
   enumerateMapEntries,
@@ -474,11 +475,30 @@ function renderRows(rows: FinishedRow[], growth: string[] | null): string {
  */
 export function finishedStateSweepSection(
   snapshot: IHeapSnapshot,
-  opts: {cap?: number; minBytes?: number; earlier?: IHeapSnapshot} = {},
+  opts: {
+    cap?: number;
+    minBytes?: number;
+    earlier?: IHeapSnapshot;
+    /** Collects a lead per shown group: its largest retained roots. */
+    leads?: SweepLead[];
+  } = {},
 ): string[] {
   const rows = findFinishedState(snapshot, opts.minBytes);
   if (rows.length === 0) return [];
   const shown = rows.slice(0, opts.cap ?? 5);
+  for (const r of shown) {
+    // The largest few: a group of 48 traces would fill the residual call.
+    const ids = [...new Map(r.retainedRoots.map(n => [n.id, n])).values()]
+      .sort((a, b) => b.retainedSize - a.retainedSize)
+      .slice(0, 10)
+      .map(n => n.id);
+    opts.leads?.push({
+      label: `${r.holder} finished (${r.evidence})`,
+      bytes: r.bytes,
+      section: SWEEP_SECTION.finished,
+      ids,
+    });
+  }
   const earlier = opts.earlier;
   const growth = earlier ? shown.map(r => growthNote(r, earlier)) : null;
   return [

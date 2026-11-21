@@ -84,7 +84,9 @@ const CAPS = {
   anchors: 8,
   cuts: 10,
   extra: 5,
-  budget: 14_000,
+  // The residual call is never cut, so its finished and diagnostic entries
+  // come out of this.
+  budget: 15_000,
 };
 type Caps = typeof CAPS;
 const capsFor = (detail: 'leads' | 'full'): Caps =>
@@ -507,7 +509,7 @@ function laterSections(
     case 'finished':
       return numbered(
         SEC.finished,
-        finishedStateSweepSection(s, {cap: caps.extra}),
+        finishedStateSweepSection(s, {cap: caps.extra, leads}),
       );
     case 'stale': {
       const found: StaleReactLead[] = [];
@@ -681,7 +683,7 @@ export function registerSweep(server: McpServer): void {
   server.tool(
     'memlab_sweep',
     'The one call to make after memlab_load_snapshot: every first-pass lead in ONE compact report. Runs the sweep the best manual investigations followed, each section capped and omitted when empty: (1) top ~30 retained objects (strings and code excluded) with holder, marked when held directly by the GC root, a global or a module; (2) collections with ≥500 entries flagged at least 25% dead, plus the largest; (3) string families; (4) flagged framework buffers (per-call keys, cancelled scheduler tasks, cancelled-in-place listener arrays, oversized logs); (5) diagnostic buffers: error histories with repeated errors, the Performance timeline, telemetry queues; (6) finished traces, streams and uploads that still own their buffers; (7) React state holding dead UI: effect cleanups capturing detached DOM, registries keyed to unmounted fibers; (8) React lists: rendered items vs virtualized shells and per-item child counts; (9) the largest class by self size, and heap numbers, grouped by holder `Class.edge`; (10) async flags and Node.js server flags, including vm realms held per cache key and scripts loaded but never evaluated; (11) with 2+ snapshots (`paths`, or several resident): same-id objects that grew at every rung and growth anchors; (12) a ready-to-paste memlab_residual call that cuts the top leads, to look at the long tail. ' +
-      'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 14 KB by default; `detail:"full"` raises every cap (about 34 KB). Section timings are in the footer.',
+      'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 15 KB by default; `detail:"full"` raises every cap (about 34 KB). Section timings are in the footer.',
     {
       paths: z
         .array(z.string())
@@ -694,7 +696,7 @@ export function registerSweep(server: McpServer): void {
         .optional()
         .default('leads')
         .describe(
-          '"leads" (default, about 14 KB) or "full" (larger caps, about 34 KB).',
+          '"leads" (default, about 15 KB) or "full" (larger caps, about 34 KB).',
         ),
     },
     async ({paths, detail}) => {

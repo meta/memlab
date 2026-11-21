@@ -232,6 +232,44 @@ test('groups by holder and value; skips small, unbuffered and product rows', () 
   assert.equal(finishedStateSweepSection(fakeSnapshot([req])).length, 0);
 });
 
+test('a sweep lead cuts the 10 largest retained roots of each group', () => {
+  const pool = node('RelayAsyncStreamPool');
+  const map = link(pool, '$2', node('Map'));
+  const streams = [];
+  for (let i = 0; i < 12; i++) {
+    const e = node('Object', 'object', {
+      status: node('smi number', 'number'),
+      observers: emptyMap(),
+    });
+    own(map, e, 40_000 + i * 1000);
+    own(e, link(e, 'events', array(2)), 39_000);
+    link(map, i + 1, e, 'internal');
+    streams.push(e);
+  }
+  const leads = [];
+  const lines = finishedStateSweepSection(
+    fakeSnapshot([pool, map, ...streams]),
+    {
+      leads,
+    },
+  );
+  assert.ok(lines.length > 0);
+  assert.equal(leads.length, 1);
+  assert.equal(leads[0].section, 6);
+  assert.match(
+    leads[0].label,
+    /finished \(status=<number>, observers empty\)$/,
+  );
+  assert.equal(leads[0].bytes, 12 * 40_000 + 66_000);
+  assert.deepEqual(
+    leads[0].ids,
+    streams
+      .slice(2)
+      .reverse()
+      .map(e => e.id),
+  );
+});
+
 test('co-held contexts are counted once per group and across groups', () => {
   const tc = node('Object', 'object', {}, {retainedSize: 90_000});
   const buffer = own(tc, link(tc, 'buffer', array(40)), 89_000);
