@@ -30,8 +30,13 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {bucketSizes, fiberCensus, fiberCensusSweepSection, isNamedComponent} =
-  await import(pathToFileURL(built).href);
+const {
+  bucketSizes,
+  fiberCensus,
+  fiberCensusSweepSection,
+  isNamedComponent,
+  ladderRenderedMin,
+} = await import(pathToFileURL(built).href);
 
 let nextId = 11;
 const all = [];
@@ -162,4 +167,68 @@ test('no fiber tree: the sweep section is empty', () => {
   assert.equal(fiberCensus(snapshotOf(all)).mounted, 0);
   assert.deepEqual(fiberCensusSweepSection(snapshotOf(all)), []);
   assert.ok(fiberCensusSweepSection(feed()).join('\n').includes('Decoy'));
+});
+
+/** A Feed list of `shells` collapsed items, then `rendered` full ones. */
+function rung(shells, rendered) {
+  all.length = 0;
+  const items = [];
+  for (let i = 0; i < shells; i++) items.push(fiber('Item', [fiber('Shell')]));
+  for (let i = 0; i < rendered; i++) {
+    const decoys = [0, 1, 2, 3].map(() => fiber('Decoy', [fiber('<div>')]));
+    items.push(fiber('Item', [fiber('Body', decoys)]));
+  }
+  const root = fiber(null, [fiber('Feed', items)]);
+  const container = node('object', 'FiberRootNode');
+  link(container, 'containerInfo', node('native', 'HTMLDivElement'));
+  link(container, 'current', root);
+  return snapshotOf(all);
+}
+
+test('an earlier rung of only shells reads 0 rendered on the last rung split', () => {
+  const last = fiberCensus(feed()).groups;
+  const renderedMin = ladderRenderedMin(last);
+  assert.equal(renderedMin.get(last[0].key), 5);
+  const keys = new Set([last[0].key]);
+  const shellsOnly = rung(20, 0);
+  // One size bucket: on its own, the largest bucket reads as rendered.
+  assert.equal(
+    fiberCensus(shellsOnly, {keys, rows: 1e4}).groups[0].rendered,
+    20,
+  );
+  const g = fiberCensus(shellsOnly, {keys, renderedMin, rows: 1e4}).groups[0];
+  assert.equal(g.rendered, 0);
+  assert.deepEqual(g.rows, []);
+});
+
+test('an earlier rung keeps every child type, unfiltered and unfolded', () => {
+  const last = fiberCensus(feed()).groups;
+  const keys = new Set([last[0].key]);
+  const renderedMin = ladderRenderedMin(last);
+  const g = fiberCensus(rung(5, 3), {keys, renderedMin, rows: 1e4}).groups[0];
+  assert.equal(g.rendered, 3);
+  // Body wraps the whole item: filtered on the last rung, kept here.
+  assert.equal(g.rows.find(r => r.name === 'Body')?.total, 3);
+  assert.equal(g.rows.find(r => r.name === 'Decoy')?.total, 12);
+});
+
+test('sweep: a short list does not take the slot of a long list inside it', () => {
+  all.length = 0;
+  const items = [];
+  for (let i = 0; i < 30; i++) {
+    const decoys = [0, 1, 2, 3].map(() => fiber('Decoy', [fiber('<div>')]));
+    items.push(fiber('Item', [fiber('Body', decoys)]));
+  }
+  const panels = [fiber('Panel', [fiber('Feed', items)])];
+  for (let i = 0; i < 10; i++) panels.push(fiber('Panel', [fiber('<div>')]));
+  const root = fiber(null, [fiber('App', panels)]);
+  const container = node('object', 'FiberRootNode');
+  link(container, 'containerInfo', node('native', 'HTMLDivElement'));
+  link(container, 'current', root);
+  const s = snapshotOf(all);
+  // The full census ranks the 11 panels first and skips the feed inside.
+  assert.equal(fiberCensus(s, {lists: 1}).groups[0].items, 11);
+  const text = fiberCensusSweepSection(s).join('\n');
+  assert.match(text, /### 30 items/);
+  assert.doesNotMatch(text, /### 11 items/);
 });

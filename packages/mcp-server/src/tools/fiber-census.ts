@@ -23,6 +23,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
 import {getSnapshot} from '../heap-state.js';
+import {SWEEP_SECTION, type SweepLead} from '../lead-registry.js';
 import {
   edgeTo,
   fiberComponentName,
@@ -327,8 +328,18 @@ export interface CensusOptions {
   rows?: number;
   /** Removal bytes for this many top rows of each group (a BFS each). */
   bytesRows?: number;
-  /** Take only lists with these keys, at any size: earlier ladder rungs. */
+  /**
+   * Take only lists with these keys, at any size, and report every child type
+   * unfiltered and unfolded so the last rung's rows can be looked up by name:
+   * earlier ladder rungs.
+   */
   keys?: Set<string>;
+  /**
+   * Per list key, the subtree size from which an item counts as rendered (the
+   * last rung's split). Without it, the largest size bucket is the rendered
+   * one, which on a rung of only shells would call every shell rendered.
+   */
+  renderedMin?: Map<string, number>;
 }
 
 export function fiberCensus(
@@ -396,25 +407,29 @@ export function fiberCensus(
     const top = buckets[last];
     // Per bucket, how many of its items contain each type.
     const has = buckets.map(() => new Map<string, number>());
+    // Per type, how many of the items that are not rendered contain it.
+    const inShells = new Map<string, number>();
     const once = new Map<string, number>();
     const acc = new Map<string, Acc>();
     const rendered: number[] = [];
+    const renderedMin = opts.renderedMin?.get(key);
     for (const i of g.items) {
       const k = buckets.findIndex(b => tree.size[i] <= b.max);
-      const hist = scanItem(tree, i, k === last ? acc : null, rendered.length);
+      const isRendered =
+        renderedMin != null ? tree.size[i] >= renderedMin : k === last;
+      const hist = scanItem(tree, i, isRendered ? acc : null, rendered.length);
       for (const [t, c] of hist) {
         has[k].set(t, (has[k].get(t) ?? 0) + 1);
         if (c === 1) once.set(t, (once.get(t) ?? 0) + 1);
+        if (!isRendered) inShells.set(t, (inShells.get(t) ?? 0) + 1);
       }
-      if (k !== last) continue;
+      if (!isRendered) continue;
       rendered.push(i);
       for (const [t, a] of acc) {
         a.perMin = Math.min(a.perMin, hist.get(t) ?? 0);
         a.perMax = Math.max(a.perMax, hist.get(t) ?? 0);
       }
     }
-    const itemsWith = (t: string, skip: number) =>
-      has.reduce((s, m, x) => s + (x === skip ? 0 : (m.get(t) ?? 0)), 0);
     if (buckets.length > 1) {
       buckets.forEach((b, k) => {
         b.marks = namesIn(tree, b.example)
@@ -432,31 +447,37 @@ export function fiberCensus(
     const chain = namesIn(tree, g.items[0])
       .filter(t => (once.get(t) ?? 0) >= 0.9 * g.items.length)
       .slice(0, 6);
-    const shells = g.items.length - top.count;
+    const shells = g.items.length - rendered.length;
+    const inOthers = (t: string) => inShells.get(t) ?? 0;
+    // An earlier ladder rung keeps every type: the last rung's rows are
+    // looked up in it by name, and its own filters and folds would hide them.
+    const raw = opts.keys != null;
     const rows: ChildRow[] = [];
     const cands = [...acc]
       .filter(
         ([t, a]) =>
+          raw ||
           // Wrappers around most of an item, and the shell every item shares,
           // are structure; a row is a part the item is built from.
-          a.outerSize / a.outer <= 0.25 * top.median &&
-          !(
-            a.perMax <= 1 &&
-            itemsWith(t, last) >= 0.9 * shells &&
-            (shells > 0 || chain.includes(t))
-          ),
+          (a.outerSize / a.outer <= 0.25 * top.median &&
+            !(
+              a.perMax <= 1 &&
+              inOthers(t) >= 0.9 * shells &&
+              (shells > 0 || chain.includes(t))
+            )),
       )
       .sort((a, b) => b[1].outerSize - a[1].outerSize);
     for (const [t, a] of cands) {
       if (rows.length >= (opts.rows ?? 8)) break;
-      const same = rows.find(
-        r => r.total === a.total && a.ancestors.has(r.name),
-      );
+      const same = raw
+        ? null
+        : rows.find(r => r.total === a.total && a.ancestors.has(r.name));
       if (same != null) {
         if (same.also.length < 3) same.also.push(t);
         continue;
       }
       if (
+        !raw &&
         a.perMax <= 1 &&
         rows.some(r => r.perMax <= 1 && a.ancestors.has(r.name))
       )
@@ -467,7 +488,7 @@ export function fiberCensus(
         outer: a.outer,
         perMin: a.perMin,
         perMax: a.perMax,
-        inOthers: itemsWith(t, last),
+        inOthers: inOthers(t),
         subtree: Math.round(a.outerSize / a.outer),
         example: tree.nodes[a.example].id,
         holder: namedAncestor(tree, a.example),
@@ -585,12 +606,31 @@ export function renderGroup(g: ListGroup, withBytes: boolean): string[] {
 const SWEEP_MIN_ITEMS = 20;
 
 /** Compact sweep section: top list groups (20+ items) and their heavy children. */
-export function fiberCensusSweepSection(snapshot: IHeapSnapshot): string[] {
-  const c = fiberCensus(snapshot, {lists: 2, rows: 5});
-  // A short list (a handful of panels or rows) is rarely the story; the
-  // full tool still shows it.
-  const groups = c.groups.filter(g => g.items >= SWEEP_MIN_ITEMS);
+export function fiberCensusSweepSection(
+  snapshot: IHeapSnapshot,
+  opts: {
+    /** Collects a lead per shown list: its parent fiber. */
+    leads?: SweepLead[];
+  } = {},
+): string[] {
+  // A short list (a handful of panels or rows) is rarely the story; the full
+  // tool still shows it. Filtered in the census, so a short list neither takes
+  // one of the two slots nor hides a long list rendered inside it.
+  const c = fiberCensus(snapshot, {
+    lists: 2,
+    rows: 5,
+    minItems: SWEEP_MIN_ITEMS,
+  });
+  const groups = c.groups;
   if (groups.length === 0) return [];
+  for (const g of groups) {
+    opts.leads?.push({
+      label: `React list: ${g.label}, ${g.rendered} of ${g.items} items rendered`,
+      bytes: 0,
+      section: SWEEP_SECTION.lists,
+      ids: [g.parentId],
+    });
+  }
   const out = [
     '## React lists (fiber census)',
     '',
@@ -598,6 +638,17 @@ export function fiberCensusSweepSection(snapshot: IHeapSnapshot): string[] {
   ];
   for (const g of groups) out.push('', ...renderGroup(g, false));
   return [...out, ''];
+}
+
+/**
+ * Per list, the size from which an earlier rung's item counts as rendered:
+ * half the smallest rendered item of the last rung (`bucketSizes` starts a
+ * new bucket above twice the previous size).
+ */
+export function ladderRenderedMin(groups: ListGroup[]): Map<string, number> {
+  return new Map(
+    groups.map(g => [g.key, g.buckets[g.buckets.length - 1].min / 2]),
+  );
 }
 
 function ladderText(labels: string[], census: FiberCensus[]): string {
@@ -732,14 +783,22 @@ export function registerFiberCensus(server: McpServer): void {
         // The last rung picks the lists; earlier rungs report the same keys at any size.
         for (let i = resolved.length - 1; i >= 0; i--) {
           armScanBudgetFor(scaledTimeoutMs(largestMB));
-          const keys =
+          const lastGroups =
             i === resolved.length - 1
-              ? undefined
-              : new Set(results[resolved.length - 1].groups.map(g => g.key));
+              ? null
+              : results[resolved.length - 1].groups;
+          const keys =
+            lastGroups != null ? new Set(lastGroups.map(g => g.key)) : null;
+          // Rendered = the last rung's rendered size range, so a rung of only
+          // shells reads as 0 rendered rather than its largest bucket.
+          const renderedMin =
+            lastGroups != null ? ladderRenderedMin(lastGroups) : undefined;
           results[i] = await withSnapshotAt(resolved[i].localPath, s =>
             fiberCensus(
               s,
-              keys ? {...opts, bytesRows: 0, keys, rows: 1e4} : opts,
+              keys
+                ? {...opts, bytesRows: 0, keys, renderedMin, rows: 1e4}
+                : opts,
             ),
           );
         }

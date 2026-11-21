@@ -522,7 +522,7 @@ function laterSections(
       return lines;
     }
     case 'lists':
-      return numbered(SEC.lists, fiberCensusSweepSection(s));
+      return numbered(SEC.lists, fiberCensusSweepSection(s, {leads}));
   }
 }
 
