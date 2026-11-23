@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapSnapshot} from '@memlab/core';
 import fs from 'fs';
 import path from 'path';
+import {shapeCounts, shapeText} from './shape-clusters.js';
 import {z} from 'zod';
 import memlabHeapAnalysis from '@memlab/heap-analysis';
 const {getFullHeapFromFile} = memlabHeapAnalysis;
@@ -278,10 +279,41 @@ function detailSection(
   };
 }
 
+const SHAPE_MIN_AFTER = 50;
+
+/** Shapes whose instance count grew, largest count growth first. */
+export function shapeGrowth(
+  before: IHeapSnapshot,
+  after: IHeapSnapshot,
+): Array<{
+  cls: string;
+  props: string[];
+  before: number;
+  after: number;
+  selfDelta: number;
+}> {
+  const b = shapeCounts(before);
+  const out = [];
+  for (const [key, a] of shapeCounts(after)) {
+    if (a.count < SHAPE_MIN_AFTER) continue;
+    const was = b.get(key);
+    const bc = was?.count ?? 0;
+    if (a.count <= bc) continue;
+    out.push({
+      cls: a.cls,
+      props: a.props,
+      before: bc,
+      after: a.count,
+      selfDelta: a.self - (was?.self ?? 0),
+    });
+  }
+  return out.sort((x, y) => y.after - y.before - (x.after - x.before));
+}
+
 export function registerDiffSnapshots(server: McpServer): void {
   server.tool(
     'memlab_diff_snapshots',
-    'Compare two heap snapshots: classes that grew, shrunk, appeared or disappeared between "before" and "after". When both captures come from the SAME isolate (one tab session, no reload; detected automatically), objects are also matched by V8 object id, which V8 keeps stable for an object across every snapshot of one isolate: per class, how many objects are NEW (allocated after "before" and still alive), how many were DELETED, and their allocated and freed bytes — so churn shows as N new + N deleted rather than as Δ0. Pass `class_name` with `detail` to list the new or deleted objects themselves, largest first and paged, as ids ready for memlab_retainer_trace. Each side accepts either a resident snapshot handle (from memlab_snapshots) or a file path — resident handles are reused in place, so diffing a ladder you already loaded never re-parses a file. By default the "after" snapshot becomes the active snapshot (set set_active:false to leave your active snapshot unchanged). For an ordered sequence of 3+ snapshots, use memlab_sequence_analysis instead.',
+    'Compare two heap snapshots: classes that grew, shrunk, appeared or disappeared between "before" and "after", and the object shapes (constructor + property set) that grew most by count, which is where many small records hidden in one `Object` row show up. When both captures come from the SAME isolate (one tab session, no reload; detected automatically), objects are also matched by V8 object id, which V8 keeps stable for an object across every snapshot of one isolate: per class, how many objects are NEW (allocated after "before" and still alive), how many were DELETED, and their allocated and freed bytes — so churn shows as N new + N deleted rather than as Δ0. Pass `class_name` with `detail` to list the new or deleted objects themselves, largest first and paged, as ids ready for memlab_retainer_trace. Each side accepts either a resident snapshot handle (from memlab_snapshots) or a file path — resident handles are reused in place, so diffing a ladder you already loaded never re-parses a file. By default the "after" snapshot becomes the active snapshot (set set_active:false to leave your active snapshot unchanged). For an ordered sequence of 3+ snapshots, use memlab_sequence_analysis instead.',
     {
       before_path: z
         .string()
@@ -695,6 +727,35 @@ export function registerDiffSnapshots(server: McpServer): void {
             );
           }
           lines.push('');
+        }
+
+        const shapeRows = shapeGrowth(beforeSnapshot, afterSnapshot);
+        if (shapeRows.length > 0) {
+          lines.push(
+            `### Shapes that grew by count (constructor + property set, ≥ ${SHAPE_MIN_AFTER} instances after)`,
+            '',
+            markdownTable(
+              ['Shape', 'Before', 'After', 'Δ Count', '×', 'Δ Self'],
+              shapeRows
+                .slice(0, limit)
+                .map(r => [
+                  `\`${shapeText(r.cls, r.props, 70)}\``,
+                  formatNumber(r.before),
+                  formatNumber(r.after),
+                  `+${formatNumber(r.after - r.before)}`,
+                  r.before === 0
+                    ? 'new'
+                    : r.after / r.before >= 100
+                      ? `${formatNumber(Math.round(r.after / r.before))}×`
+                      : `${(r.after / r.before).toFixed(1)}×`,
+                  `${sign(r.selfDelta)}${formatBytes(Math.abs(r.selfDelta))}`,
+                ]),
+              new Set([1, 2, 3, 4, 5]),
+            ),
+            '',
+            '_Many small records that grow (subscriptions, selectors, wrappers) hide inside one `Object` class row above. Ranked by count, not bytes; a shape is matched across the two snapshots by its constructor and property names. `memlab_population_diff({population: "shape:…"})` breaks one down by owner._',
+            '',
+          );
         }
 
         // Shrunk section

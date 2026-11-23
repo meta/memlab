@@ -33,6 +33,68 @@ export interface ShapeCluster {
 
 const SKIP_NAME = /^(system \/ |\()/;
 
+/** Constructor plus sorted property names, or null for a non-record. */
+export function shapeKeyOf(node: IHeapNode): {
+  key: string;
+  props: string[];
+  closures: number;
+} | null {
+  if (node.type !== 'object' || node.id <= 3) return null;
+  if (SKIP_NAME.test(node.name)) return null;
+  const props: string[] = [];
+  let closures = 0;
+  for (const e of node.references) {
+    if (e.type !== 'property') continue;
+    const name = String(e.name_or_index);
+    if (name === '__proto__') continue;
+    props.push(name);
+    if (e.toNode.type === 'closure') closures++;
+  }
+  if (props.length === 0) return null;
+  props.sort();
+  return {key: `${node.name}\u0000${props.join(',')}`, props, closures};
+}
+
+/** Instance count and self bytes per shape. */
+export function shapeCounts(
+  snapshot: IHeapSnapshot,
+): Map<
+  string,
+  {cls: string; props: string[]; count: number; self: number; example: number}
+> {
+  const out = new Map<
+    string,
+    {cls: string; props: string[]; count: number; self: number; example: number}
+  >();
+  snapshot.nodes.forEach((node: IHeapNode) => {
+    const k = shapeKeyOf(node);
+    if (k == null) return;
+    const row = out.get(k.key);
+    if (row == null) {
+      out.set(k.key, {
+        cls: node.name,
+        props: k.props,
+        count: 1,
+        self: node.self_size,
+        example: node.id,
+      });
+    } else {
+      row.count++;
+      row.self += node.self_size;
+    }
+  });
+  return out;
+}
+
+export function shapeText(
+  cls: string,
+  props: readonly string[],
+  width: number,
+): string {
+  const text = `${cls}{${props.join(', ')}}`;
+  return text.length > width ? `${text.slice(0, width - 2)}…}` : text;
+}
+
 export function shapeClusters(
   snapshot: IHeapSnapshot,
   opts: {minCount?: number; candidates?: number} = {},
@@ -51,20 +113,9 @@ export function shapeClusters(
     example: number;
   }> = [];
   snapshot.nodes.forEach((node: IHeapNode) => {
-    if (node.type !== 'object' || node.id <= 3) return;
-    if (SKIP_NAME.test(node.name)) return;
-    const props: string[] = [];
-    let closures = 0;
-    for (const e of node.references) {
-      if (e.type !== 'property') continue;
-      const name = String(e.name_or_index);
-      if (name === '__proto__') continue;
-      props.push(name);
-      if (e.toNode.type === 'closure') closures++;
-    }
-    if (props.length === 0) return;
-    props.sort();
-    const key = `${node.name}\u0000${props.join(',')}`;
+    const shape = shapeKeyOf(node);
+    if (shape == null) return;
+    const {key, props, closures} = shape;
     let g = index.get(key);
     if (g == null) {
       g = groups.length;
@@ -145,9 +196,7 @@ export function shapeClusters(
 }
 
 function shapeLabel(c: ShapeCluster, width: number): string {
-  const props = c.props.join(', ');
-  const text = `${c.cls}{${props}}`;
-  return text.length > width ? `${text.slice(0, width - 2)}…}` : text;
+  return shapeText(c.cls, c.props, width);
 }
 
 /** The sweep's bottom-up population table. */

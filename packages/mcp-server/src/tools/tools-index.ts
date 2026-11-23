@@ -371,7 +371,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_diff_snapshots',
-        'Per-class deltas between two snapshots. For two captures of one tab session (same V8 isolate, detected automatically) it also matches objects by id: per class, how many are new and still alive, how many were freed, and their bytes, so churn no longer reads as zero. `class_name` + `detail` ("added" or "deleted") lists those objects, paged.',
+        'Per-class deltas between two snapshots, plus the shapes (constructor + property set) that grew most by count. For two captures of one tab session (same V8 isolate, detected automatically) it also matches objects by id: per class, how many are new and still alive, how many were freed, and their bytes, so churn no longer reads as zero. `class_name` + `detail` ("added" or "deleted") lists those objects, paged.',
       ],
       [
         'memlab_hypothesis',
