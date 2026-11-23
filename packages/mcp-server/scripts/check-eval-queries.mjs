@@ -81,3 +81,62 @@ test('lint: a plain {} keyed by heap names is flagged, a literal key is not', ()
   );
   assert.equal(protoKeyTrap('let $c = {}; $c[k] = 1;').length, 1);
 });
+
+test('a query that does not parse gets {error}; the others still answer', () => {
+  const out = run([
+    {name: 'a', code: 'return 1;'},
+    {name: 'b', code: 'return 1 +;'},
+    {name: 'c', code: 'result = 3;'},
+  ]);
+  assert.equal(out.a, 1);
+  assert.match(out.b.error, /SyntaxError/);
+  assert.equal(out.c, 3);
+});
+
+test('duplicate or __proto__ query names are refused', () => {
+  const q = name => ({name, code: 'return 1;'});
+  assert.throws(() => composeQueries([q('x'), q('x')]), /unique/);
+  assert.throws(() => composeQueries([q('__proto__')]), /unique/);
+});
+
+test('a max_nodes abort stops the batch and keeps the partial answers', () => {
+  const ctx = {
+    result: undefined,
+    boom() {
+      const e = new Error('max_nodes budget of 10 exhausted');
+      e.name = 'BudgetExceeded';
+      throw e;
+    },
+  };
+  const code = composeQueries([
+    {name: 'a', code: 'return 1;'},
+    {name: 'b', code: 'result = 5; boom(); result = 6;'},
+    {name: 'c', code: 'return 3;'},
+  ]);
+  assert.throws(() => vm.runInNewContext(code, ctx), /max_nodes/);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.result)), {a: 1, b: 5});
+});
+
+test('an abort in the first query with nothing assigned leaves no result', () => {
+  const ctx = {
+    result: undefined,
+    boom() {
+      const e = new Error('exhausted');
+      e.name = 'BudgetExceeded';
+      throw e;
+    },
+  };
+  const code = composeQueries([{name: 'a', code: 'boom(); result = 1;'}]);
+  assert.throws(() => vm.runInNewContext(code, ctx));
+  assert.equal(ctx.result, undefined);
+});
+
+test('a timeout in a later query keeps the answers already made', () => {
+  const ctx = {result: undefined};
+  const code = composeQueries([
+    {name: 'a', code: 'return 1;'},
+    {name: 'b', code: 'for (;;) {}'},
+  ]);
+  assert.throws(() => vm.runInNewContext(code, ctx, {timeout: 200}));
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.result)), {a: 1});
+});

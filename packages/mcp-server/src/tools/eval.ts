@@ -1792,7 +1792,7 @@ export function registerEval(server: McpServer): void {
         .max(25)
         .optional()
         .describe(
-          'Several independent questions in ONE call: `[{name, code}, ...]`, each written like `code` (assign `result` or `return`). They run in order in one sandbox and share the helper indexes, and the call returns `{name: result}`. A query that throws gets `{error}` and the others still run. Use it instead of one eval per question.',
+          'Several independent questions in ONE call: `[{name, code}, ...]`, each written like `code` (assign `result` or `return`). They run in order in one sandbox and share the helper indexes, and the call returns `{name: result}`. A query that throws or does not parse gets `{error}` and the others still run. Names must be unique. Use it instead of one eval per question.',
         ),
       timeout_ms: z
         .number()
@@ -2050,21 +2050,49 @@ function hasTopLevelReturn(code: string): boolean {
   }
 }
 
+function querySyntaxError(code: string): string | null {
+  try {
+    new vm.Script(`(() => {\n${code}\n})`);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  }
+}
+
 /**
  * One script running each query in its own scope: `result` or a top-level
- * `return` is its answer, an exception is `{error}`.
+ * `return` is its answer, an exception or a syntax error is `{error}`.
+ * `result` is updated after every answer, so a timeout keeps the answers
+ * already made, and a `max_nodes` abort stops the batch with the partial
+ * value of the query it hit.
  */
 export function composeQueries(
   queries: ReadonlyArray<{name: string; code: string}>,
 ): string {
-  const parts = queries.map(
-    q =>
-      `try {\n  __memlabQueries[${JSON.stringify(q.name)}] = (() => {\n    let result;\n    const __r = (() => {\n${q.code}\n    })();\n    return __r !== undefined ? __r : result;\n  })();\n} catch (__e) {\n  __memlabQueries[${JSON.stringify(q.name)}] = {error: String((__e && __e.message) || __e)};\n}`,
-  );
+  const seen = new Set<string>();
+  for (const {name} of queries) {
+    if (name === '__proto__' || seen.has(name)) {
+      throw new Error(
+        `Query names must be unique and not \`__proto__\`: ${JSON.stringify(name)} is not.`,
+      );
+    }
+    seen.add(name);
+  }
+  const parts = queries.map(q => {
+    const name = JSON.stringify(q.name);
+    const syntax = querySyntaxError(q.code);
+    if (syntax != null) {
+      return `__memlabAnswer(${name}, {error: ${JSON.stringify(syntax)}});`;
+    }
+    return `{\n  let result;\n  try {\n    const __r = (() => {\n${q.code}\n    })();\n    if (__r !== undefined) result = __r;\n  } catch (__e) {\n    if (__e && __e.name === 'BudgetExceeded') {\n      if (result !== undefined) __memlabAnswer(${name}, result);\n      throw __e;\n    }\n    result = {error: String((__e && __e.message) || __e)};\n  }\n  __memlabAnswer(${name}, result);\n}`;
+  });
   return [
     'const __memlabQueries = {};',
+    'const __memlabAnswer = (name, value) => {',
+    '  __memlabQueries[name] = value;',
+    '  result = __memlabQueries;',
+    '};',
     ...parts,
-    'result = __memlabQueries;',
   ].join('\n');
 }
 
