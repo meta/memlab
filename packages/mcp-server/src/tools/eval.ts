@@ -52,6 +52,7 @@ import {
   nearestFiber,
 } from '../react-shapes.js';
 import {shapeKeyOf, shapeText} from './shape-clusters.js';
+import {edgeNameIndex, isIndexedEdgeName} from '../edge-name-index.js';
 import {readElements as readElementsInfo} from '../heap-shapes.js';
 import {
   SNAPSHOT_STRING_LIMIT,
@@ -3604,6 +3605,12 @@ export async function runEval({
       }:${name}`;
       const cached = scratch[key] as number[] | undefined;
       if (cached) return cached;
+      const index = isIndexedEdgeName(name) ? edgeNameIndex(snapshot) : null;
+      if (index != null) {
+        const hit = index.holders(name, edgeTypes);
+        scratch[key] = hit;
+        return hit;
+      }
       const ids: number[] = [];
       snapshot.nodes.forEach((node: IHeapNode) => {
         if (node.id <= 3) return; // skip oddball/root nodes for parity with other tools
@@ -4907,6 +4914,10 @@ export async function runEval({
     // `.logs`") would otherwise multiply-count every shared array, and nothing
     // in the returned ids says which of them were duplicates.
     const byReferrerEdge = (edgeName: string): number[] => {
+      const index = isIndexedEdgeName(edgeName)
+        ? edgeNameIndex(snapshot)
+        : null;
+      if (index != null) return index.targets(edgeName);
       const hits = new Set<number>();
       snapshot.nodes.forEach(node => {
         forEachTargetRef(node as IHeapNode, (e, target) => {

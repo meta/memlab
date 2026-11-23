@@ -56,6 +56,14 @@ const ATTRIBUTION =
 
 const RULES: HintRule[] = [
   {
+    // Reading every node's `referrers` builds an edge object per referrer:
+    // 22 s on a 3.6M-node heap, where the indexed helpers answer in ms.
+    tool: 'helpers.byReferrerEdge / helpers.targets / helpers.topRetainers',
+    why: 'answers "what is under `.name`" and "who holds this set" from a per-snapshot index (milliseconds after a one-time build of about 2 s), where reading every node\'s `referrers` took 22 s on a 3.6M-node heap',
+    all: [/nodes\s*\.\s*forEach/, /\.referrers\b/],
+    none: [/byReferrerEdge|topRetainers|helpers\s*\.\s*targets\(/],
+  },
+  {
     // First, because the answer it corrects is a confident wrong number.
     // `iterByClass(callbackName, {type: 'closure'})` returned 1 for a callback
     // bound by 246 listener records: the closure is the DEFINITION, shared by
