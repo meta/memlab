@@ -173,3 +173,48 @@ export function formatEvalHints(hints: EvalHint[]): string | null {
     .map(h => `note: \`${h.tool}\` does this directly — it ${h.why}.`)
     .join('\n');
 }
+
+/**
+ * The fix for a runtime error `memlab_eval` code commonly hits, or null.
+ * Each pattern was seen in agent runs, where the bare TypeError cost a
+ * retry with the same mistake.
+ */
+export function evalErrorHint(message: string): string | null {
+  if (
+    /\]\.push is not a function|\]\.(add|set) is not a function/.test(message)
+  ) {
+    return 'An edge or property NAME used as a key of a plain `{}` collides with `Object.prototype` (`constructor`, `toString`, `__proto__`, …), so `groups[name]` is a function, not your array. Key by a `new Map()`, or create the object with `Object.create(null)`.';
+  }
+  if (
+    /Cannot read properties of undefined \(reading '(push|add|set)'\)/.test(
+      message,
+    )
+  ) {
+    return 'The group was never created: initialise it on first use, e.g. `(groups[key] ??= []).push(x)`, or use a `new Map()`.';
+  }
+  if (
+    /Cannot read properties of null \(reading '(references|referrers|id|name|type|self_size|retainedSize|toNode|fromNode|dominatorNode)'\)/.test(
+      message,
+    )
+  ) {
+    return '`snapshot.getNodeById(id)` (and every helper that resolves an id) returns null for an id that is not in THIS snapshot. Ids differ between snapshots, and an id printed from another one is not here. Check for null before using the node.';
+  }
+  if (
+    /Cannot read properties of undefined \(reading '(toNode|fromNode|name_or_index|type)'\)/.test(
+      message,
+    )
+  ) {
+    return 'An edge read past the end of a list: `node.references[i]` is undefined when `i` is out of range. Iterate with `for (const e of node.references)`, or check `.length` first.';
+  }
+  if (
+    /\.(filter|map|reduce|forEach|slice|some|every|find) is not a function/.test(
+      message,
+    )
+  ) {
+    return 'That value is not an array. `helpers.retainedSizes(ids)` returns an object keyed by id (`Object.values(x)`), a Set or Map needs `[...x]`, and a saved value comes back as it was saved. Wrap it with `Array.from(x)` or check `Array.isArray(x)`.';
+  }
+  if (/\.toString is not a function/.test(message)) {
+    return 'Use `String(x)` rather than `x.toString()`: briefs, null-prototype objects and `undefined` fields have no `toString`.';
+  }
+  return null;
+}

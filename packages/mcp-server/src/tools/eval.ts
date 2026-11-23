@@ -75,7 +75,7 @@ import {
 import {beginAnalysisBudget} from '../analysis-budget.js';
 import {currentProgress} from '../progress.js';
 import {startJob} from './jobs.js';
-import {formatEvalHints, hintsForEval} from '../eval-hints.js';
+import {evalErrorHint, formatEvalHints, hintsForEval} from '../eval-hints.js';
 import {findModuleSpans, scriptSources} from './module-source.js';
 import {
   abbreviateBlinkTypeName,
@@ -5941,7 +5941,10 @@ function actionableEvalError(err: unknown, code: string | undefined): string {
   ) {
     return `${msg}\n${VALIDATE_WITHOUT_LOADING}\nHint: iterate all nodes with \`snapshot.nodes.forEach(node => { ... })\`, not \`for...of\`.`;
   }
-  return `${msg}\n${VALIDATE_WITHOUT_LOADING}`;
+  const hint = evalErrorHint(msg);
+  return hint != null
+    ? `${msg}\nHint: ${hint}\n${VALIDATE_WITHOUT_LOADING}`
+    : `${msg}\n${VALIDATE_WITHOUT_LOADING}`;
 }
 
 /**
@@ -6222,7 +6225,7 @@ function lintRefusals(source: string, helperNames: string[]): string[] {
       `\`helpers.${name}\` does not exist.` +
         (near.length > 0
           ? ` Did you mean ${near.slice(0, 4).join(', ')}?`
-          : ''),
+          : ` No helper has a similar name. The helpers are: ${helperNames.join(', ')}.`),
     );
   }
   // Printing, saving and defining are outputs too.
