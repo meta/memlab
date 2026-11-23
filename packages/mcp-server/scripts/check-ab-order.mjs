@@ -37,8 +37,11 @@ const {readArms, abaNote} = await import(
 const {loadRunManifest, ladderSegments, settleRungForSegment} = await import(
   pathToFileURL(path.join(dist, 'run-manifest.js')).href
 );
+const {abSegments} = await import(
+  pathToFileURL(path.join(dist, 'tools', 'analysis-battery.js')).href
+);
 
-function abaRun() {
+function abaRun(splits = [1, 3]) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aba-'));
   const rung = (index, cycles) => ({
     index,
@@ -58,7 +61,7 @@ function abaRun() {
     JSON.stringify({
       rungs,
       totals: {cycles: 90},
-      ladder_splits_after_rung: [1, 3],
+      ladder_splits_after_rung: splits,
       settle_rung: {path: path.join(dir, 'rung_99_settle.heapsnapshot')},
       ab: {
         off: {
@@ -104,6 +107,25 @@ test('each arm is scored against its own settle rung', () => {
     'on.heapsnapshot',
     'rung_99_settle.heapsnapshot',
   ]);
+});
+
+test('a ladder never spans two arms, even where no reload was recorded', () => {
+  for (const splits of [[], [3], [1, 3]]) {
+    const dir = abaRun(splits);
+    const m = loadRunManifest(dir);
+    assert.deepEqual(m.splitAfterRung, [1, 3], `splits ${splits}`);
+    assert.deepEqual(
+      ladderSegments(m).map(s => [s.firstRung, s.lastRung]),
+      [
+        [0, 1],
+        [2, 3],
+        [4, 5],
+      ],
+    );
+    const ab = abSegments(dir, m);
+    assert.equal(ab?.off.segment, 0);
+    assert.equal(ab?.on.segment, 1);
+  }
 });
 
 test('the third arm says whether the effect reverses', () => {

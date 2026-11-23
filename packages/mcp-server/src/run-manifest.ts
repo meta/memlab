@@ -481,6 +481,22 @@ export function settleRungForSegment(
   };
 }
 
+/**
+ * The last rung of every A/B arm but the final one. Each arm re-runs its own
+ * baseline under other flag values, often after a reload the runner did not
+ * detect, so no ladder may span two arms.
+ */
+export function abArmCuts(ab: unknown): number[] {
+  if (ab == null || typeof ab !== 'object') return [];
+  const arms = ab as Record<string, {rungs?: unknown} | null | undefined>;
+  const ends = (['off', 'on', 'off2'] as const)
+    .map(name => arms[name]?.rungs)
+    .filter((r): r is unknown[] => Array.isArray(r) && r.length > 0)
+    .map(r => Math.max(...r.filter((n): n is number => typeof n === 'number')))
+    .filter(Number.isFinite);
+  return ends.slice(0, -1);
+}
+
 export function loadRunManifest(runDir: string): RunManifest {
   const file = runDir.endsWith('.json')
     ? runDir
@@ -585,11 +601,16 @@ export function loadRunManifest(runDir: string): RunManifest {
     elapsedPerRung,
     uaMemoryPerRung,
     workerHeapPerRung,
-    splitAfterRung: Array.isArray(raw.ladder_splits_after_rung)
-      ? (raw.ladder_splits_after_rung as unknown[]).filter(
-          (n): n is number => typeof n === 'number',
-        )
-      : [],
+    splitAfterRung: [
+      ...new Set([
+        ...(Array.isArray(raw.ladder_splits_after_rung)
+          ? (raw.ladder_splits_after_rung as unknown[]).filter(
+              (n): n is number => typeof n === 'number',
+            )
+          : []),
+        ...abArmCuts(raw.ab),
+      ]),
+    ].sort((a, b) => a - b),
     caveats: asStringArray(raw.caveats),
     provisionalNotes: asStringArray(raw.provisional_notes),
     combos: asStringArray(
@@ -824,8 +845,9 @@ export function resolveLadderInputs(args: {
     if (segments.length > 1 && args.segment !== 'all') {
       if (args.segment == null) {
         throw new Error(
-          `this run reloaded the page mid-ladder, so its ${segments.length} segments are ` +
-            `DIFFERENT V8 isolates and cannot be compared to each other — a run like this ` +
+          `this run's ladder is split (the page reloaded mid-ladder, or each arm of an A/B ` +
+            `round starts its own ladder), so its ${segments.length} segments cannot be ` +
+            `compared to each other — a reloaded run like this ` +
             `reported a 3.6 MB SHRINK where the valid segment read +2.1 MB. ` +
             `Pass \`segment: <n>\` to analyze one (${describeSegments(segments)}), ` +
             `or \`segment: "all"\` to override and treat the whole ladder as one heap.`,
