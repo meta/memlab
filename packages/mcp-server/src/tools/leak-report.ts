@@ -256,7 +256,8 @@ function devBuildOf(runDir: string): boolean | null {
 /**
  * A warning when the idle control ran another build than the round: a
  * prod-like control has none of a dev build's polling (hot reload, DEV-only
- * requests) or dev-only populations, so it is no floor for them.
+ * requests) or dev-only populations, so it is no floor for them; a dev
+ * control's floor holds them, so it is too high for a prod-like round.
  */
 export function controlBuildMismatch(
   runDir: string,
@@ -268,7 +269,9 @@ export function controlBuildMismatch(
   const name = (b: boolean) => (b ? 'a dev build' : 'a prod-like build');
   return (
     `⚠ The idle control \`${path.basename(controlDir.replace(/\/$/, ''))}\` ran ${name(control)} and this round ${name(round)}, ` +
-    `so what only ${round ? 'the dev build' : 'one build'} does has no floor in it, and rates above the control overstate this round. ` +
+    (round
+      ? 'so what only the dev build does has no floor in it, and rates above the control overstate this round. '
+      : "so its floor includes the dev build's own polling, and rates above the control understate this round: a leak below that floor is hidden. ") +
     'Drive an idle control on the same build.'
   );
 }

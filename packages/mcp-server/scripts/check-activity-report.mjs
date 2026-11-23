@@ -184,8 +184,16 @@ test('an idle control on another build than the round is called out', async () =
   const unknown = round('r3', null);
   assert.match(
     controlBuildMismatch(dev, prod),
-    /ran a prod-like build and this round a dev build/,
+    /ran a prod-like build and this round a dev build, .* overstate this round/,
   );
+  const prodRound = round('r4', false);
+  const devControl = round('idle-control-dev', true);
+  const flipped = controlBuildMismatch(prodRound, devControl);
+  assert.match(
+    flipped,
+    /ran a dev build and this round a prod-like build, .* understate this round/,
+  );
+  assert.doesNotMatch(flipped, /overstate/);
   assert.equal(controlBuildMismatch(dev, dev2), null);
   assert.equal(controlBuildMismatch(unknown, prod), null);
   fs.rmSync(root, {recursive: true});
