@@ -23,6 +23,7 @@ import {toolAnnotations} from './tool-annotations.js';
 import {getSnapshotMetadata, isTerse, shouldEmitNote} from './heap-state.js';
 import {makeProgressReporter, runWithProgress} from './progress.js';
 import {runWithReadScope} from './read-scope.js';
+import {withFileSizeLimit} from './file-size-scope.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   beginAnalysisBudget,
@@ -477,6 +478,37 @@ function jsonOutput(name: string, params: unknown, result: unknown): unknown {
   return result;
 }
 
+/** Parameters through which a tool reads snapshot files. */
+const FILE_INPUT_KEYS = [
+  'paths',
+  'run_dir',
+  'run_dirs',
+  'file_path',
+  'baseline',
+  'target',
+  'compare',
+  'compare_to',
+];
+
+function readsFiles(key: string): boolean {
+  return FILE_INPUT_KEYS.includes(key) || /(^|_)(run_dirs?|paths?)$/.test(key);
+}
+
+function fileSizeParam() {
+  return z
+    .number()
+    .optional()
+    .describe(
+      'Per-file size limit in MB for the snapshots this call reads (default scales with the server heap; MEMLAB_MAX_FILE_SIZE_MB sets it for all calls). Snapshots already loaded are never refused.',
+    );
+}
+
+function fileLimitOf(params: unknown): number | undefined {
+  if (params == null || typeof params !== 'object') return undefined;
+  const v = (params as {max_file_size_mb?: unknown}).max_file_size_mb;
+  return typeof v === 'number' ? v : undefined;
+}
+
 function timeoutParam() {
   return z
     .number()
@@ -515,6 +547,13 @@ export function installAnalysisGuardrail(server: McpServer): void {
       // `timeout_ms` the shape does not name never reaches the budget below.
       if (shape != null && !('timeout_ms' in shape)) {
         shape.timeout_ms = timeoutParam();
+      }
+      if (
+        shape != null &&
+        !('max_file_size_mb' in shape) &&
+        Object.keys(shape).some(readsFiles)
+      ) {
+        shape.max_file_size_mb = fileSizeParam();
       }
       recordToolHandler(name, inner, shape);
       if (shape != null) params = Object.keys(shape);
@@ -560,10 +599,12 @@ export function installAnalysisGuardrail(server: McpServer): void {
           const result = await runWithProgress(
             makeProgressReporter(extra, name.replace(/^memlab_/, '')),
             () =>
-              runWithReadScope(async () =>
-                ref != null
-                  ? withSnapshotRef(ref, () => inner(...hArgs))
-                  : inner(...hArgs),
+              withFileSizeLimit(fileLimitOf(params), () =>
+                runWithReadScope(async () =>
+                  ref != null
+                    ? withSnapshotRef(ref, () => inner(...hArgs))
+                    : inner(...hArgs),
+                ),
               ),
           );
           return wantsJson(name, params)

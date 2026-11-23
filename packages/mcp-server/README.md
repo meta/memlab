@@ -17,7 +17,7 @@ The package also ships `memlab-cli`, which runs the same tools from a shell with
 
 **Snapshot-size ceiling.** The server keeps the full parsed graph resident: nodes, edges, dominator tree and indexes. A full load needs several times the snapshot's on-disk size in memory. To avoid an out-of-memory crash, which would lose all loaded state, `memlab_load_snapshot` refuses a load in three cases:
 
-- **File size.** The file is larger than `max_file_size_mb`. The default is 900 MB or 0.25 × the old-space limit, whichever is larger. That is 2,048 MB on an 8 GB server.
+- **File size.** The file is larger than `max_file_size_mb`. The default is 900 MB or 0.25 × the old-space limit, whichever is larger. That is 2,048 MB on an 8 GB server. `MEMLAB_MAX_FILE_SIZE_MB` changes the default for every call, and every tool that reads snapshot files (`paths`, `run_dir`, `baseline`/`target`, ...) accepts `max_file_size_mb` for one call. A snapshot that is already loaded is never refused by path.
 - **Node/edge count.** The node or edge count in the snapshot header is above the load ceiling. The ceiling is derived from the old-space limit the process is actually running with: about 13.9M nodes and 55.7M edges at 8 GB. Raising the heap raises it with no other change. To make a one-off oversized load anyway, pass `force: true`.
 - **Memory headroom.** The projected working set doesn't fit in the remaining old space. In that case the least-recently-used resident snapshot is evicted first, and the load is refused only if it still doesn't fit.
 
@@ -644,6 +644,7 @@ The server keeps a few small files so that work survives a restart:
 | --- | --- |
 | `NODE_OPTIONS` | Set `--max-old-space-size` here when running `memlab-mcp` or `dist/index.js` directly |
 | `MEMLAB_MAX_OLD_SPACE_MB` | Server heap in MB when launched by `memlab-cli` (minimum 512; default scales with RAM) |
+| `MEMLAB_MAX_FILE_SIZE_MB` | Per-file size limit for every call, in MB, instead of the default (900 MB or a quarter of the server heap); a call's `max_file_size_mb` still wins |
 | `MEMLAB_ANALYSIS_TIMEOUT_MS` | Default per-call wall-clock budget (default 90000, or 9 µs per node of the active snapshot when larger; `<= 0` disables it) |
 | `MEMLAB_DISABLE_CODE_TOOLS` | `1` turns off every tool that runs caller-supplied JavaScript (the table under [Tools that execute JavaScript](#tools-that-execute-javascript)); `memlab_tools({enable})` cannot turn them back on. Use `memlab_query_objects`, `memlab_retained_by` and `memlab_native_contexts` for queries instead |
 | `MEMLAB_TOOLSETS` | Expose only these tool groups, comma-separated: `core` (the ~20 everyday tools) and the question groups `composition`, `growth`, `retention`, `artifacts`, `dom`, `collections`, `strings`, `inspect`, `ask`, `sharing`, `session`. The session tools are always on, and `memlab_tools({enable: "growth"})` turns more groups on mid-session. Unset (or `all`) exposes every tool |

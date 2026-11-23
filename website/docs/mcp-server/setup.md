@@ -131,6 +131,9 @@ To avoid crashing out of memory, which would lose every loaded snapshot,
 
 - **The file is too large.** The limit is `max_file_size_mb`: 900 MB, or a
   quarter of the server's heap limit if that is larger (2,048 MB with 8 GB).
+  `MEMLAB_MAX_FILE_SIZE_MB` changes it for every call, and every tool that
+  reads snapshot files takes `max_file_size_mb` for one call. A snapshot that
+  is already loaded is never refused by path.
 - **It has too many nodes or edges.** The limit follows from the server's
   heap limit: about 13.9 million nodes and 55.7 million edges with 8 GB.
 - **It doesn't fit in the memory that is left**, even after unloading the

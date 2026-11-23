@@ -24,6 +24,7 @@ import {
   identityKeyText,
   stringIdentityKey,
 } from '../string-identity.js';
+import {callFileSizeLimit, envFileSizeLimit} from '../file-size-scope.js';
 import {recordEviction, timedLoad} from '../perf-stats.js';
 import {minifiedWarning} from '../minified.js';
 import {z} from 'zod';
@@ -331,7 +332,8 @@ export function resolveMaxFileSizeMB(
   explicit: number | undefined,
   fetchedFromManifold: boolean,
 ): number {
-  if (explicit != null) return explicit;
+  const chosen = explicit ?? callFileSizeLimit() ?? envFileSizeLimit();
+  if (chosen != null) return chosen;
   const floor = fetchedFromManifold
     ? MANIFOLD_FETCH_SIZE_LIMIT_MB
     : LOCAL_FILE_SIZE_LIMIT_MB;
@@ -365,7 +367,14 @@ export function fileSizeRefusal(
       : `max_file_size_mb: ${raise}`;
   // An explicit limit is the caller's own choice; the heap is only the remedy
   // for the default, which scales with it.
-  return explicit != null
+  if (
+    explicit == null &&
+    callFileSizeLimit() == null &&
+    envFileSizeLimit() != null
+  ) {
+    return `${p} is ${sizeMB.toFixed(0)} MB — over MEMLAB_MAX_FILE_SIZE_MB (${limit} MB). Raise it with ${how}, or raise the env var.`;
+  }
+  return explicit != null || callFileSizeLimit() != null
     ? `${p} is ${sizeMB.toFixed(0)} MB — over the max_file_size_mb of ${limit} MB passed to this call. Raise it with ${how}.`
     : `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${limit} MB per-file safety limit. Raise it with ${how}, or ${raiseHeapHint(getOldSpaceLimitMB())}`;
 }
