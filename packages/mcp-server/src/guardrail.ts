@@ -9,6 +9,7 @@
  */
 
 import crypto from 'crypto';
+import {z} from 'zod';
 import {
   snapshotParam,
   takesSnapshotParam,
@@ -19,7 +20,7 @@ import {trackSdkTool} from './toolsets.js';
 import {toolsetsOf} from './tools/tools-index.js';
 import {recordCall} from './perf-stats.js';
 import {toolAnnotations} from './tool-annotations.js';
-import {isTerse, shouldEmitNote} from './heap-state.js';
+import {getSnapshotMetadata, isTerse, shouldEmitNote} from './heap-state.js';
 import {makeProgressReporter, runWithProgress} from './progress.js';
 import {runWithReadScope} from './read-scope.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -476,6 +477,15 @@ function jsonOutput(name: string, params: unknown, result: unknown): unknown {
   return result;
 }
 
+function timeoutParam() {
+  return z
+    .number()
+    .optional()
+    .describe(
+      'Wall-clock budget for this call in ms (default 90 s, more on heaps over 10M nodes; 0 disables).',
+    );
+}
+
 export function installAnalysisGuardrail(server: McpServer): void {
   installUnknownParamRejection(server);
   const origTool = (server.tool as AnyFn).bind(server) as AnyFn;
@@ -501,6 +511,11 @@ export function installAnalysisGuardrail(server: McpServer): void {
       const statelessSnapshot =
         shape != null && takesSnapshotParam(name, shape);
       if (statelessSnapshot && shape != null) shape.snapshot = snapshotParam();
+      // Declared on every tool: argument parsing drops undeclared keys, so a
+      // `timeout_ms` the shape does not name never reaches the budget below.
+      if (shape != null && !('timeout_ms' in shape)) {
+        shape.timeout_ms = timeoutParam();
+      }
       recordToolHandler(name, inner, shape);
       if (shape != null) params = Object.keys(shape);
       // tool(name, [description,] shape, handler) → insert the annotations
@@ -523,6 +538,7 @@ export function installAnalysisGuardrail(server: McpServer): void {
             : undefined;
         const timeoutMs = getAnalysisTimeoutMs(
           typeof override === 'number' ? override : undefined,
+          getSnapshotMetadata()?.nodeCount ?? 0,
         );
         beginAnalysisBudget(timeoutMs);
         // Timed in `finally`, so calls that time out or throw count too.

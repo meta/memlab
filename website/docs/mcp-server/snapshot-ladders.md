@@ -201,9 +201,12 @@ Ladder analyses can take longer than the assistant waits for a tool call.
 - **Waiting.** `memlab_job_status` and `memlab_battery_status` take `wait_ms`,
   up to 90 seconds, so the call returns before a client gives up on it. A
   RUNNING reply says when it was written, so a late reply reads as stale.
-- **Time limit.** Every call runs under a 90-second limit by default (change
-  it with `timeout_ms`, or `MEMLAB_ANALYSIS_TIMEOUT_MS` for all calls). A scan
-  that runs past it returns "analysis stopped" instead of blocking the server.
+- **Time limit.** Every call runs under a 90-second limit by default, longer
+  on heaps over 10 million nodes (9 µs per node). Every tool takes `timeout_ms`
+  to change it for one call, and `MEMLAB_ANALYSIS_TIMEOUT_MS` changes it for
+  all calls. A scan that runs past it returns "analysis stopped" instead of
+  blocking the server. `memlab_sweep` gives each section its own limit and
+  lists the sections that ran out.
 - **Jobs survive restarts.** Job handles are written to `~/.memlab/jobs/`
   (`MEMLAB_STATE_DIR`), so a restarted server, or a second one, still answers
   for them: with the result, "running in another memlab server", or ORPHANED

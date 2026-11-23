@@ -67,12 +67,19 @@ let activeBudget: {tick: () => void} | null = null;
 let activeStart = 0;
 let activeTimeoutMs = 0;
 
+/** Default budget per node of the active snapshot: 90 s covers ~10M nodes. */
+const DEFAULT_TIMEOUT_MS_PER_NODE = 0.009;
+
 /**
  * Resolve the analysis timeout in ms: an explicit per-call override wins, then
- * the MEMLAB_ANALYSIS_TIMEOUT_MS env var, then the 90s default. A value <= 0
- * disables the guardrail (returns 0 → never trips).
+ * the MEMLAB_ANALYSIS_TIMEOUT_MS env var, then the default: 90 s, or 9 µs per
+ * node of the active snapshot when that is larger. A value <= 0 disables the
+ * guardrail (returns 0 → never trips).
  */
-export function getAnalysisTimeoutMs(override?: number | null): number {
+export function getAnalysisTimeoutMs(
+  override?: number | null,
+  activeNodeCount = 0,
+): number {
   if (override != null && Number.isFinite(override)) {
     return override > 0 ? override : 0;
   }
@@ -80,7 +87,10 @@ export function getAnalysisTimeoutMs(override?: number | null): number {
   if (Number.isFinite(env)) {
     return env > 0 ? env : 0;
   }
-  return DEFAULT_ANALYSIS_TIMEOUT_MS;
+  return Math.max(
+    DEFAULT_ANALYSIS_TIMEOUT_MS,
+    Math.ceil(activeNodeCount * DEFAULT_TIMEOUT_MS_PER_NODE),
+  );
 }
 
 /** Arm the global budget for one tool call. `timeoutMs <= 0` disables it. */
