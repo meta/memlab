@@ -10,7 +10,9 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapEdge, IHeapNode, IHeapSnapshot} from '@memlab/core';
+import fs from 'fs';
 import {z} from 'zod';
+import {ScanTimeoutError} from '../analysis-budget.js';
 import {
   getMetadataByHandle,
   getSnapshot,
@@ -20,7 +22,12 @@ import {
 import {cachedPathLabeler} from '../heap-families.js';
 import {recordSweepLeads, SWEEP_SECTION as SEC} from '../lead-registry.js';
 import {getSlotBytes} from '../heap-shapes.js';
-import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
+import {
+  armScanBudgetFor,
+  resolveRungs,
+  scaledTimeoutMs,
+  withSnapshotAt,
+} from '../snapshot-borrow.js';
 import {stringFamilyCensus} from '../string-families.js';
 import {
   envLabelOf,
@@ -679,11 +686,21 @@ export function residualCall(leads: Lead[], cap: number): string | null {
   return `memlab_residual({explained: [\n${out.map(o => `  ${JSON.stringify(o)}`).join(',\n')}\n]})`;
 }
 
+/** File size in MB, 0 when unknown. */
+function fileMB(filePath: string | undefined): number {
+  if (filePath == null) return 0;
+  try {
+    return fs.statSync(filePath).size / (1024 * 1024);
+  } catch {
+    return 0;
+  }
+}
+
 export function registerSweep(server: McpServer): void {
   server.tool(
     'memlab_sweep',
     'The one call to make after memlab_load_snapshot: every first-pass lead in ONE compact report. Runs the sweep the best manual investigations followed, each section capped and omitted when empty: (1) top ~30 retained objects (strings and code excluded) with holder, marked when held directly by the GC root, a global or a module; (2) collections with ≥500 entries flagged at least 25% dead, plus the largest; (3) string families; (4) flagged framework buffers (per-call keys, cancelled scheduler tasks, cancelled-in-place listener arrays, oversized logs); (5) diagnostic buffers: error histories with repeated errors, the Performance timeline, telemetry queues; (6) finished traces, streams and uploads that still own their buffers; (7) React state holding dead UI: effect cleanups capturing detached DOM, registries keyed to unmounted fibers; (8) React lists: rendered items vs virtualized shells and per-item child counts; (9) the largest class by self size, and heap numbers, grouped by holder `Class.edge`; (10) async flags and Node.js server flags, including vm realms held per cache key and scripts loaded but never evaluated; (11) with 2+ snapshots (`paths`, or several resident): same-id objects that grew at every rung and growth anchors; (12) a ready-to-paste memlab_residual call that cuts the top leads, to look at the long tail. ' +
-      'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 15 KB by default; `detail:"full"` raises every cap (about 34 KB). Section timings are in the footer.',
+      'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 15 KB by default; `detail:"full"` raises every cap (about 34 KB). Section timings are in the footer. Each section has its own scan budget, scaled to the snapshot size (`timeout_ms` overrides it); a section that runs out is listed as skipped and the others still report.',
     {
       paths: z
         .array(z.string())
@@ -698,8 +715,14 @@ export function registerSweep(server: McpServer): void {
         .describe(
           '"leads" (default, about 15 KB) or "full" (larger caps, about 34 KB).',
         ),
+      timeout_ms: z
+        .number()
+        .optional()
+        .describe(
+          'Scan budget PER SECTION, in ms. Default: 600 ms per MB of the largest snapshot swept, at least 60 s.',
+        ),
     },
-    async ({paths, detail}) => {
+    async ({paths, detail, timeout_ms}) => {
       try {
         const caps = capsFor(detail);
         const t0 = Date.now();
@@ -708,8 +731,10 @@ export function registerSweep(server: McpServer): void {
         let baselineName = '';
         // The rungs this call read, oldest first, the swept one last.
         let header: string | undefined;
+        let largestMB = 0;
         if (paths != null && paths.length > 0) {
-          const {rungs: resolved} = resolveRungs(paths);
+          const {rungs: resolved, largestMB: mb} = resolveRungs(paths);
+          largestMB = mb;
           const last = resolved[resolved.length - 1];
           const handle = await loadSnapshotByPath(last.localPath);
           if (handle == null) {
@@ -733,6 +758,12 @@ export function registerSweep(server: McpServer): void {
             if (other != null) await withSnapshotAt(other.filePath, fn);
           });
           baselineName = others[0]?.fileName ?? '';
+          for (const m of others) {
+            largestMB = Math.max(
+              largestMB,
+              fileMB(getMetadataByHandle(m.handle)?.filePath),
+            );
+          }
           if (others.length > 0) {
             header = pathsHeader([
               ...others.map(m => m.fileName),
@@ -740,15 +771,26 @@ export function registerSweep(server: McpServer): void {
             ]);
           }
         }
+        largestMB = Math.max(largestMB, fileMB(meta?.filePath));
+        const sectionBudgetMs = scaledTimeoutMs(largestMB, timeout_ms);
+        const skipped: string[] = [];
         const leads: Lead[] = [];
         const timed = async (
           name: string,
           f: () => Promise<string[]> | string[],
         ) => {
+          armScanBudgetFor(sectionBudgetMs);
           const start = Date.now();
-          const lines = await f();
-          times.push(`${name} ${((Date.now() - start) / 1000).toFixed(1)}s`);
-          return lines;
+          try {
+            const lines = await f();
+            times.push(`${name} ${((Date.now() - start) / 1000).toFixed(1)}s`);
+            return lines;
+          } catch (e) {
+            if (!(e instanceof ScanTimeoutError)) throw e;
+            times.push(`${name} skipped`);
+            skipped.push(name);
+            return [];
+          }
         };
         const env = meta?.env ?? 'unknown';
         const total = s.nodes.get(0)?.retainedSize ?? 0;
@@ -785,6 +827,13 @@ export function registerSweep(server: McpServer): void {
                 leads,
               ),
             )),
+          );
+        }
+        if (skipped.length > 0) {
+          lines.push(
+            `> ⚠ **Skipped** (each ran past its ${(sectionBudgetMs / 1000).toFixed(sectionBudgetMs < 10_000 ? 1 : 0)}s scan budget): ${skipped.join(', ')}. ` +
+              'The other sections are complete. Re-run with a larger `timeout_ms` (per section) to include them.',
+            '',
           );
         }
         const call = residualCall(leads, caps.cuts);
