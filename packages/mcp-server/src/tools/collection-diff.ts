@@ -482,8 +482,8 @@ export function registerCollectionDiff(server: McpServer): void {
       limit: z
         .number()
         .optional()
-        .default(30)
-        .describe('Maximum number of collections to report (default 30).'),
+        .default(15)
+        .describe('Maximum number of collections to report (default 15).'),
       monotonic_only: z
         .boolean()
         .optional()

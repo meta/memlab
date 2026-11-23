@@ -51,8 +51,8 @@ export function registerNativeContexts(server: McpServer): void {
         .int()
         .min(1)
         .optional()
-        .default(20)
-        .describe('Rows in the realm list and in the breakdown (default 20).'),
+        .default(10)
+        .describe('Rows in the realm list and in the breakdown (default 10).'),
     },
     async ({handle, breakdown, limit}) => {
       try {

@@ -532,10 +532,8 @@ export function registerResidual(server: McpServer): void {
       limit: z
         .number()
         .optional()
-        .default(30)
-        .describe(
-          'Rows per table (default 30; the number and array tables show at most 15).',
-        ),
+        .default(15)
+        .describe('Rows per table (default 15).'),
     },
     async ({explained, limit}) => {
       try {

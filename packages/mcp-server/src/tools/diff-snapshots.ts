@@ -302,8 +302,8 @@ export function registerDiffSnapshots(server: McpServer): void {
       limit: z
         .number()
         .optional()
-        .default(30)
-        .describe('Maximum rows per section / top_n (default 30)'),
+        .default(15)
+        .describe('Maximum rows per section / top_n (default 15)'),
       min_count_delta: z
         .number()
         .optional()

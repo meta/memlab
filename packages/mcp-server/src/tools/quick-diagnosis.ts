@@ -49,18 +49,18 @@ export function registerQuickDiagnosis(server: McpServer): void {
       top_objects: z
         .number()
         .optional()
-        .default(20)
-        .describe('Number of largest objects to include (default 20)'),
+        .default(10)
+        .describe('Number of largest objects to include (default 10)'),
       top_classes: z
         .number()
         .optional()
-        .default(15)
-        .describe('Number of top classes in histogram (default 15)'),
+        .default(10)
+        .describe('Number of top classes in histogram (default 10)'),
       top_strings: z
         .number()
         .optional()
-        .default(10)
-        .describe('Number of top duplicated strings (default 10)'),
+        .default(5)
+        .describe('Number of top duplicated strings (default 5)'),
       exact_retained_size: z
         .boolean()
         .optional()
