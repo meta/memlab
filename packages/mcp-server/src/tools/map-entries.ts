@@ -195,7 +195,11 @@ export function registerMapEntries(server: McpServer): void {
           const weakValues = entries.filter(
             e => e.value?.name === 'WeakRef',
           ).length;
-          if (!mapSlotsAligned(node) && entries.every(e => e.value == null)) {
+          if (
+            entries.length > 0 &&
+            !mapSlotsAligned(node) &&
+            entries.every(e => e.value == null)
+          ) {
             lines.push(
               '',
               '**Key/value alignment unknown:** every slot stands alone and the table is too small to place them, so each is shown as a key. They may equally be VALUES under small-integer keys, so treat the key type as unknown.',

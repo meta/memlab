@@ -993,18 +993,14 @@ export function collectionSlotCounts(node: IHeapNode): {
   deleted: number;
 } {
   const isMap = node.name === 'Map' || node.name === 'WeakMap';
-  const {holes} = readBackingStore(node);
-  const live = isMap
-    ? enumerateMapEntries(node).length
-    : collectBackingSlots(node).length;
-  if (!isMap) return {live, deleted: holes.length};
+  const store = readBackingStore(node);
+  const {slots, holes} = store;
+  if (!isMap) return {live: slots.length, deleted: holes.length};
+  const r = mapResidueOf(node, store);
+  const live = pairMapSlots(slots, r).length;
   if (node.name === 'WeakMap') {
     return {live, deleted: Math.round(holes.length / 2)};
   }
-  const r = mapKeyResidue([
-    ...collectBackingSlots(node).map(x => x.idx),
-    ...holes,
-  ]);
   const deleted =
     r == null
       ? Math.round(holes.length / 2)
@@ -1152,12 +1148,25 @@ export function flattenString(
  * Map has SMI values (a real correctness bug on browser heaps).
  */
 export function enumerateMapEntries(node: IHeapNode): CollectionEntry[] {
-  const {slots, holes} = readBackingStore(node);
+  const store = readBackingStore(node);
+  return pairMapSlots(store.slots, mapResidueOf(node, store));
+}
+
+/** The key-slot residue `enumerateMapEntries` pairs by; null for a WeakMap. */
+function mapResidueOf(
+  node: IHeapNode,
+  {slots, holes}: {slots: BackingSlot[]; holes: number[]},
+): number | null {
+  return node.name === 'WeakMap'
+    ? null
+    : mapKeyResidue([...slots.map(x => x.idx), ...holes]);
+}
+
+function pairMapSlots(
+  slots: BackingSlot[],
+  r: number | null,
+): CollectionEntry[] {
   const entries: CollectionEntry[] = [];
-  const r =
-    node.name === 'WeakMap'
-      ? null
-      : mapKeyResidue([...slots.map(x => x.idx), ...holes]);
   if (r != null) {
     const at = new Map(slots.map(x => [x.idx, x.node]));
     for (const {idx, node: n} of slots) {
