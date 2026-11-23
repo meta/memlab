@@ -105,6 +105,12 @@ test('lint: a plain {} keyed by heap names is flagged, a literal key is not', ()
   assert.equal(protoKeyTrap("const by = {}; by['x' + k] = 1;").length, 1);
   assert.deepEqual(protoKeyTrap('const by = {}; by[`x`] = 1;'), []);
   assert.equal(protoKeyTrap('const a = {}, b = {}; b[k] = 1;').length, 1);
+  assert.equal(
+    protoKeyTrap('const by = {}; for (const n of ns) out.push(...by[n.name]);')
+      .length,
+    1,
+  );
+  assert.deepEqual(protoKeyTrap('const by = {}; x = m?.by[k];'), []);
 });
 
 test('a query that does not parse gets {error}; the others still answer', () => {

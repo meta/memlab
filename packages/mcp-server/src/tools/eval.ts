@@ -6720,9 +6720,9 @@ export function protoKeyTrap(code: string): string[] {
   for (let m = decl.exec(code); m != null; m = decl.exec(code)) {
     const name = m[1];
     // A computed key that is not a literal: a name read off the heap. A
-    // `.name[k]` is some other object's property.
+    // `.name[k]` is some other object's property; a spread `...name[k]` is not.
     const dynamic = new RegExp(
-      `(?<![\\w$.])${name.replace(/\$/g, '\\$')}\\[\\s*(?!(?:'[^']*'|"[^"]*"|\`[^\`$]*\`|\\d+)\\s*\\])[^\\]]+\\]`,
+      `(?<![\\w$])(?<!(?<!\\.\\.)\\.)${name.replace(/\$/g, '\\$')}\\[\\s*(?!(?:'[^']*'|"[^"]*"|\`[^\`$]*\`|\\d+)\\s*\\])[^\\]]+\\]`,
     );
     if (dynamic.test(code.slice(m.index + m[0].length))) {
       out.push(
