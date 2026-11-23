@@ -9,6 +9,7 @@
  */
 
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
+import {recordLead} from '../lead-registry.js';
 import {formatBytes, formatNumber, markdownTable} from '../utils.js';
 
 /**
@@ -206,6 +207,17 @@ export function shapeClustersSection(
 ): string[] {
   const rows = shapeClusters(snapshot).slice(0, limit);
   if (rows.length === 0) return [];
+  for (const c of rows) {
+    recordLead(snapshot, {
+      label: shapeText(c.cls, c.props, 90),
+      ids: [c.example],
+      bytes: c.frees,
+      kind: 'large',
+      why: `shape cluster: ${formatNumber(c.count)} instances, cutting all frees ${formatBytes(c.frees)}`,
+      source: 'sweep shapes',
+      check: `memlab_what_if({shape:${JSON.stringify(c.props.slice(0, 12))}})`,
+    });
+  }
   const top = rows[0];
   return [
     `### Shape clusters by what cutting every instance frees (≥ 50 instances) → \`memlab_what_if({shape})\``,

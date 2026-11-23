@@ -12,6 +12,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapSnapshot} from '@memlab/core';
 import fs from 'fs';
 import path from 'path';
+import {recordLead} from '../lead-registry.js';
 import {shapeCounts, shapeText} from './shape-clusters.js';
 import {z} from 'zod';
 import memlabHeapAnalysis from '@memlab/heap-analysis';
@@ -291,6 +292,7 @@ export function shapeGrowth(
   before: number;
   after: number;
   selfDelta: number;
+  example: number;
 }> {
   const b = shapeCounts(before);
   const out = [];
@@ -305,6 +307,7 @@ export function shapeGrowth(
       before: bc,
       after: a.count,
       selfDelta: a.self - (was?.self ?? 0),
+      example: a.example,
     });
   }
   return out.sort((x, y) => y.after - y.before - (x.after - x.before));
@@ -730,6 +733,17 @@ export function registerDiffSnapshots(server: McpServer): void {
         }
 
         const shapeRows = shapeGrowth(beforeSnapshot, afterSnapshot);
+        for (const r of shapeRows.slice(0, limit)) {
+          recordLead(afterSnapshot, {
+            label: shapeText(r.cls, r.props, 90),
+            ids: [r.example],
+            bytes: r.selfDelta,
+            kind: 'growing',
+            why: `shape grew ${formatNumber(r.before)} → ${formatNumber(r.after)} instances`,
+            source: 'diff_snapshots shapes',
+            check: `memlab_population_diff({population:"shape:${r.props.slice(0, 8).join(',')}"})`,
+          });
+        }
         if (shapeRows.length > 0) {
           lines.push(
             `### Shapes that grew by count (constructor + property set, ≥ ${SHAPE_MIN_AFTER} instances after)`,

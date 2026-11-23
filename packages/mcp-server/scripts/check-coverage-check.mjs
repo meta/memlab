@@ -331,3 +331,37 @@ test('report: uncovered sorted by bytes, unnamed on one line, ⚠ on soft not_pr
   assert.match(md, /Covered by findings \(1\): F1: Msg.__x_thumbnailHQ/);
   assert.doesNotMatch(md, /tinyThing/);
 });
+
+test('markdown: items under an Ignored heading account for a lead', () => {
+  const items = parseDraft(
+    '# Findings\n## F1 the queue\n\n## Ignored\n- ignored: dispatcherFunc records, instrumentation is off in production\n',
+  );
+  const ignored = items.find(i => /ignored: dispatcherFunc/.test(i.text));
+  assert.equal(ignored?.kind, 'not_problem');
+  const shape = lead({
+    label: 'a{dispatcherFunc, implementation, interceptor, name}',
+    kind: 'large',
+    ids: [537369],
+  });
+  assert.equal(itemFor(shape, items)?.kind, 'not_problem');
+});
+
+test('bottom-up leads: a shape that grew by count is listed with its check', () => {
+  const grew = lead({
+    label: 't{context, eventType, key, listener, remove, subscriber}',
+    ids: [8661577],
+    kind: 'growing',
+    bytes: 2_100_000,
+    why: 'shape grew 10,574 → 72,361 instances',
+    check:
+      'memlab_population_diff({population:"shape:context,eventType,key,listener,remove,subscriber"})',
+  });
+  const out = coverageReport(
+    [grew],
+    parseDraft('# Findings\n## F1 other\n'),
+    64 * 1024,
+    5,
+  );
+  assert.match(out, /with a signal/);
+  assert.match(out, /memlab_population_diff/);
+});

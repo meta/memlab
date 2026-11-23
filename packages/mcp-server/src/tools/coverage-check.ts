@@ -27,7 +27,8 @@ export interface DraftItem {
   text: string;
 }
 
-const NP_HEADING = /not[\s_-]*(a[\s_-]*)?problems?|ruled[\s_-]*out|non-issues/i;
+const NP_HEADING =
+  /not[\s_-]*(a[\s_-]*)?problems?|ruled[\s_-]*out|non-issues|ignored/i;
 
 /** report.json (`findings`, `not_problems`), else markdown split by heading. */
 export function parseDraft(raw: string): DraftItem[] {
@@ -230,7 +231,7 @@ export function coverageReport(
   const lines = [
     `## Coverage check: ${open.length} of ${all.length} leads (≥ ${formatBytes(minBytes)}) are not in the draft (${findings} findings, ${items.length - findings} not_problems)`,
     '',
-    '- Leads to check, not issues: each is a row a tool printed this session. Drill it, then report it, rule it out with evidence, or drop it.',
+    '- Leads to check, not issues: each is a row a tool printed this session, including bottom-up ones (shape clusters, shapes that grew by count, duplicate subscriptions). Drill it, then account for it: a finding, a not_problem with evidence, or `ignored: <reason>` under an Ignored heading.',
   ];
   // A lead with evidence (dead, copies, growth) before one that is only big.
   const signal = named.filter(l => EVIDENCE.has(l.kind));
@@ -315,7 +316,7 @@ export function coverageReport(
 export function registerCoverageCheck(server: McpServer): void {
   server.tool(
     'memlab_coverage_check',
-    'Run before the final report: lists the leads memlab tools surfaced this session (sweep, residual, largest_objects, framework_buffers, growth anchors, duplicated_strings, collection_diff) that the draft does not name, largest first, with why each surfaced and the call that checks it. Leads named only in not_problems are listed too, marked ⚠ when the reason is "bounded"/"expected"/"normal" but the lead says dead, duplicate, finished or growing. ' +
+    'Run before the final report: lists the leads memlab tools surfaced this session (sweep, including its shape clusters; residual, largest_objects, framework_buffers, growth anchors, duplicated_strings, collection_diff, the shapes diff_snapshots saw grow by count, duplicate_subscriptions) that the draft does not name, largest first, with why each surfaced and the call that checks it. Leads named only in not_problems are listed too, marked ⚠ when the reason is "bounded"/"expected"/"normal" but the lead says dead, duplicate, finished or growing. ' +
       'Matching is by @id, holder and class names. Leads are not issues: drill each before adding it.',
     {
       report_path: z

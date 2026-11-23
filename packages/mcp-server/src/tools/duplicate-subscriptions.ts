@@ -18,6 +18,7 @@ import {
   registryEvents,
 } from '../emitter-shapes.js';
 import {getSnapshotMetadata, listSnapshots} from '../heap-state.js';
+import {recordLead} from '../lead-registry.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {
   errorResult,
@@ -43,6 +44,8 @@ export interface Registration {
   codeStable: string;
   codeLabel: string;
   closureId: number;
+  /** The callback closure's retained size. */
+  bytes: number;
   kind: 'emitter' | 'set' | 'dom';
 }
 
@@ -185,6 +188,7 @@ export function collectRegistrations(snapshot: IHeapSnapshot): Registration[] {
       codeStable: c.stable,
       codeLabel: c.label,
       closureId: closure.id,
+      bytes: closure.retainedSize,
     });
   };
   snapshot.nodes.forEach((node: IHeapNode) => {
@@ -251,6 +255,7 @@ export interface DuplicateGroup {
   registrations: number;
   closures: number;
   exampleClosure: number;
+  bytes: number;
 }
 
 /**
@@ -310,11 +315,13 @@ export function duplicateGroups(regs: readonly Registration[]): {
         registrations: 0,
         closures: 0,
         exampleClosure: r.closureId,
+        bytes: 0,
         ids: new Set(),
       };
       byKey.set(k, g);
     }
     g.registrations++;
+    g.bytes += r.bytes;
     g.ids.add(r.closureId);
   }
   const duplicates = [...byKey.values()]
@@ -381,8 +388,22 @@ export function registerDuplicateSubscriptions(server: McpServer): void {
           labels = [...others.map(m => m.handle), active.handle];
         }
         const newest = rungPaths[rungPaths.length - 1];
-        const regs = await withSnapshotAt(newest, s => collectRegistrations(s));
-        const {duplicates, perCode} = duplicateGroups(regs);
+        const {regs, duplicates, perCode} = await withSnapshotAt(newest, s => {
+          const all = collectRegistrations(s);
+          const groups = duplicateGroups(all);
+          for (const g of groups.duplicates.slice(0, limit)) {
+            recordLead(s, {
+              label: `${g.store} ${g.event === '' ? '' : `'${g.event}' `}${g.codeLabel}`,
+              ids: [g.exampleClosure],
+              bytes: g.bytes,
+              kind: 'duplicate',
+              why: `same callback registered ${formatNumber(g.registrations)}× for one subscriber`,
+              source: 'duplicate_subscriptions',
+              check: 'memlab_duplicate_subscriptions({})',
+            });
+          }
+          return {regs: all, ...groups};
+        });
         const stores = new Set(regs.map(r => r.storeId)).size;
         const byKind = {emitter: 0, set: 0, dom: 0};
         for (const r of regs) byKind[r.kind]++;
