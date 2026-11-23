@@ -100,3 +100,22 @@ test('ranks by what cutting every instance frees, counting nested ones once', ()
   assert.equal(cell.count, 60);
   assert.equal(cell.frees, 16 * 60);
 });
+
+test('an instance under a dominator chain longer than 100k hops is still nested', () => {
+  const g = graph();
+  const root = g.node('(GC roots)', 0, 0, 'synthetic');
+  const leaf = g.node('leaf', 8, 8, 'number', root);
+  const head = g.node('Cell', 16, 1_000_000, 'object', root);
+  g.prop(head, 'next', leaf);
+  let up = head;
+  for (let i = 0; i < 150_000; i++) {
+    up = g.node('', 8, 8, 'hidden', up);
+  }
+  for (let i = 0; i < 59; i++) {
+    const c = g.node('Cell', 16, 16, 'object', up);
+    g.prop(c, 'next', leaf);
+  }
+  const [cell] = shapeClusters(g.snapshot);
+  assert.equal(cell.count, 60);
+  assert.equal(cell.frees, 1_000_000);
+});

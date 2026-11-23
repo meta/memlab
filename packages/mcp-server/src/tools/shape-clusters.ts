@@ -149,14 +149,15 @@ export function shapeClusters(
   const frees = new Float64Array(groups.length);
 
   // Nearest strict dominator-ancestor that is an instance of any picked
-  // shape, memoised so the whole pass is O(N).
+  // shape, memoised so the whole pass is O(N). The hop cap only stops a
+  // cycle in malformed dominator data: a real chain is at most n long.
   const near = new Int32Array(n).fill(-3);
   const path: number[] = [];
   const nearest = (start: number): number => {
     path.length = 0;
     let cur = start;
     let answer = -1;
-    for (let hops = 0; hops < 100_000; hops++) {
+    for (let hops = 0; hops <= n; hops++) {
       if (near[cur] !== -3) {
         answer = near[cur];
         break;
