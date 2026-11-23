@@ -69,9 +69,11 @@ function build(mock) {
   const link = (from, to, etype, name) => from.edges.push({etype, name, to});
   const root = mk('synthetic', '');
   const byName = new Map();
-  const add = (key, type, name, self = 0) => {
+  const add = (key, type, name, self = 0, rooted = true) => {
     const n = mk(type, name, self);
-    link(root, n, 'element', root.edges.length);
+    if (rooted) {
+      link(root, n, 'element', root.edges.length);
+    }
     byName.set(key, n);
     return n;
   };
@@ -95,9 +97,11 @@ function build(mock) {
   for (const si of mock.scopeInfos) add(si.name, 'code', 'system / ScopeInfo');
   for (const f of mock.sfis)
     add(f.name, 'code', `system / SharedFunctionInfo / ${f.name}`);
+  // `unrooted`: reachable only through what holds it
   for (const c of mock.contexts)
-    add(c.name, 'object', `system / Context / ${c.name}`, 16);
-  for (const c of mock.closures ?? []) add(c.name, 'closure', c.name, 32);
+    add(c.name, 'object', `system / Context / ${c.name}`, 16, !c.unrooted);
+  for (const c of mock.closures ?? [])
+    add(c.name, 'closure', c.name, 32, !c.unrooted);
   // Objects held from the root as well, like a page's Window.
   for (const g of mock.globals ?? []) {
     const n = add(g.name, 'object', g.name, g.size ?? 100);
@@ -168,6 +172,10 @@ function build(mock) {
   for (const c of mock.closures ?? []) {
     link(N(c.name), N(c.sfi), 'internal', 'shared');
     link(N(c.name), N(c.context), 'internal', 'context');
+  }
+  // [field, node, edge name]: the field's value holds the node
+  for (const [field, to, name] of mock.links ?? []) {
+    link(fieldValues.get(field), N(to), 'property', name);
   }
   // generator objects: one map per instance type, shared
   const maps = new Map();
@@ -409,6 +417,27 @@ const cases = {
       sfi: 'liveReaderSfi',
       context: 'fnCall2',
     });
+    return m;
+  })(),
+  // fnCall.deadVar's value holds a closure whose context's dead `selfRef`
+  // points back at it: that slot is inside the value, so only fnCall.deadVar
+  // holds it and frees it; selfRef frees nothing
+  selfHeld: (() => {
+    const m = base();
+    m.scripts[0].scopes[0].vars.push('selfRef');
+    m.contexts.push({
+      name: 'innerCall',
+      scopeInfo: 'fn',
+      unrooted: true,
+      fields: [{name: 'selfRef', sameAs: 'fnCall.deadVar'}],
+    });
+    m.closures.push({
+      name: 'innerClosure',
+      sfi: 'liveReaderSfi',
+      context: 'innerCall',
+      unrooted: true,
+    });
+    m.links = [['fnCall.deadVar', 'innerClosure', 'callback']];
     return m;
   })(),
   // two contexts of one scope whose order flips under min_retained_size 3000:

@@ -65,7 +65,8 @@ export interface DeadField {
   /**
    * When the value is held only by dead slots, several of them (another
    * context's, or a second slot of this one): how many. Clearing them all
-   * frees it. 0 otherwise, including when something else also holds it.
+   * frees it. 0 otherwise, including when something else also holds it or
+   * this slot is inside the value's own dominator subtree.
    */
   deadHolders: number;
 }
@@ -641,18 +642,24 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
   }
   // Classified once every dead slot is known: a value can be held by dead
   // slots of several contexts.
+  const holdersOf = new Map<number, Set<string> | null>();
   for (const scope of scopes) {
     for (const c of scope.contexts) {
       for (const f of c.deadFields) {
         const value = valueOf.get(f);
-        const holders = value != null ? holdingEdges(value, deadSlots) : null;
-        if (holders == null) continue;
-        const own =
-          holders.length === 1 &&
-          holders[0].fromNode.id === c.contextId &&
-          String(holders[0].name_or_index) === f.name;
-        if (own) f.releasedSize = f.retainedSize;
-        else f.deadHolders = holders.length;
+        if (value == null) continue;
+        let holders = holdersOf.get(value.id);
+        if (holders === undefined) {
+          holders = holdingSlots(value, deadSlots);
+          holdersOf.set(value.id, holders);
+        }
+        // A slot inside the value's own subtree is not one of its holders:
+        // clearing it frees nothing.
+        if (holders == null || !holders.has(slotKey(c.contextId, f.name))) {
+          continue;
+        }
+        if (holders.size === 1) f.releasedSize = f.retainedSize;
+        else f.deadHolders = holders.size;
       }
       c.deadFields.sort(
         (a, b) =>
@@ -688,14 +695,14 @@ const slotKey = (contextId: number, name: string) => `${contextId}:${name}`;
 const MAX_DOMINATOR_HOPS = 256;
 
 /**
- * The edges that keep `value` alive, those from outside its own dominator
+ * The slots that keep `value` alive, the edges from outside its own dominator
  * subtree, when every one of them is a dead slot; null as soon as one is not.
  */
-function holdingEdges(
+function holdingSlots(
   value: IHeapNode,
   deadSlots: ReadonlySet<string>,
-): IHeapEdge[] | null {
-  const out: IHeapEdge[] = [];
+): Set<string> | null {
+  const out = new Set<string>();
   let shared = false;
   value.forEachReferrer((edge: IHeapEdge) => {
     if (edge.type === 'weak') return;
@@ -706,14 +713,12 @@ function holdingEdges(
       if (next == null || next.id === d.id) break;
       d = next;
     }
-    if (
-      edge.type !== 'context' ||
-      !deadSlots.has(slotKey(edge.fromNode.id, String(edge.name_or_index)))
-    ) {
+    const key = slotKey(edge.fromNode.id, String(edge.name_or_index));
+    if (edge.type !== 'context' || !deadSlots.has(key)) {
       shared = true;
       return {stop: true};
     }
-    out.push(edge);
+    out.add(key);
   });
   return shared ? null : out;
 }

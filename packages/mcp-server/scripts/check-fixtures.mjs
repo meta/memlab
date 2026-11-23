@@ -364,6 +364,7 @@ const deadExpected = {
   shared: ['deadVar'],
   aliased: ['deadVar'],
   deadShared: ['deadTwin', 'deadVar', 'deadVar'],
+  selfHeld: ['deadVar'],
   ranked: ['deadSmall', 'deadVar', 'deadVar'],
 };
 for (const [name, expected] of Object.entries(deadExpected)) {
@@ -446,6 +447,27 @@ await check(
     assert(
       /held only by 3 dead slots/.test(text) && !/something other/.test(text),
       `text: ${text.slice(0, 600)}`,
+    );
+  },
+);
+await check(
+  'dead_context_variables: a slot inside its own value is not one of its holders',
+  async () => {
+    const {data} = await call('memlab_dead_context_variables', {
+      snapshot: scope.selfHeld.file,
+      include_shared: true,
+    });
+    const fields = data.scopes.flatMap(s =>
+      s.contexts.flatMap(c => c.dead_fields),
+    );
+    const byName = Object.fromEntries(fields.map(f => [f.name, f]));
+    assert(
+      byName.deadVar?.released_size === byName.deadVar.retained_size &&
+        byName.deadVar.dead_holders === 0 &&
+        byName.selfRef?.released_size === 0 &&
+        byName.selfRef.dead_holders === 0 &&
+        data.held_only_by_dead_slots.values === 0,
+      `fields: ${JSON.stringify(data)}`,
     );
   },
 );
