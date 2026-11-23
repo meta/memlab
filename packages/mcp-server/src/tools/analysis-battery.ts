@@ -447,6 +447,9 @@ function buildPlan(
     // Native memory a JS object alone keeps alive: in no heap total, so a
     // never-settling promise pinning Blink objects shows only here.
     {tool: 'memlab_native_pin_cost', args: {run_dir: runDir, limit: 8}},
+    // Broken UI text (a dropped parameter, `[object Object]`) left in the
+    // fibers: a visible bug, including rows below the fold.
+    {tool: 'memlab_rendered_text_audit', args: {run_dir: runDir, limit: 10}},
     ...(hasControls
       ? [{tool: 'memlab_positive_controls', args: {run_dir: runDir}}]
       : []),

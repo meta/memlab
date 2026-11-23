@@ -118,6 +118,34 @@ globalThis.__fixtureModels = [
   new FixtureMsg('fixture-m1'),
   new FixtureMsg('fixture-m1'),
 ];
+// Fiber-shaped records: a row whose text lost both of its parameters.
+class FiberNode {
+  constructor(type, props, elementType = type) {
+    this.elementType = elementType;
+    this.type = type;
+    this.memoizedProps = props;
+    this.pendingProps = props;
+    this.return = null;
+    this.child = null;
+    this.sibling = null;
+    this.stateNode = null;
+  }
+}
+function FixtureChatRow() {}
+{
+  const owner = new FiberNode(FixtureChatRow, {});
+  const span = new FiberNode('span', {});
+  span.return = owner;
+  const parts = ['You added ', '', ' & ', ''].map(t => new FiberNode(null, t));
+  span.child = parts[0];
+  parts.forEach((p, i) => {
+    p.return = span;
+    p.sibling = parts[i + 1] ?? null;
+  });
+  const ok = new FiberNode('span', {children: 'You added Alice & Bob'});
+  ok.return = owner;
+  globalThis.__fixtureFibers = [owner, span, ok, ...parts];
+}
 // A promise that never settles, gaining `.then` reactions between snapshots.
 function fixturePendingHandler() {}
 globalThis.__fixturePending = new Promise(() => {});
@@ -581,6 +609,23 @@ await shapeCheck(
       `promiseReactions: ${JSON.stringify(json)}`,
     );
     await call('memlab_load_snapshot', {file_path: nodeSnapshot});
+  },
+);
+
+await shapeCheck(
+  'rendered_text_audit: an empty parameter, by component',
+  async () => {
+    const {text} = await call('memlab_rendered_text_audit', {});
+    assert(
+      /empty parameter +\| FixtureChatRow +\| text +\| `You·added··&·` +\| +1 /.test(
+        text,
+      ),
+      `finding: ${text.slice(0, 1200)}`,
+    );
+    assert(
+      !/Alice·&·Bob/.test(text),
+      `clean row flagged: ${text.slice(0, 1200)}`,
+    );
   },
 );
 

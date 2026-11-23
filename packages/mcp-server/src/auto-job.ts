@@ -34,6 +34,7 @@ export const AUTO_JOB_TOOLS = new Set([
   'memlab_model_duplicates',
   'memlab_retained_errors',
   'memlab_native_pin_cost',
+  'memlab_rendered_text_audit',
   'memlab_eval',
 ]);
 

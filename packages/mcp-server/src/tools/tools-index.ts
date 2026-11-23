@@ -484,6 +484,10 @@ const GROUPS: Group[] = [
         'Where retained Error objects were created, from the stack frames V8 captured (survives a truncated `.stack`); groups by top frames, names the JSX site of React `_debugStack` Errors.',
       ],
       [
+        'memlab_rendered_text_audit',
+        'UI text bugs read from React fibers, no pixels needed: `[object Object]`, `undefined`, `Invalid Date`, an empty parameter (`You added  & `), unreplaced `{name}` / `%s`; by component, per rung and per A/B arm.',
+      ],
+      [
         'memlab_native_pin_cost',
         'Native (browser) memory JS alone keeps alive, by pinner: a promise by its first `.then`, a closure by its function; per rung and per cycle with `run_dir`, per arm on an A/B round. What `app_delta` cannot see.',
       ],

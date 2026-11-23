@@ -81,6 +81,11 @@ JavaScript heap, where analyses ranked by size don't notice them:
   its function. No heap total includes these bytes, so a promise that never
   settles while pinning browser objects through its reactions shows here.
   `memlab_ab_compare` reports the total per arm.
+- **Broken UI text:** `memlab_rendered_text_audit` reads the text React
+  rendered, from the fibers, and flags `[object Object]`, `undefined`,
+  `Invalid Date`, a dropped parameter (`You added  & `) or an unreplaced
+  `{name}` placeholder, by component. It sees rows a screenshot cannot,
+  below the fold included.
 - **Retained errors:** `memlab_retained_errors` groups retained Error objects
   and error text by message template, on the first and last rung. It gives
   the change per cycle, marks templates that are new, and says when only an
