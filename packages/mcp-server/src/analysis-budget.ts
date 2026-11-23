@@ -44,8 +44,10 @@ export class ScanTimeoutError extends Error {
  * elapsed time every few thousand iterations and throws {@link ScanTimeoutError}
  * when the budget is exceeded.
  */
-export function makeScanBudget(timeoutMs: number): {tick: () => void} {
-  const start = Date.now();
+export function makeScanBudget(
+  timeoutMs: number,
+  start = Date.now(),
+): {tick: () => void} {
   let i = 0;
   return {
     tick() {
@@ -66,6 +68,8 @@ const DEFAULT_ANALYSIS_TIMEOUT_MS = 90_000;
 let activeBudget: {tick: () => void} | null = null;
 let activeStart = 0;
 let activeTimeoutMs = 0;
+// The budget came from the default, so a walked snapshot may widen it.
+let activeIsDefault = false;
 
 /** Default budget per node of the active snapshot: 90 s covers ~10M nodes. */
 const DEFAULT_TIMEOUT_MS_PER_NODE = 0.009;
@@ -93,17 +97,41 @@ export function getAnalysisTimeoutMs(
   );
 }
 
-/** Arm the global budget for one tool call. `timeoutMs <= 0` disables it. */
-export function beginAnalysisBudget(timeoutMs: number): void {
+/**
+ * Arm the global budget for one tool call. `timeoutMs <= 0` disables it.
+ * `isDefault`: no `timeout_ms` was passed, so {@link scaleBudgetToHeap} may
+ * widen it.
+ */
+export function beginAnalysisBudget(
+  timeoutMs: number,
+  isDefault = false,
+): void {
   activeStart = Date.now();
   activeTimeoutMs = timeoutMs;
   activeBudget = timeoutMs > 0 ? makeScanBudget(timeoutMs) : null;
+  activeIsDefault = isDefault && timeoutMs > 0;
+}
+
+/**
+ * Widen a default budget to the one a snapshot of `nodeCount` nodes gets.
+ * The default is sized from the active snapshot; a call that walks another
+ * one (a per-call `snapshot`, a ladder rung) calls this once it has it. An
+ * explicit `timeout_ms`, MEMLAB_ANALYSIS_TIMEOUT_MS or a tool's own re-arm
+ * is never changed. The clock keeps running from the start of the call.
+ */
+export function scaleBudgetToHeap(nodeCount: number): void {
+  if (!activeIsDefault) return;
+  const want = getAnalysisTimeoutMs(undefined, nodeCount);
+  if (want <= activeTimeoutMs) return;
+  activeTimeoutMs = want;
+  activeBudget = makeScanBudget(want, activeStart);
 }
 
 /** Disarm the global budget at the end of a tool call. */
 export function endAnalysisBudget(): void {
   activeBudget = null;
   activeTimeoutMs = 0;
+  activeIsDefault = false;
 }
 
 /**

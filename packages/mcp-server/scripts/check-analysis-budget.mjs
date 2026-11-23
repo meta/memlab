@@ -29,7 +29,13 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {getAnalysisTimeoutMs} = await import(pathToFileURL(built).href);
+const {
+  activeTimeoutMs_,
+  beginAnalysisBudget,
+  endAnalysisBudget,
+  getAnalysisTimeoutMs,
+  scaleBudgetToHeap,
+} = await import(pathToFileURL(built).href);
 
 test('default is 90 s, scaled by the active node count past 10M nodes', () => {
   delete process.env.MEMLAB_ANALYSIS_TIMEOUT_MS;
@@ -46,4 +52,31 @@ test('a per-call override wins, then the env var', () => {
   process.env.MEMLAB_ANALYSIS_TIMEOUT_MS = '0';
   assert.equal(getAnalysisTimeoutMs(undefined, 26_000_000), 0);
   delete process.env.MEMLAB_ANALYSIS_TIMEOUT_MS;
+});
+
+test('a default budget widens to the heap the call walks', () => {
+  delete process.env.MEMLAB_ANALYSIS_TIMEOUT_MS;
+  beginAnalysisBudget(90_000, true);
+  scaleBudgetToHeap(3_000_000);
+  assert.equal(activeTimeoutMs_(), 90_000);
+  scaleBudgetToHeap(26_000_000);
+  assert.equal(activeTimeoutMs_(), 234_000);
+  scaleBudgetToHeap(12_000_000);
+  assert.equal(activeTimeoutMs_(), 234_000);
+  endAnalysisBudget();
+});
+
+test('an explicit or re-armed budget is never widened', () => {
+  delete process.env.MEMLAB_ANALYSIS_TIMEOUT_MS;
+  beginAnalysisBudget(5000);
+  scaleBudgetToHeap(26_000_000);
+  assert.equal(activeTimeoutMs_(), 5000);
+  beginAnalysisBudget(90_000, true);
+  beginAnalysisBudget(60_000);
+  scaleBudgetToHeap(26_000_000);
+  assert.equal(activeTimeoutMs_(), 60_000);
+  beginAnalysisBudget(0, true);
+  scaleBudgetToHeap(26_000_000);
+  assert.equal(activeTimeoutMs_(), 0);
+  endAnalysisBudget();
 });

@@ -34,7 +34,7 @@ import {
   isCachedHandle,
   setCachedHandle,
 } from './heap-state.js';
-import {beginAnalysisBudget} from './analysis-budget.js';
+import {beginAnalysisBudget, scaleBudgetToHeap} from './analysis-budget.js';
 import {
   estimateLoadHeapMB,
   fileSizeRefusal,
@@ -336,6 +336,7 @@ export async function withSnapshotAt<T>(
       throw new Error(`${localPath} is loaded but has no snapshot handle`);
     }
     const rung = snapshot;
+    scaleBudgetToHeap(rung.nodes?.length ?? 0);
     return await runWithBorrowedHandle(borrowed, () => fn(rung));
   } finally {
     // Retained: removed later by its scope (or evicted for room) instead.

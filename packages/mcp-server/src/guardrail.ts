@@ -38,6 +38,7 @@ import {
   endAnalysisBudget,
   getAnalysisTimeoutMs,
   activeElapsedMs,
+  activeTimeoutMs_,
   ScanTimeoutError,
 } from './analysis-budget.js';
 import {errorResult, toolResult} from './utils.js';
@@ -617,7 +618,7 @@ export function installAnalysisGuardrail(server: McpServer): void {
           typeof override === 'number' ? override : undefined,
           getSnapshotMetadata()?.nodeCount ?? 0,
         );
-        beginAnalysisBudget(timeoutMs);
+        beginAnalysisBudget(timeoutMs, typeof override !== 'number');
         // Timed in `finally`, so calls that time out or throw count too.
         const started = Date.now();
         try {
@@ -680,7 +681,7 @@ export function installAnalysisGuardrail(server: McpServer): void {
         } catch (e) {
           if (e instanceof ScanTimeoutError) {
             const ran = Math.round(activeElapsedMs() / 1000);
-            const limit = Math.round(timeoutMs / 1000);
+            const limit = Math.round((activeTimeoutMs_() || timeoutMs) / 1000);
             return toolResult(
               `⚠ Analysis stopped: \`${name}\` exceeded the ${limit}s guardrail (ran ~${ran}s) and was halted to keep the MCP server responsive. No complete result was produced.\n\n` +
                 `This usually means the heap is very large. Options:\n` +

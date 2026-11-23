@@ -11,10 +11,12 @@
 import fs from 'fs';
 import {z} from 'zod';
 import {
+  getMetadataByHandle,
   listSnapshots,
   resolveHandle,
   runWithBorrowedHandle,
 } from './heap-state.js';
+import {scaleBudgetToHeap} from './analysis-budget.js';
 import {noteRungCached, withSnapshotAt} from './snapshot-borrow.js';
 import {resolveSnapshotPath} from './tools/load-snapshot.js';
 
@@ -109,6 +111,7 @@ export async function withSnapshotRef<T>(
   const handle = resolveHandle(ref);
   if (handle != null) {
     if (/\.heapsnapshot(\.gz)?$/.test(ref)) noteRungCached();
+    scaleBudgetToHeap(getMetadataByHandle(handle)?.nodeCount ?? 0);
     return await runWithBorrowedHandle(handle, fn);
   }
   const {localPath} = resolveSnapshotPath(ref);
