@@ -88,3 +88,19 @@ test("a key containing ',' is a different shape from the keys it joins", () => {
     [[['a,b'], 0, 400]],
   );
 });
+
+test('a name containing NUL is a different shape from the names it joins', () => {
+  const before = heap([['Object', ['a', 'b'], 500]]);
+  const after = heap([
+    ['Object', ['a', 'b'], 500],
+    ['Object', ['a\u0000b'], 400],
+    ['Object\u0000a', ['b'], 300],
+  ]);
+  assert.deepEqual(
+    shapeGrowth(before, after).map(r => [r.cls, r.props, r.before, r.after]),
+    [
+      ['Object', ['a\u0000b'], 0, 400],
+      ['Object\u0000a', ['b'], 0, 300],
+    ],
+  );
+});

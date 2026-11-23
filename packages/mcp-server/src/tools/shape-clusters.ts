@@ -53,8 +53,13 @@ export function shapeKeyOf(node: IHeapNode): {
   }
   if (props.length === 0) return null;
   props.sort();
-  // NUL-joined: a dictionary-mode key can itself contain ','.
-  return {key: `${node.name}\u0000${props.join('\u0000')}`, props, closures};
+  // NUL-joined: a dictionary-mode key can itself contain ','. A name that
+  // contains NUL switches to JSON, which has no raw NUL, so keys stay distinct.
+  const parts = [node.name, ...props];
+  const key = parts.some(p => p.includes('\u0000'))
+    ? JSON.stringify(parts)
+    : parts.join('\u0000');
+  return {key, props, closures};
 }
 
 /** Instance count and self bytes per shape. */
