@@ -106,22 +106,31 @@ function isAmbient(node: IHeapNode): boolean {
  * Each closure is visited once: the closures of one module share its context,
  * so without the check a callback in a module of 2,000 functions visited
  * 2,000 x 2,000 contexts, re-reading the same objects millions of times.
+ * Breadth-first, so that one visit is at the closure's shallowest depth and
+ * still expands what it captures.
  */
-function payloadOf(fn: IHeapNode): IHeapNode | null {
+export function payloadOf(fn: IHeapNode): IHeapNode | null {
   let best: IHeapNode | null = null;
-  const seen = new Set<number>();
-  const visit = (f: IHeapNode, depth: number): void => {
-    if (seen.has(f.nodeIndex)) return;
-    seen.add(f.nodeIndex);
-    const {fns, objs} = contextVars(f);
-    for (const o of objs) {
-      if (best != null && o.retainedSize <= best.retainedSize) continue;
-      if (isAmbient(o)) continue;
-      best = o;
+  const seen = new Set<number>([fn.nodeIndex]);
+  let level = [fn];
+  for (let depth = 0; level.length > 0; depth++) {
+    const next: IHeapNode[] = [];
+    for (const f of level) {
+      const {fns, objs} = contextVars(f);
+      for (const o of objs) {
+        if (best != null && o.retainedSize <= best.retainedSize) continue;
+        if (isAmbient(o)) continue;
+        best = o;
+      }
+      if (depth >= 2) continue;
+      for (const g of fns) {
+        if (seen.has(g.nodeIndex)) continue;
+        seen.add(g.nodeIndex);
+        next.push(g);
+      }
     }
-    if (depth < 2) for (const g of fns) visit(g, depth + 1);
-  };
-  visit(fn, 0);
+    level = next;
+  }
   return best;
 }
 
