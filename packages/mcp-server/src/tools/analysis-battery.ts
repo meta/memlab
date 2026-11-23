@@ -444,6 +444,9 @@ function buildPlan(
     // Errors are too small for any size-ranked step to show, and an error
     // template that grows per cycle is often a user-visible bug.
     {tool: 'memlab_retained_errors', args: {run_dir: runDir}},
+    // Native memory a JS object alone keeps alive: in no heap total, so a
+    // never-settling promise pinning Blink objects shows only here.
+    {tool: 'memlab_native_pin_cost', args: {run_dir: runDir, limit: 8}},
     ...(hasControls
       ? [{tool: 'memlab_positive_controls', args: {run_dir: runDir}}]
       : []),

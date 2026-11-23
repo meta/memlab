@@ -14,7 +14,7 @@ prints with `memlab_tools`.
 | --- | --- | --- |
 | [Heap composition](./tools/composition.md) | What is this heap actually made of? | 44 |
 | [Growth and leaks](./tools/growth.md) | Is anything growing — and is it a leak? | 39 |
-| [Retention](./tools/retention.md) | Who owns the growth / why is X retained? | 32 |
+| [Retention](./tools/retention.md) | Who owns the growth / why is X retained? | 33 |
 | [Measurement artifacts](./tools/artifacts.md) | Is it real, or a measurement artifact? | 6 |
 | [Detached DOM and listeners](./tools/dom.md) | Detached DOM and event listeners | 5 |
 | [Collections and caches](./tools/collections.md) | Collections and caches | 15 |

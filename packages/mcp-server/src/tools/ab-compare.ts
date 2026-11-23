@@ -26,6 +26,8 @@ import {
 } from './dev-artifacts.js';
 import type {IHeapSnapshot} from '@memlab/core';
 import {resolveProbeSet} from '../probe-sets.js';
+import {nativePins} from '../native-pins.js';
+import {loadRunManifest} from '../run-manifest.js';
 import {
   errorResult,
   formatNumber,
@@ -88,6 +90,8 @@ type MetricSpec = string | {code: string; cap?: number};
 
 const RAW_TOTAL = 'heap self KB (raw)';
 const PROD_TOTAL = 'heap self KB (production-only)';
+const NATIVE_TOTAL = 'native KB pinned by JS';
+const UASM_TOTAL = 'measureUserAgentSpecificMemory MB';
 
 /**
  * Total self size in KB (MB would sit under the verdict's 0.01/cycle noise
@@ -96,7 +100,11 @@ const PROD_TOTAL = 'heap self KB (production-only)';
  * doubles in one arm moves the raw total by megabytes and the production
  * total not at all.
  */
-function heapTotals(snap: IHeapSnapshot): {raw: number; prod: number | null} {
+function heapTotals(snap: IHeapSnapshot): {
+  raw: number;
+  prod: number | null;
+  native: number;
+} {
   const devRoots = collectDevRoots(snap);
   const reached =
     devRoots.byId.size > 0
@@ -112,7 +120,11 @@ function heapTotals(snap: IHeapSnapshot): {raw: number; prod: number | null} {
     }
   });
   const kb = (b: number) => Math.round(b / 1024);
-  return {raw: kb(raw), prod: reached == null ? null : kb(prod)};
+  return {
+    raw: kb(raw),
+    prod: reached == null ? null : kb(prod),
+    native: kb(nativePins(snap).total),
+  };
 }
 
 function rateOf(cycles: number[], ys: Array<number | null>) {
@@ -216,7 +228,7 @@ export function warmupNote(steady: string, all: string): string {
 export function registerAbCompare(server: McpServer): void {
   server.tool(
     'memlab_ab_compare',
-    "Judge an A/B round (`hunt_runner --ab`) in one call: run the same probes on the OFF arm and the ON arm, fit each arm against its own cycles, and print one table with per-cycle rates, the ON/OFF ratio and a verdict per metric — FIX EFFECTIVE / PARTIAL / NO EFFECT / CANNOT JUDGE. Each arm's heap total is a row too, production-only beside raw, so a dev-only resize in one arm is not read as that arm growing more. Each arm's first rung is left out of its fit by default (`skip_intervals`), because an arm starts on a freshly loaded page and that warm-up is not a per-cycle rate. " +
+    "Judge an A/B round (`hunt_runner --ab`) in one call: run the same probes on the OFF arm and the ON arm, fit each arm against its own cycles, and print one table with per-cycle rates, the ON/OFF ratio and a verdict per metric — FIX EFFECTIVE / PARTIAL / NO EFFECT / CANNOT JUDGE. Each arm's heap total is a row too, production-only beside raw, so a dev-only resize in one arm is not read as that arm growing more; so is the native memory JS pins (`memlab_native_pin_cost`), which no heap total includes, and the runner's `measureUserAgentSpecificMemory` when it recorded one. Each arm's first rung is left out of its fit by default (`skip_intervals`), because an arm starts on a freshly loaded page and that warm-up is not a per-cycle rate. " +
       'Reads the arms from run.json `ab`. Probes are `memlab_eval` code assigning a number to `result` (as in `memlab_ladder_probe`); `census` adds built-in `memlab_census` populations. Give a metric a `cap` when the fix bounds a population at a size: a round whose OFF arm never reached the cap cannot show the fix working, and is reported CANNOT JUDGE rather than NO EFFECT.',
     {
       run_dir: z.string().describe('The A/B round directory (holds run.json).'),
@@ -330,6 +342,21 @@ export function registerAbCompare(server: McpServer): void {
           );
         }
         const arms = readArms(run_dir);
+        // The runner's per-rung measureUserAgentSpecificMemory, which covers
+        // workers and wasm that no page snapshot holds.
+        const uasmOf = new Map<string, number>();
+        try {
+          const manifest = loadRunManifest(run_dir);
+          manifest.paths.forEach((p, i) => {
+            const u = manifest.uaMemoryPerRung[i];
+            if (u != null) uasmOf.set(p, u.totalMb);
+          });
+        } catch {
+          // The arms were read; a manifest this module cannot parse further
+          // only costs the UASM row.
+        }
+        const withUasm =
+          totals && arms.some(a => a.paths.some(p => uasmOf.has(p)));
         const probes = specs.map(([name, spec]) => ({
           name,
           code: typeof spec === 'string' ? spec : spec.code,
@@ -343,7 +370,8 @@ export function registerAbCompare(server: McpServer): void {
         const names = [
           ...probes.map(p => p.name),
           ...builtins.map(b => b.name),
-          ...(totals ? [PROD_TOTAL, RAW_TOTAL] : []),
+          ...(totals ? [PROD_TOTAL, RAW_TOTAL, NATIVE_TOTAL] : []),
+          ...(withUasm ? [UASM_TOTAL] : []),
         ];
         // Series are keyed by name; two metrics sharing one would interleave.
         const dup = names.find((n, i) => names.indexOf(n) !== i);
@@ -394,7 +422,7 @@ export function registerAbCompare(server: McpServer): void {
             let measured: {
               out: Awaited<ReturnType<typeof probeRung>>;
               counts: Map<string, number> | null;
-              heap: {raw: number; prod: number | null} | null;
+              heap: {raw: number; prod: number | null; native: number} | null;
             } | null = null;
             try {
               measured = await withSnapshotAt(rung.localPath, async snap => {
@@ -445,6 +473,11 @@ export function registerAbCompare(server: McpServer): void {
             if (totals) {
               perMetric.get(PROD_TOTAL)?.push(measured?.heap?.prod ?? null);
               perMetric.get(RAW_TOTAL)?.push(measured?.heap?.raw ?? null);
+              perMetric.get(NATIVE_TOTAL)?.push(measured?.heap?.native ?? null);
+            }
+            if (withUasm) {
+              const armPath = arm.paths[rungs.indexOf(rung)];
+              perMetric.get(UASM_TOTAL)?.push(uasmOf.get(armPath) ?? null);
             }
           }
           values.set(arm.name, perMetric);

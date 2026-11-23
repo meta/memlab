@@ -75,6 +75,12 @@ JavaScript heap, where analyses ranked by size don't notice them:
   (Blink) objects per rung and rates a fixed list of browser holders that
   have no cap, such as performance entries, User Timing marks, style caches
   and observer registrations. It is left out on A/B rounds.
+- **Native memory pinned by JavaScript:** `memlab_native_pin_cost` charges
+  each native (browser) object to its nearest JavaScript dominator and groups
+  them by that object: a promise by its first `.then` handler, a closure by
+  its function. No heap total includes these bytes, so a promise that never
+  settles while pinning browser objects through its reactions shows here.
+  `memlab_ab_compare` reports the total per arm.
 - **Retained errors:** `memlab_retained_errors` groups retained Error objects
   and error text by message template, on the first and last rung. It gives
   the change per cycle, marks templates that are new, and says when only an

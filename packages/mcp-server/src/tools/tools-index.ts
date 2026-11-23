@@ -484,6 +484,10 @@ const GROUPS: Group[] = [
         'Where retained Error objects were created, from the stack frames V8 captured (survives a truncated `.stack`); groups by top frames, names the JSX site of React `_debugStack` Errors.',
       ],
       [
+        'memlab_native_pin_cost',
+        'Native (browser) memory JS alone keeps alive, by pinner: a promise by its first `.then`, a closure by its function; per rung and per cycle with `run_dir`, per arm on an A/B round. What `app_delta` cannot see.',
+      ],
+      [
         'memlab_retained_errors',
         'Retained Errors and error text by message template, with first app frame and whether only the DevTools console holds them; with `run_dir` the change per cycle and templates new since the first rung.',
       ],
