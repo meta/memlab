@@ -754,15 +754,27 @@ await shapeCheck(
       code: [
         "const p = helpers.allByEdgeName('__fixturePending')[0].target;",
         'const r = helpers.promiseReactions(p);',
-        'result = {count: r.count, state: r.state, fns: r.handlers.map(h => h.fn)};',
+        'const notPromise = helpers.promiseReactions(r.handlers[0].id).state;',
+        'result = {count: r.count, state: r.state, fns: r.handlers.map(h => h.fn), notPromise};',
       ].join('\n'),
     });
     const json = JSON.parse(ev.text.match(/^\{[\s\S]*?^\}$/m)[0]);
     assert(
       json.count === 8 &&
         json.state === 'pending' &&
+        json.notPromise === 'not a promise' &&
         json.fns.includes('fixturePendingHandler'),
       `promiseReactions: ${JSON.stringify(json)}`,
+    );
+    let oneRung = null;
+    try {
+      await call('memlab_pending_promises', {paths: [nodeSnapshot]});
+    } catch (err) {
+      oneRung = err.message;
+    }
+    assert(
+      oneRung != null && /Need at least two rungs/.test(oneRung),
+      `one rung is an error: ${oneRung}`,
     );
     await call('memlab_load_snapshot', {file_path: nodeSnapshot});
   },

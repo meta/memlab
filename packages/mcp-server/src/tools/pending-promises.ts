@@ -64,9 +64,6 @@ function creatorOf(snapshot: IHeapSnapshot, promise: IHeapNode): string {
   return `${fn.name || '(anonymous)'} — ${whereOf(snapshot, fn)}`;
 }
 
-/** Pending promises per rung that `creator` mode labels, longest first. */
-const CREATOR_POOL = 2000;
-
 /**
  * Reactions per first-handler creator at every rung. A label, unlike a node
  * id, means the same thing in every rung and every isolate.
@@ -83,10 +80,7 @@ async function creatorLadder(
     perRung.push(
       await withSnapshotAt(p, snap => {
         const m = new Map<string, {promises: number; reactions: number}>();
-        for (const {node, reactions} of pendingPromises(snap).slice(
-          0,
-          CREATOR_POOL,
-        )) {
+        for (const {node, reactions} of pendingPromises(snap)) {
           const c = creatorOf(snap, node);
           const row = m.get(c) ?? {promises: 0, reactions: 0};
           row.promises++;
@@ -244,8 +238,13 @@ export function registerPendingPromises(server: McpServer): void {
             } catch {
               arms = [];
             }
+            // By file name: run.json may record a rung relative to the round
+            // while the manifest resolves it.
+            const base = (p: string) => p.replace(/^.*\//, '');
             segments = segs.map(seg => {
-              const arm = arms.find(a => a.paths.includes(seg.paths[0]));
+              const arm = arms.find(a =>
+                a.paths.some(p => base(p) === base(seg.paths[0])),
+              );
               return {
                 paths: seg.paths,
                 axis: seg.cyclesPerRung,
@@ -255,6 +254,9 @@ export function registerPendingPromises(server: McpServer): void {
           }
         } else {
           rungPaths = resolveLadderPaths(paths as string[]).paths;
+        }
+        if (segments == null && rungPaths.length < 2) {
+          return errorResult(new Error('Need at least two rungs.'));
         }
         const run = group_by === 'creator' ? creatorLadder : promiseLadder;
         if (segments != null) {
