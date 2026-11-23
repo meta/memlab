@@ -83,6 +83,12 @@ it.
   `helpers.componentName(fiber)` its component, `helpers.hooks(fiber)` its
   hooks with their pending updates, and `helpers.memoCacheSlots(fiber)` the
   React Compiler cache slots that can keep a stale closure alive.
+- `helpers.groupByShape(ids)`, `helpers.topRetainers(ids)` (who outside a set
+  holds it), `helpers.referrerChains(id)` and `helpers.edgeWalk(id, names)`
+  replace the walks people otherwise write by hand.
+- To ask several things at once, pass `queries: [{name, code}, ...]` instead
+  of `code`. The answers come back keyed by name, and one query failing does
+  not stop the others.
 - `memlab_eval({mode: "recipes"})` prints worked examples.
 
 Before running a program, the tool checks it for mistakes that would waste a

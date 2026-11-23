@@ -606,6 +606,8 @@ Input:  memlab_start_job { tool, args }    memlab_job_status { job_id? }
 
 The escape hatch when no fixed-shape tool matches the question. It runs JavaScript against the loaded snapshot with access to `snapshot`, `utils` and `helpers`; assign the answer to `result`, or `return` it at the top level. `node.references` and `node.referrers` iterate lazily with `for…of` and also take the usual array methods (`.filter`, `.map`, `.find`, `.some`, `.length`, …), and `node.props` is `{name: node}` for an object's properties or a context's variables. A mistyped helper name is answered with the helper that does it (`groupBy` → `histogram`, `newestOf` → `newest`), and `helpers.ctxVars`, `helpers.arrayLen` and `helpers.firstRetainer` cover a scope's variables, a collection's entry count and a node's holder. The helpers are indexed and memoized per snapshot, for example `helpers.byClass`, `helpers.hasShape`, `helpers.rootPath`, `helpers.mapEntries` and `helpers.retainedSize`. `mode: "describe_env"` prints the full helper surface and its gotchas.
 
+- **`queries`:** `queries: [{name, code}, ...]` (up to 25) answers several questions in one call: each runs in its own scope, they share the helper indexes, and the call returns `{name: result}`. A query that throws gets `{error}` and the others still run.
+- **Walk helpers:** `helpers.groupByShape(ids)` groups by constructor + property set, `helpers.topRetainers(ids)` lists who outside the set holds its members as `Class.edge`, `helpers.referrerChains(id, {depth, limit})` returns several upward paths, and `helpers.edgeWalk(id, ["a", "b"])` follows named edges and says where it stopped.
 - **`save_as`:** keeps a result set server-side, and `helpers.load(name)` reads it back in a later call. To compare two snapshots, save counts keyed by `helpers.stableKey` rather than node ids, and read them back with `{allowCrossSnapshot: true}`.
 - **`max_nodes`:** bounds a full-heap walk.
 - **`code_file` and `use`:** `code_file` runs a `.js` file instead of inline `code`. `use: ["<set>"]` runs the `prelude` of each named probe set first, so shared setup is saved once with `memlab_probes({mode: "save", set, prelude})` and reused across sessions. `memlab_eval_across` takes both, and `prelude`. Given `use` and no `code`, `memlab_eval_across` runs every probe of the named sets on every rung and returns one probe × rung table. It runs on the set's saved `run_dir` (`memlab_probes({mode: "save", set, run_dir})`) when no `run_dir`, `paths` or `handles` is passed.
@@ -621,7 +623,7 @@ The escape hatch when no fixed-shape tool matches the question. It runs JavaScri
 > `memlab_eval` executes arbitrary code with the full privileges of the server process. See [Tools that execute JavaScript](#tools-that-execute-javascript).
 
 ```
-Input:  { code | code_file, mode?, prelude?, use?, timeout_ms?, max_nodes?, save_as?, async?, ... }
+Input:  { code | code_file | queries, mode?, prelude?, use?, timeout_ms?, max_nodes?, save_as?, async?, ... }
 ```
 
 ## State and Cache Files

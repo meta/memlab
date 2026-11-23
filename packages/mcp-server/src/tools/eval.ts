@@ -51,6 +51,7 @@ import {
   isFiberNode,
   nearestFiber,
 } from '../react-shapes.js';
+import {shapeKeyOf, shapeText} from './shape-clusters.js';
 import {readElements as readElementsInfo} from '../heap-shapes.js';
 import {
   SNAPSHOT_STRING_LIMIT,
@@ -1206,6 +1207,10 @@ function maxTraversalNesting(code: string): number {
  * against this list at compile time, so the two cannot drift.
  */
 const HELPER_NAMES = [
+  'edgeWalk',
+  'groupByShape',
+  'referrerChains',
+  'topRetainers',
   'ageRank',
   'aggregateRetained',
   'allByEdgeName',
@@ -1660,7 +1665,9 @@ export function registerEval(server: McpServer): void {
       '`helpers.byClass(name)` / `helpers.byTypename(name)` / `helpers.withProp(name)` return id arrays; ' +
       '`helpers.hasShape(id, ["a","b"], {exact})` is the CORRECT shape test and `helpers.shapeKeys(id)` / `helpers.ownProps(id)` its building blocks; ' +
       '`helpers.rootPath(id)` is the GC-root path without hand-writing the `pathEdge` loop; ' +
-      '`helpers.mapEntries(id)` / `helpers.setElements(id)` enumerate Maps/Sets correctly. ' +
+      '`helpers.mapEntries(id)` / `helpers.setElements(id)` enumerate Maps/Sets correctly; ' +
+      '`helpers.groupByShape(ids)`, `helpers.topRetainers(ids)` (holders outside the set, as `Class.edge`), `helpers.referrerChains(id, {depth, limit})` and `helpers.edgeWalk(id, ["a", "b"])` replace the hand-written referrer/reference walks. ' +
+      '**Several questions: one call** with `queries: [{name, code}, ...]` instead of one eval each. ' +
       '**`helpers.props()` is for INSPECTION, not shape matching** — on a node with no property edges it falls back to internal/hidden edges and adds synthetic keys, so a shape test written against `Object.keys(props(id))` returns zero matches on objects that plainly have the shape. Call `mode: "describe_env"` for the full surface and its gotchas.\n' +
       '**Get node by ID:** `snapshot.getNodeById(id)` returns IHeapNode or null. Passing a node, or a `{ref}` value from `helpers.props()`, returns that node; helpers that take an id take either too.\n' +
       '**String values:** `node.toStringNode()?.stringValue` for string nodes.\n' +
@@ -1696,6 +1703,7 @@ export function registerEval(server: McpServer): void {
             'helpers ({ serializeNodeSummary, serializeNodeDetail, formatBytes, formatNumber, ' +
             'markdownTable, isNodeWorthInspecting, filterLargestObjects, queryNodes, ' +
             'groupReferrersByEdge(nodeId), groupArrayElementsByProperty(arrayNodeId, propName), ' +
+            'groupByShape(ids, {limit})->[{shape, count, self_size, example}] (constructor + property set), topRetainers(ids, {limit})->[{holder: "Class.edge", edges, holders, example}] (who outside the set holds it), referrerChains(id, {depth=4, limit=5})->[[{id, name, type, edge}]] (several upward paths, nearest holder first), edgeWalk(id, ["a", "b"])->{found, node} | {found: false, stopped_at, missing, at}, ' +
             'isOrphaned(nodeId, ownershipEdgeNames[]), countUniqueTargets(arrayNodeId, propName), ' +
             'retainedSize(id)->number, retainedSizes(ids[])->Record<id,bytes> (an OBJECT keyed by id, NOT an array — index it as sizes[id] or Object.values(sizes)), ' +
             'mapEntries(mapId, limit=1000)->[{key: brief|null, value: brief|null}] & setElements(setId, limit=1000)->[brief] (correct Map/Set/WeakMap enumeration — handles browser internal-typed slots, SMI keys and values (null), and skips deleted slots, so you never re-derive it wrong; a brief is a plain {id,name,type,self_size,retained_size,string} summary, NOT a node, and a capped call warns), ' +
@@ -1738,6 +1746,13 @@ export function registerEval(server: McpServer): void {
             'NOTE: `node.retainedSize` / `node.retained_size` THROW inside eval — they can read back ~0 for every node on some loads, so a silent wrong number is refused; use helpers.retainedSize(id). `node.self_size` is reliable. ' +
             'Node traversal: use node.references (outgoing) and node.referrers (incoming) with for-of or array methods (.filter/.map/.find/.length); node.props is {name: node}. A top-level `return` sets result. ' +
             'Edge properties: .name_or_index, .type, .toNode, .fromNode.',
+        ),
+      queries: z
+        .array(z.object({name: z.string(), code: z.string()}))
+        .max(25)
+        .optional()
+        .describe(
+          'Several independent questions in ONE call: `[{name, code}, ...]`, each written like `code` (assign `result` or `return`). They run in order in one sandbox and share the helper indexes, and the call returns `{name: result}`. A query that throws gets `{error}` and the others still run. Use it instead of one eval per question.',
         ),
       timeout_ms: z
         .number()
@@ -1827,9 +1842,17 @@ export function registerEval(server: McpServer): void {
           'Abort a `snapshot.nodes.forEach` walk after this many node visits. Defaults to a budget SCALED from the loaded graph (6 full passes, floored at 20,000,000) — a probe that makes several passes is the normal shape, so a flat cap silently truncated ordinary multi-pass analysis on large heaps. On abort the partial `result` is returned with a note; an abort that produced NO result is refused outright, because an empty value is indistinguishable from a genuine empty census. Reported back as `nodes_visited` on every call.',
         ),
     },
-    async ({async: background, use, code_file, ...rest}) => {
+    async ({async: background, use, code_file, queries, ...rest}) => {
       let args: typeof rest;
       try {
+        if (queries != null && queries.length > 0) {
+          if ((rest.code ?? '').trim() !== '' || (code_file ?? '') !== '') {
+            throw new Error(
+              'Pass `queries` or `code` / `code_file`, not both.',
+            );
+          }
+          rest.code = composeQueries(queries);
+        }
         args = resolveEvalSource({...rest, use, code_file});
       } catch (err) {
         return errorResult(err);
@@ -1945,6 +1968,24 @@ function hasTopLevelReturn(code: string): boolean {
   } catch (err) {
     return err instanceof Error && /Illegal return/.test(err.message);
   }
+}
+
+/**
+ * One script running each query in its own scope: `result` or a top-level
+ * `return` is its answer, an exception is `{error}`.
+ */
+export function composeQueries(
+  queries: ReadonlyArray<{name: string; code: string}>,
+): string {
+  const parts = queries.map(
+    q =>
+      `try {\n  __memlabQueries[${JSON.stringify(q.name)}] = (() => {\n    let result;\n    const __r = (() => {\n${q.code}\n    })();\n    return __r !== undefined ? __r : result;\n  })();\n} catch (__e) {\n  __memlabQueries[${JSON.stringify(q.name)}] = {error: String((__e && __e.message) || __e)};\n}`,
+  );
+  return [
+    'const __memlabQueries = {};',
+    ...parts,
+    'result = __memlabQueries;',
+  ].join('\n');
 }
 
 /**
@@ -3006,6 +3047,177 @@ export async function runEval({
           keyNode: wrapNode(e.key),
           valueNode: e.value == null ? null : wrapNode(e.value),
         }));
+    };
+    const refsToNodes = (refs: Iterable<NodeRef> | NodeRef): IHeapNode[] => {
+      const list =
+        typeof refs === 'object' &&
+        refs != null &&
+        Symbol.iterator in (refs as object)
+          ? [...(refs as Iterable<NodeRef>)]
+          : [refs as NodeRef];
+      const out: IHeapNode[] = [];
+      for (const r of list) {
+        const n = resolveNode(r);
+        if (n != null) out.push(n);
+      }
+      return out;
+    };
+    const groupByShape = (
+      refs: Iterable<NodeRef> | NodeRef,
+      opts: {limit?: number} = {},
+    ) => {
+      const groups = new Map<
+        string,
+        {shape: string; count: number; self_size: number; example: number}
+      >();
+      for (const n of refsToNodes(refs)) {
+        const k = shapeKeyOf(n);
+        const key = k?.key ?? `${n.type}\u0000${n.name}`;
+        const g = groups.get(key);
+        if (g != null) {
+          g.count++;
+          g.self_size += n.self_size;
+        } else {
+          groups.set(key, {
+            shape:
+              k != null
+                ? shapeText(n.name, k.props, 90)
+                : `${n.name} (${n.type})`,
+            count: 1,
+            self_size: n.self_size,
+            example: n.id,
+          });
+        }
+      }
+      return [...groups.values()]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, opts.limit ?? 20);
+    };
+    const holderEdgeLabel = (e: IHeapEdge): string => {
+      const from = e.fromNode;
+      const raw = String(e.name_or_index);
+      const edge = e.type === 'element' || /^\d+$/.test(raw) ? '[]' : `.${raw}`;
+      const cls =
+        e.type === 'context' ? 'closure var' : from.name || `(${from.type})`;
+      return `${cls}${edge}`;
+    };
+    const topRetainers = (
+      refs: Iterable<NodeRef> | NodeRef,
+      opts: {limit?: number} = {},
+    ) => {
+      const nodes = refsToNodes(refs);
+      const pop = new Set(nodes.map(n => n.id));
+      const groups = new Map<
+        string,
+        {holder: string; edges: number; holders: Set<number>; example: number}
+      >();
+      for (const n of nodes) {
+        for (const e of n.referrers) {
+          if (e.type === 'weak' || e.type === 'shortcut') continue;
+          const from = e.fromNode;
+          if (pop.has(from.id)) continue;
+          if (
+            from.type === 'hidden' ||
+            from.type === 'synthetic' ||
+            from.name.startsWith('(')
+          ) {
+            continue;
+          }
+          const label = holderEdgeLabel(e);
+          const g = groups.get(label);
+          if (g != null) {
+            g.edges++;
+            g.holders.add(e.fromNode.id);
+          } else {
+            groups.set(label, {
+              holder: label,
+              edges: 1,
+              holders: new Set([e.fromNode.id]),
+              example: e.fromNode.id,
+            });
+          }
+        }
+      }
+      return [...groups.values()]
+        .sort((a, b) => b.edges - a.edges)
+        .slice(0, opts.limit ?? 15)
+        .map(g => ({
+          holder: g.holder,
+          edges: g.edges,
+          holders: g.holders.size,
+          example: g.example,
+        }));
+    };
+    const referrerChains = (
+      nodeOrId: NodeRef,
+      opts: {depth?: number; limit?: number} = {},
+    ) => {
+      const start = resolveNode(nodeOrId);
+      if (start == null) return [];
+      const depth = opts.depth ?? 4;
+      const limit = opts.limit ?? 5;
+      const chains: Array<
+        Array<{id: number; name: string; type: string; edge: string}>
+      > = [];
+      const walk = (
+        n: IHeapNode,
+        chain: Array<{id: number; name: string; type: string; edge: string}>,
+        seen: Set<number>,
+      ): void => {
+        if (chains.length >= limit) return;
+        const ups = [...n.referrers].filter(
+          e =>
+            e.type !== 'weak' &&
+            e.type !== 'shortcut' &&
+            !seen.has(e.fromNode.id),
+        );
+        if (chain.length >= depth || ups.length === 0 || n.id <= 3) {
+          chains.push(chain);
+          return;
+        }
+        for (const e of ups) {
+          if (chains.length >= limit) return;
+          const from = e.fromNode;
+          seen.add(from.id);
+          walk(
+            from,
+            [
+              ...chain,
+              {
+                id: from.id,
+                name: from.name,
+                type: from.type,
+                edge: String(e.name_or_index),
+              },
+            ],
+            seen,
+          );
+          seen.delete(from.id);
+        }
+      };
+      walk(start, [], new Set([start.id]));
+      return chains;
+    };
+    const edgeWalk = (nodeOrId: NodeRef, path: readonly string[]) => {
+      let n: IHeapNode | null = resolveNode(nodeOrId);
+      if (n == null)
+        return {found: false, stopped_at: 0, missing: null, at: null};
+      for (let i = 0; i < path.length; i++) {
+        const name = String(path[i]);
+        let next: IHeapNode | null = null;
+        const here: IHeapNode = n;
+        for (const e of here.references as Iterable<IHeapEdge>) {
+          if (String(e.name_or_index) === name) {
+            next = e.toNode;
+            break;
+          }
+        }
+        if (next == null) {
+          return {found: false, stopped_at: i, missing: name, at: nodeBrief(n)};
+        }
+        n = next;
+      }
+      return {found: true, node: nodeBrief(n)};
     };
     const setElementNodes = (nodeOrId: NodeRef, limit = Infinity) => {
       const id = toNodeId(nodeOrId);
@@ -5194,6 +5406,10 @@ export async function runEval({
         return queryNodes(unwrapNode(snap) as IHeapSnapshot, filter, opts);
       },
       groupReferrersByEdge,
+      groupByShape,
+      topRetainers,
+      referrerChains,
+      edgeWalk,
       groupArrayElementsByProperty,
       isOrphaned,
       countUniqueTargets,
@@ -6111,7 +6327,7 @@ function describeEnvLines(): string[] {
     '## In-scope globals',
     '- `snapshot` — IHeapSnapshot: `.nodes.forEach(cb)`, `.edges.forEach(cb)`, `.getNodeById(id)`.',
     '- `utils` — @memlab/core utils (e.g. `aggregateDominatorMetrics`, `isFiberNode`, `isDetachedDOMNode`).',
-    '- `helpers` — `serializeNodeSummary`, `serializeNodeDetail`, `formatBytes`, `formatNumber`, `markdownTable`, `isNodeWorthInspecting`, `filterLargestObjects`, `queryNodes`, `groupReferrersByEdge(nodeId)`, `groupArrayElementsByProperty(arrayNodeId, prop)`, `isOrphaned(nodeId, ownerEdges[])`, `countUniqueTargets(arrayNodeId, prop)`, `retainedSize(id) -> number`, `retainedSizes(ids[]) -> Record<id, bytes>` (an OBJECT keyed by id, NOT an array — use `sizes[id]` or `Object.values(sizes)`, not `.reduce`/`.map` directly).',
+    '- `helpers` — `serializeNodeSummary`, `serializeNodeDetail`, `formatBytes`, `formatNumber`, `markdownTable`, `isNodeWorthInspecting`, `filterLargestObjects`, `queryNodes`, `groupReferrersByEdge(nodeId)`, `groupByShape(ids, {limit})`, `topRetainers(ids, {limit})`, `referrerChains(id, {depth, limit})`, `edgeWalk(id, [edge names])`, `groupArrayElementsByProperty(arrayNodeId, prop)`, `isOrphaned(nodeId, ownerEdges[])`, `countUniqueTargets(arrayNodeId, prop)`, `retainedSize(id) -> number`, `retainedSizes(ids[]) -> Record<id, bytes>` (an OBJECT keyed by id, NOT an array — use `sizes[id]` or `Object.values(sizes)`, not `.reduce`/`.map` directly).',
     '- Standard JS built-ins (Array, Object, Map, Set, JSON, Math, RegExp, …). No require/process/fs/network.',
     '',
     '## Collection / shape / index helpers (prefer these over hand-rolling)',
