@@ -201,7 +201,8 @@ export function evalErrorHint(message: string): string | null {
     const method = missing[1];
     const init =
       method === 'push' ? '[]' : method === 'add' ? 'new Set()' : 'new Map()';
-    return `The group was never created: initialise it on first use. With a \`new Map()\`: \`let g = groups.get(key); if (g == null) groups.set(key, (g = ${init})); g.${method}(x)\`. On an object, create it with \`Object.create(null)\` first: on a plain \`{}\` an inherited key such as \`constructor\` is not nullish, so \`(groups[key] ??= ${init})\` keeps it.`;
+    const use = method === 'set' ? 'g.set(k, x)' : `g.${method}(x)`;
+    return `The group was never created: initialise it on first use. With a \`new Map()\`: \`let g = groups.get(key); if (g == null) groups.set(key, (g = ${init})); ${use}\`. On an object, create it with \`Object.create(null)\` first: on a plain \`{}\` an inherited key such as \`constructor\` is not nullish, so \`(groups[key] ??= ${init})\` keeps it.`;
   }
   if (
     /Cannot read properties of null \(reading '(references|referrers|id|name|type|self_size|retainedSize|toNode|fromNode|dominatorNode)'\)/.test(

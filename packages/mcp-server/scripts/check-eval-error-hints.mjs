@@ -60,6 +60,10 @@ const cases = [
     /g = new Set\(\)\)\); g\.add\(x\)/,
   ],
   [
+    "TypeError: Cannot read properties of undefined (reading 'set')",
+    /g = new Map\(\)\)\); g\.set\(k, x\)/,
+  ],
+  [
     "TypeError: Cannot read properties of undefined (reading 'push')",
     /Object\.create\(null\)/,
   ],
