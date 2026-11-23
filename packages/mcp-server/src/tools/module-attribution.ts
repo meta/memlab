@@ -185,10 +185,16 @@ interface ModuleStat {
   nodes: number;
 }
 
+const MEMO_UNKNOWN = -1;
+const MEMO_NONE = -2;
+
 /**
  * One pass with a memo indexed by `nodeIndex`: each node inherits its immediate
  * dominator's module unless it IS a module export, so the whole heap is
  * attributed in O(N) rather than one bounded walk per node.
+ *
+ * The memo is an `Int32Array` of interned module numbers: V8 caps a `Map` at
+ * 2^24 entries, which a per-node `Map` exceeds on large heaps.
  */
 export function attributeByModule(
   snapshot: IHeapSnapshot,
@@ -199,38 +205,50 @@ export function attributeByModule(
   for (const r of registries) {
     for (const [id, name] of r.moduleByNodeId) moduleOf.set(id, name);
   }
-  const memo = new Map<number, string | null>();
+  const names: string[] = [];
+  const nameIndex = new Map<string, number>();
+  const intern = (name: string): number => {
+    let i = nameIndex.get(name);
+    if (i === undefined) {
+      i = names.length;
+      names.push(name);
+      nameIndex.set(name, i);
+    }
+    return i;
+  };
+  const memo = new Int32Array(snapshot.nodes.length).fill(MEMO_UNKNOWN);
   const resolve = (node: IHeapNode): string | null => {
     const direct = moduleOf.get(node.id);
     if (direct != null) return direct;
-    const cached = memo.get(node.id);
-    if (cached !== undefined) return cached;
+    const cached = memo[node.nodeIndex];
+    if (cached !== MEMO_UNKNOWN)
+      return cached === MEMO_NONE ? null : names[cached];
     // Walk up, remembering the chain, then write the answer back to all of it.
     const chain: IHeapNode[] = [];
     let cur: IHeapNode | null = node;
-    let answer: string | null = null;
+    let answer: number = MEMO_NONE;
     let hops = 0;
     const guard = new Set<number>();
-    while (cur != null && hops < 200 && !guard.has(cur.id)) {
-      guard.add(cur.id);
+    while (cur != null && hops < 200 && !guard.has(cur.nodeIndex)) {
+      guard.add(cur.nodeIndex);
       const hit = moduleOf.get(cur.id);
       if (hit != null) {
-        answer = hit;
+        answer = intern(hit);
         break;
       }
-      const m = memo.get(cur.id);
-      if (m !== undefined) {
+      const m = memo[cur.nodeIndex];
+      if (m !== MEMO_UNKNOWN) {
         answer = m;
         break;
       }
       chain.push(cur);
       const dom: IHeapNode | null = cur.dominatorNode ?? null;
-      if (dom == null || dom.id === cur.id) break;
+      if (dom == null || dom.nodeIndex === cur.nodeIndex) break;
       cur = dom;
       hops++;
     }
-    for (const n of chain) memo.set(n.id, answer);
-    return answer;
+    for (const n of chain) memo[n.nodeIndex] = answer;
+    return answer === MEMO_NONE ? null : names[answer];
   };
 
   const byModule = new Map<string, ModuleStat>();
