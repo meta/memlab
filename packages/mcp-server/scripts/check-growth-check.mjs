@@ -29,7 +29,7 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {growthVerdict} = await import(pathToFileURL(built).href);
+const {growthVerdict, membersBase} = await import(pathToFileURL(built).href);
 const {isolateOf, isolateSample} = await import(
   pathToFileURL(path.join(here, '..', 'dist', 'isolate-identity.js')).href
 );
@@ -137,6 +137,41 @@ test('an anonymous holder on another session is not "created since"', () => {
   assert.equal(v.verdict, 'not comparable');
   assert.doesNotMatch(v.why, /created since/);
   assert.match(v.why, /another session/);
+});
+
+test('members of a rung from another session are not compared', () => {
+  const v = growthVerdict([
+    {...rung('a', 50, 5000, ids(0, 50), 'path'), isolate: 'other'},
+    {...rung('b', 50, 5000, ids(1000, 50)), isolate: 'same'},
+  ]);
+  assert.equal(v.verdict, 'flat');
+  assert.match(v.why, /members not compared/);
+});
+
+test('a lone same-session rung is no membership base for the table', () => {
+  const rungs = [
+    {...rung('a', 50, 5000, ids(0, 50), 'path'), isolate: 'other'},
+    {...rung('b', 50, 5000, ids(1000, 50)), isolate: 'same'},
+  ];
+  assert.equal(membersBase(rungs), null);
+  rungs.push({...rung('c', 50, 5000, ids(1000, 50)), isolate: 'same'});
+  assert.equal(membersBase(rungs)?.label, 'b');
+});
+
+test('membership is measured from the first same-session rung', () => {
+  const v = growthVerdict([
+    {...rung('a', 50, 5000, ids(0, 50), 'path'), isolate: 'other'},
+    {...rung('b', 50, 5000, ids(1000, 50)), isolate: 'same'},
+    {...rung('c', 50, 5000, ids(2000, 50)), isolate: 'same'},
+  ]);
+  assert.equal(v.verdict, 'turns over');
+  assert.match(v.why, /0% of b's members/);
+  const same = growthVerdict([
+    {...rung('a', 50, 5000, ids(0, 50), 'path'), isolate: 'other'},
+    {...rung('b', 50, 5000, ids(1000, 50)), isolate: 'same'},
+    {...rung('c', 50, 5000, ids(1000, 50)), isolate: 'same'},
+  ]);
+  assert.notEqual(same.verdict, 'frozen');
 });
 
 test('isolateOf tells a same-isolate rung from a reused id range', () => {

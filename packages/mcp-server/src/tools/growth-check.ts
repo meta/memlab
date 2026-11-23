@@ -88,9 +88,20 @@ function kept(first: Set<number>, later: Set<number>): number {
 }
 
 /**
+ * The rung membership is measured from: the first same-session rung where the
+ * holder was found, when at least two such rungs exist; ids on a rung from
+ * another session name other objects.
+ */
+export function membersBase(rungs: RungMeasure[]): RungMeasure | null {
+  const same = rungs.filter(r => r.found != null && r.isolate !== 'other');
+  return same.length >= 2 ? same[0] : null;
+}
+
+/**
  * What the measurements support. Sizes within 10% are "the same size"; the
  * share of first-rung members still present on the last rung tells a frozen
  * buffer (≥ 95% kept) from a bounded queue whose entries are replaced (< 50%).
+ * Members are compared only between rungs of one session.
  */
 export function growthVerdict(
   rungs: RungMeasure[],
@@ -120,7 +131,13 @@ export function growthVerdict(
   const a = size(first);
   const b = size(last);
   const change = a === 0 ? (b === 0 ? 0 : Infinity) : (b - a) / a;
-  const keptShare = kept(first.members, last.members);
+  const sameSession = seen.filter(r => r.isolate !== 'other');
+  const base = membersBase(rungs);
+  const keptShare = base != null ? kept(base.members, last.members) : null;
+  const keptNote =
+    base == null
+      ? 'members not compared: the earlier rungs are from another session, where ids name other objects'
+      : `${((keptShare ?? 0) * 100).toFixed(0)}% of ${base === first ? "the first rung's" : `${base.label}'s`} members are still held`;
   const monotonic = seen.every(
     (r, i) => i === 0 || size(r) >= size(seen[i - 1]),
   );
@@ -128,7 +145,7 @@ export function growthVerdict(
   if (change > 0.1 && b - a >= 2) {
     return {
       verdict: 'grows',
-      why: `${what} ${formatNumber(a)} → ${formatNumber(b)}${monotonic ? ', rising at every rung' : ', not at every rung'}; ${(keptShare * 100).toFixed(0)}% of the first rung's members are still held`,
+      why: `${what} ${formatNumber(a)} → ${formatNumber(b)}${monotonic ? ', rising at every rung' : ', not at every rung'}; ${keptNote}`,
     };
   }
   if (change < -0.1) {
@@ -141,16 +158,21 @@ export function growthVerdict(
     kept(first.members, r.members) >= 0.95 &&
     r.members.size <= first.members.size * 1.05 &&
     Math.abs(r.retained - first.retained) <= 0.02 * Math.max(1, first.retained);
-  if (first.members.size > 0 && seen.every(unchanged)) {
+  if (
+    keptShare != null &&
+    sameSession.length === seen.length &&
+    first.members.size > 0 &&
+    seen.every(unchanged)
+  ) {
     return {
       verdict: 'frozen',
       why: `the same members (${(keptShare * 100).toFixed(0)}% kept) and the same retained size on every rung: nothing is appended`,
     };
   }
-  if (keptShare < 0.5) {
+  if (keptShare != null && keptShare < 0.5) {
     return {
       verdict: 'turns over',
-      why: `about the same size, but only ${(keptShare * 100).toFixed(0)}% of the first rung's members are still held: entries are replaced, so it is bounded`,
+      why: `about the same size, but only ${keptNote}: entries are replaced, so it is bounded`,
     };
   }
   const peak = seen.reduce((p, r) => (size(r) > size(p) ? r : p));
@@ -160,7 +182,7 @@ export function growthVerdict(
       : '';
   return {
     verdict: 'flat',
-    why: `${what} within 10% (${formatNumber(a)} → ${formatNumber(b)})${peaked}, ${(keptShare * 100).toFixed(0)}% of members kept`,
+    why: `${what} within 10% (${formatNumber(a)} → ${formatNumber(b)})${peaked}, ${keptShare != null ? `${(keptShare * 100).toFixed(0)}% of members kept` : keptNote}`,
   };
 }
 
@@ -290,7 +312,7 @@ export function registerGrowthCheck(server: McpServer): void {
           );
         }
         rungs.push(newest.rung);
-        const base = rungs.find(r => r.found != null);
+        const base = membersBase(rungs);
         const {verdict, why} = growthVerdict(rungs, target.key != null);
         const lines = [
           `## Growth check: @${node_id} ${target.name}${target.key != null ? ` (\`${target.key}\`)` : ''}`,
@@ -305,13 +327,14 @@ export function registerGrowthCheck(server: McpServer): void {
             ],
             rungs.map(r => [
               r.label,
-              r.found ??
-                (r.isolate === 'other'
+              r.found != null
+                ? `${r.found}${r.isolate === 'other' ? ' (other session)' : ''}`
+                : r.isolate === 'other'
                   ? 'not found (other session)'
-                  : 'not found'),
+                  : 'not found',
               r.entries != null ? formatNumber(r.entries) : '—',
               r.found != null ? formatBytes(r.retained) : '—',
-              r.found != null && base != null
+              r.found != null && base != null && r.isolate !== 'other'
                 ? `${(kept(base.members, r.members) * 100).toFixed(0)}%`
                 : '—',
             ]),
