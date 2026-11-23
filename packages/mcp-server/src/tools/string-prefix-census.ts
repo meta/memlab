@@ -11,6 +11,7 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import memlabCore from '@memlab/core';
 import {z} from 'zod';
+import {prewarmSidecars} from '../sidecar-prewarm.js';
 import {loadRunManifest} from '../run-manifest.js';
 import {resolveLadderPaths} from './ladder.js';
 import {linearFit} from './ladder-probe.js';
@@ -141,6 +142,12 @@ export function registerStringPrefixCensus(server: McpServer): void {
         const perRung: Array<ReturnType<typeof prefixCounts> | null> = [];
         const failures: string[] = [];
         let parsed = 0;
+        // Rungs without a sidecar are parsed in parallel workers first; the
+        // loop below then reads every rung from its sidecar.
+        const prewarm = await prewarmSidecars(
+          rungPaths.map(p => ({sidecarBase: p, localPath: p})),
+        );
+        parsed += prewarm.built;
         for (const p of rungPaths) {
           try {
             const {index, cached} = await indexFor(p);

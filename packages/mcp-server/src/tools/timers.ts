@@ -30,12 +30,27 @@ const TASK_SHAPE = [
   'sortIndex',
 ];
 
-function hasProps(node: IHeapNode, props: ReadonlyArray<string>): boolean {
-  const names = new Set<string>();
-  for (const e of node.references) {
-    if (e.type === 'property') names.add(String(e.name_or_index));
+const TASK_BIT = new Map(TASK_SHAPE.map((p, i) => [p, 1 << i]));
+const TASK_ALL = (1 << TASK_SHAPE.length) - 1;
+
+/**
+ * Whether `node` has every `TASK_SHAPE` property. Runs on every object in the
+ * heap, so it walks edges in place and stops once all five are seen, instead
+ * of building an edge array and a name set per object.
+ */
+function hasTaskShape(node: IHeapNode): boolean {
+  if (node.type !== 'object' || node.edge_count < TASK_SHAPE.length) {
+    return false;
   }
-  return props.every(p => names.has(p));
+  let seen = 0;
+  node.forEachReference(e => {
+    if (e.type !== 'property') return;
+    const bit = TASK_BIT.get(e.name_or_index as string);
+    if (bit == null) return;
+    seen |= bit;
+    return seen === TASK_ALL ? {stop: true} : undefined;
+  });
+  return seen === TASK_ALL;
 }
 
 /** Closure-valued and object-valued variables of a function's own context. */
@@ -85,14 +100,24 @@ function isAmbient(node: IHeapNode): boolean {
   return props >= 1000;
 }
 
-/** The biggest object a function (or the functions it closes over) captures. */
+/**
+ * The biggest object a function (or the functions it closes over) captures.
+ *
+ * Each closure is visited once: the closures of one module share its context,
+ * so without the check a callback in a module of 2,000 functions visited
+ * 2,000 x 2,000 contexts, re-reading the same objects millions of times.
+ */
 function payloadOf(fn: IHeapNode): IHeapNode | null {
   let best: IHeapNode | null = null;
+  const seen = new Set<number>();
   const visit = (f: IHeapNode, depth: number): void => {
+    if (seen.has(f.nodeIndex)) return;
+    seen.add(f.nodeIndex);
     const {fns, objs} = contextVars(f);
     for (const o of objs) {
+      if (best != null && o.retainedSize <= best.retainedSize) continue;
       if (isAmbient(o)) continue;
-      if (best == null || o.retainedSize > best.retainedSize) best = o;
+      best = o;
     }
     if (depth < 2) for (const g of fns) visit(g, depth + 1);
   };
@@ -141,7 +166,7 @@ export function registerTimers(server: McpServer): void {
         const labeler = cachedPathLabeler(snapshot);
         const tasks: IHeapNode[] = [];
         snapshot.nodes.forEach((n: IHeapNode) => {
-          if (n.type === 'object' && hasProps(n, TASK_SHAPE)) tasks.push(n);
+          if (hasTaskShape(n)) tasks.push(n);
         });
         if (tasks.length === 0) {
           return toolResult(
