@@ -43,6 +43,14 @@ const opt = name => {
 };
 const reuseFile = opt('--file');
 const serverEntry = opt('--server');
+// modulesMap entries; they point at nodes 3..REG+2, so N must cover those.
+const REG = 256;
+if (!Number.isInteger(N) || N < REG + 3) {
+  console.error(`check-huge-heap: --nodes must be an integer >= ${REG + 3}.`);
+  process.exit(2);
+}
+// A tool on a 2^24-node heap takes minutes; one that takes this long hung.
+const CALL_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * Stream a valid V8 heap snapshot: node 0 is the root and node i holds
@@ -53,7 +61,6 @@ async function writeSnapshot(file, n) {
   const out = fs.createWriteStream(file);
   const write = s =>
     out.write(s) ? Promise.resolve() : new Promise(r => out.once('drain', r));
-  const REG = 256;
   const reg = n - 1;
   const edges = n - 1 + 1 + REG;
   await write(
@@ -199,6 +206,21 @@ class Client {
     this.buf = '';
     this.next = 1;
     this.pending = new Map();
+    this.dead = null;
+    const die = why => {
+      this.dead ??= why;
+      for (const {reject} of this.pending.values()) {
+        reject(new Error(this.dead));
+      }
+      this.pending.clear();
+    };
+    this.proc.on('error', e => die(`server failed to start: ${e.message}`));
+    this.proc.stdin.on('error', e => die(`server stdin: ${e.message}`));
+    this.proc.on('exit', (code, signal) =>
+      die(`server exited (${signal ?? `code ${code}`})`),
+    );
+    // Chunks split multi-byte characters such as the '⚠' check (b) matches.
+    this.proc.stdout.setEncoding('utf8');
     this.proc.stdout.on('data', d => {
       this.buf += d;
       let i;
@@ -208,18 +230,34 @@ class Client {
         if (line.trim() === '') continue;
         const m = JSON.parse(line);
         if (m.id != null && this.pending.has(m.id)) {
-          this.pending.get(m.id)(m);
+          this.pending.get(m.id).resolve(m);
           this.pending.delete(m.id);
         }
       }
     });
   }
   request(method, params) {
+    if (this.dead != null) return Promise.reject(new Error(this.dead));
     const id = this.next++;
     this.proc.stdin.write(
       JSON.stringify({jsonrpc: '2.0', id, method, params}) + '\n',
     );
-    return new Promise(r => this.pending.set(id, r));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`no reply in ${CALL_TIMEOUT_MS / 60_000} min`));
+      }, CALL_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: m => {
+          clearTimeout(timer);
+          resolve(m);
+        },
+        reject: e => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
+    });
   }
   async call(name, args) {
     const m = await this.request('tools/call', {name, arguments: args});
@@ -244,21 +282,18 @@ console.log(
 );
 
 const client = new Client();
-await client.request('initialize', {
-  protocolVersion: '2025-03-26',
-  capabilities: {},
-  clientInfo: {name: 'check-huge-heap', version: '1'},
-});
-client.proc.stdin.write(
-  JSON.stringify({jsonrpc: '2.0', method: 'notifications/initialized'}) + '\n',
-);
-
 const failures = [];
 const run = async (name, args, {allowError = false} = {}) => {
   const s = Date.now();
-  const {text, isError} = await client.call(name, args);
-  const secs = ((Date.now() - s) / 1000).toFixed(1);
+  let text = '';
+  let isError = false;
   const problems = [];
+  try {
+    ({text, isError} = await client.call(name, args));
+  } catch (e) {
+    problems.push(e instanceof Error ? e.message : String(e));
+  }
+  const secs = ((Date.now() - s) / 1000).toFixed(1);
   if (/maximum size exceeded/i.test(text))
     problems.push('Map/Set maximum size exceeded');
   if (/^⚠ Analysis stopped/m.test(text) && text.split('\n').length < 12)
@@ -275,30 +310,45 @@ const run = async (name, args, {allowError = false} = {}) => {
   return text;
 };
 
-await run('memlab_load_snapshot', {
-  file_path: file,
-  max_file_size_mb: 100000,
-  force: true,
-});
-await run('memlab_module_attribution', {});
-await run('memlab_island_doors', {
-  seed_node_ids: [5],
-  island_mode: 'dominated',
-  limit: 5,
-});
-await run('memlab_trace_dominators', {node_id: 5});
-await run('memlab_drill_to_heavy_leaf', {node_id: 5});
-await run('memlab_class_histogram', {limit: 5});
-await run('memlab_sweep', {});
-// (c): the loaded file by path, with a limit far below its size.
-await run(
-  'memlab_detached_dom',
-  {paths: [file, file], max_file_size_mb: 1},
-  {allowError: true},
-);
-
-client.proc.kill('SIGTERM');
-if (!keep && reuseFile == null) fs.rmSync(dir, {recursive: true, force: true});
+try {
+  await client.request('initialize', {
+    protocolVersion: '2025-03-26',
+    capabilities: {},
+    clientInfo: {name: 'check-huge-heap', version: '1'},
+  });
+  client.proc.stdin.write(
+    JSON.stringify({jsonrpc: '2.0', method: 'notifications/initialized'}) +
+      '\n',
+  );
+  await run('memlab_load_snapshot', {
+    file_path: file,
+    max_file_size_mb: 100000,
+    force: true,
+  });
+  await run('memlab_module_attribution', {});
+  await run('memlab_island_doors', {
+    seed_node_ids: [5],
+    island_mode: 'dominated',
+    limit: 5,
+  });
+  await run('memlab_trace_dominators', {node_id: 5});
+  await run('memlab_drill_to_heavy_leaf', {node_id: 5});
+  await run('memlab_class_histogram', {limit: 5});
+  await run('memlab_sweep', {});
+  // (c): the loaded file by path, with a limit far below its size.
+  await run(
+    'memlab_detached_dom',
+    {paths: [file, file], max_file_size_mb: 1},
+    {allowError: true},
+  );
+} catch (e) {
+  failures.push(`initialize: ${e instanceof Error ? e.message : String(e)}`);
+} finally {
+  client.proc.kill('SIGTERM');
+  if (!keep && reuseFile == null) {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+}
 assert.deepEqual(
   failures,
   [],
