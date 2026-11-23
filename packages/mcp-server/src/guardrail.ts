@@ -17,6 +17,13 @@ import {
   withSnapshotRef,
 } from './snapshot-ref.js';
 import {runWithRungStats} from './snapshot-borrow.js';
+import {
+  AUTO_JOB_TOOLS,
+  autoJobReply,
+  backgroundParam,
+  shouldAutoJob,
+} from './auto-job.js';
+import {startJob} from './tools/jobs.js';
 import {trackSdkTool} from './toolsets.js';
 import {toolsetsOf} from './tools/tools-index.js';
 import {recordCall} from './perf-stats.js';
@@ -579,6 +586,13 @@ export function installAnalysisGuardrail(server: McpServer): void {
       ) {
         shape.max_file_size_mb = fileSizeParam();
       }
+      if (
+        shape != null &&
+        AUTO_JOB_TOOLS.has(name) &&
+        !('background' in shape)
+      ) {
+        shape.background = backgroundParam();
+      }
       recordToolHandler(name, inner, shape);
       if (shape != null) params = Object.keys(shape);
       // tool(name, [description,] shape, handler) → insert the annotations
@@ -620,6 +634,29 @@ export function installAnalysisGuardrail(server: McpServer): void {
           const conflict =
             ref != null ? snapshotRefConflict(params as object) : null;
           if (conflict != null) return errorResult(new Error(conflict));
+          const est = shouldAutoJob(name, params);
+          if (est != null) {
+            const job = startJob(name, jobExtra =>
+              withFileSizeLimit(fileLimitOf(params), () =>
+                runWithReadScope(async () =>
+                  ref != null
+                    ? withSnapshotRef(ref, () => inner(params, jobExtra))
+                    : inner(params, jobExtra),
+                ),
+              ),
+            );
+            if (typeof job !== 'string') {
+              return toolResult(
+                autoJobReply(
+                  name,
+                  job.id,
+                  est,
+                  (params as {background?: unknown}).background === true,
+                ),
+              );
+            }
+            // No free job slot: run in the foreground as before.
+          }
           const {result, stats: rungs} = await runWithRungStats(() =>
             runWithProgress(
               makeProgressReporter(extra, name.replace(/^memlab_/, '')),
