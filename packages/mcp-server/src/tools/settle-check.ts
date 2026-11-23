@@ -766,12 +766,20 @@ export function registerSettleCheck(server: McpServer): void {
         // Registered dev-only / bounded families come out of every histogram
         // before anything is classified.
         let excl: KnownFamily[] = [];
+        let exclError: string | null = null;
         if (run_dir != null) {
+          let file: string | null = null;
           try {
-            const file = loadRunManifest(run_dir).familiesFile;
-            if (file != null) excl = excludableFamilies(loadFamilies(file));
+            file = loadRunManifest(run_dir).familiesFile;
           } catch {
-            excl = [];
+            // An unreadable run.json is reported where the rungs are resolved.
+          }
+          if (file != null) {
+            try {
+              excl = excludableFamilies(loadFamilies(file));
+            } catch (err: unknown) {
+              exclError = `${file}: ${err instanceof Error ? err.message : String(err)}`;
+            }
           }
         }
         const exclNotes = new Map<string, string>();
@@ -803,11 +811,13 @@ export function registerSettleCheck(server: McpServer): void {
           return h;
         };
         const exclusionLine = (): string =>
-          exclNotes.size > 0
-            ? `\nexcluded (registered families): ${[...exclNotes]
-                .map(([f, n]) => `${f}: ${n}`)
-                .join('; ')}`
-            : '';
+          exclError != null
+            ? `\nexcluded (registered families): none, the families file was not read (${exclError})`
+            : exclNotes.size > 0
+              ? `\nexcluded (registered families): ${[...exclNotes]
+                  .map(([f, n]) => `${f}: ${n}`)
+                  .join('; ')}`
+              : '';
 
         if (run_dir != null) {
           const plan = segmentSettlePlan(run_dir);

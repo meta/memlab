@@ -756,16 +756,22 @@ export function registerLeakReport(server: McpServer): void {
         }
         const excludable = excludableFamilies(knownFamilies);
         const excluded: ExcludedFamily[][] = [];
+        const progress = makeProgressReporter(extra, 'leak_report');
         const {steps, rows, cachedRungs} = await computeSequenceTrends(paths, {
           minGrowthCount: min_growth_count,
           monotonicOnly: monotonic_only,
           maxFileSizeMB: max_file_size_mb,
           toolName: 'memlab_leak_report',
-          progress: makeProgressReporter(extra, 'leak_report'),
+          progress,
           adjust:
             excludable.length > 0
               ? async rungs => {
-                  for (const st of rungs) {
+                  for (const [i, st] of rungs.entries()) {
+                    progress.phase(
+                      i + 1,
+                      rungs.length,
+                      `subtracting registered families: ${st.label}`,
+                    );
                     const ex = await withSnapshotAt(st.localPath, snap =>
                       excludedFamilies(
                         snap,

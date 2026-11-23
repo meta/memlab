@@ -409,6 +409,26 @@ await shapeCheck('snapshot_summary: native + V8 heap = total', async () => {
 });
 
 await shapeCheck(
+  'artifact_budget: a bad families file is a warning, not an error',
+  async () => {
+    const bad = path.join(tmp, 'bad-families.json');
+    fs.writeFileSync(
+      bad,
+      JSON.stringify({families: [{id: 'a', label: 'A', kind: 'leaky'}]}),
+    );
+    const {text} = await call('memlab_artifact_budget', {
+      target: nodeSnapshot,
+      families: bad,
+    });
+    assert(
+      text.includes('Known families not read from') &&
+        text.includes('## Artifact budget'),
+      `budget: ${text.slice(0, 600)}`,
+    );
+  },
+);
+
+await shapeCheck(
   'native_contexts: owned + shared + unattributed = total',
   async () => {
     const {data} = await call('memlab_native_contexts');

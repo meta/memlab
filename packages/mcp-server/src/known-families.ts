@@ -83,6 +83,12 @@ export function loadFamilies(file: string): KnownFamily[] {
         `${file}: family ${i} kind must be "dev_only" or "bounded_window"`,
       );
     }
+    // Only a family with a kind is subtracted, so its locator would be ignored.
+    if (hasLocator && fam.kind == null) {
+      throw new Error(
+        `${file}: family ${i} has a locator but no kind; set kind to "dev_only" or "bounded_window"`,
+      );
+    }
     return {...fam, shapes: fam.shapes ?? []} as KnownFamily;
   });
 }

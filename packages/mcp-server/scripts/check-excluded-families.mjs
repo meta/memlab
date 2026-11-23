@@ -38,6 +38,9 @@ const {excludableFamilies, excludedFamilies, excludedSection} = await import(
 const {loadFamilies} = await import(
   pathToFileURL(path.join(dist, 'known-families.js')).href
 );
+const {familyDeltas} = await import(
+  pathToFileURL(path.join(dist, 'tools', 'artifact-budget.js')).href
+);
 
 /** A dominator tree: `[id, name, type, self, dominatorId]`. */
 function tree(rows) {
@@ -147,4 +150,38 @@ test('only kinds with a locator are excludable; files are validated', () => {
   assert.throws(() => loadFamilies(bad), /kind must be/);
   fs.writeFileSync(bad, JSON.stringify({families: [{id: 'a', label: 'A'}]}));
   assert.throws(() => loadFamilies(bad), /shapes list .* or a locator/);
+  fs.writeFileSync(
+    bad,
+    JSON.stringify({families: [{id: 'a', label: 'A', locator: 'M.x'}]}),
+  );
+  assert.throws(() => loadFamilies(bad), /has a locator but no kind/);
+});
+
+test('a family found at one end only is not subtracted', () => {
+  const fam = label => ({family: {label}});
+  const rows = familyDeltas(
+    [
+      {...fam('both'), root: 1, bytes: 500},
+      {...fam('gone'), root: null, bytes: 0},
+      {...fam('new'), root: 3, bytes: 700},
+      {...fam('never'), root: null, bytes: 0},
+    ],
+    [
+      {root: 1, bytes: 200},
+      {root: 2, bytes: 400},
+      {root: null, bytes: 0},
+      {root: null, bytes: 0},
+    ],
+    'r5',
+    'r0',
+  );
+  assert.deepEqual(
+    rows.map(r => [r.label, r.delta, r.missing]),
+    [
+      ['both', 300, null],
+      ['gone', null, 'not found at r5, not subtracted'],
+      ['new', null, 'not found at r0, not subtracted'],
+      ['never', null, 'not found'],
+    ],
+  );
 });

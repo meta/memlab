@@ -10,7 +10,9 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {excludableFamilies, excludedFamilies} from '../excluded-families.js';
+import type {ExcludedFamily} from '../excluded-families.js';
 import {loadFamilies} from '../known-families.js';
+import type {KnownFamily} from '../known-families.js';
 import {z} from 'zod';
 import {artifactLabel} from '../artifact-classes.js';
 import {computeHeapBudget, devFamilyBytes} from '../heap-budget.js';
@@ -90,6 +92,35 @@ function signed(n: number): string {
   return `${n >= 0 ? '+' : '-'}${formatBytes(Math.abs(n))}`;
 }
 
+/**
+ * Each registered family's change between two rungs. A root found at one end
+ * only has no delta: subtracting it would count the whole family as growth or
+ * shrinkage.
+ */
+export function familyDeltas(
+  target: ReadonlyArray<Pick<ExcludedFamily, 'family' | 'root' | 'bytes'>>,
+  base: ReadonlyArray<Pick<ExcludedFamily, 'root' | 'bytes'>>,
+  targetLabel: string,
+  baseLabel: string,
+): Array<{label: string; delta: number | null; missing: string | null}> {
+  return target.map((f, i) => {
+    const b = base[i];
+    const missing =
+      f.root == null && b?.root == null
+        ? 'not found'
+        : f.root == null
+          ? `not found at ${targetLabel}, not subtracted`
+          : b?.root == null
+            ? `not found at ${baseLabel}, not subtracted`
+            : null;
+    return {
+      label: f.family.label,
+      delta: missing == null ? f.bytes - b.bytes : null,
+      missing,
+    };
+  });
+}
+
 export function registerArtifactBudget(server: McpServer): void {
   server.tool(
     'memlab_artifact_budget',
@@ -144,8 +175,15 @@ export function registerArtifactBudget(server: McpServer): void {
         const scanBudgetMs = scaledTimeoutMs(largestMB);
 
         const declared = windows ?? [];
-        const excludable =
-          families != null ? excludableFamilies(loadFamilies(families)) : [];
+        let excludable: KnownFamily[] = [];
+        let familiesError: string | null = null;
+        if (families != null) {
+          try {
+            excludable = excludableFamilies(loadFamilies(families));
+          } catch (err: unknown) {
+            familiesError = err instanceof Error ? err.message : String(err);
+          }
+        }
         const measure = (snap: IHeapSnapshot) => {
           // The unremoved reachability walk is the same for every window.
           let reach: Reachability | null = null;
@@ -212,6 +250,12 @@ export function registerArtifactBudget(server: McpServer): void {
             `app-attributable is ${formatBytes(budget.app)} across ${formatNumber(budget.appNodes)} nodes.`,
         );
         lines.push('');
+        if (familiesError != null) {
+          lines.push(
+            `> ⚠️ Known families not read from ${families}: ${familiesError}`,
+            '',
+          );
+        }
 
         if (baseBudget != null && baseRung != null) {
           const rows = [
@@ -318,17 +362,17 @@ export function registerArtifactBudget(server: McpServer): void {
             `**app_delta: ${signed(appDelta)}**${share}.${exclWindows}`,
           );
           if (measured.excluded.length > 0) {
-            const famDelta = measured.excluded.reduce(
-              (n, f, i) => n + f.bytes - (base?.excluded[i]?.bytes ?? 0),
-              0,
+            const famRows = familyDeltas(
+              measured.excluded,
+              base?.excluded ?? [],
+              targetRung.label,
+              baseRung.label,
             );
+            const famDelta = famRows.reduce((n, r) => n + (r.delta ?? 0), 0);
             lines.push(
               '',
-              `Without registered families (${measured.excluded
-                .map(
-                  (f, i) =>
-                    `\`${f.family.label}\` ${f.root == null ? 'not found' : signed(f.bytes - (base?.excluded[i]?.bytes ?? 0))}`,
-                )
+              `Without registered families (${famRows
+                .map(r => `\`${r.label}\` ${r.missing ?? signed(r.delta ?? 0)}`)
                 .join('; ')}): **app_delta ${signed(appDelta - famDelta)}**.`,
             );
           }
