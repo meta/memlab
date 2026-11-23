@@ -465,7 +465,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_dead_context_variables',
-        'Captured variables no live code can read, heap-wide: a value kept alive only because it shares a closure Context with a sibling closure that is still alive. Ranked by what clearing them frees (a value counts only when its Context dominates it), grouped by scope; a dead slot pointing at something live code also reaches (the shared `Window`) is left out unless `include_shared`. Needs a V8 15.6+ (Chrome 156+) capture.',
+        'Captured variables no live code can read, heap-wide: a value kept alive only because it shares a closure Context with a sibling closure that is still alive. Ranked by what clearing them frees (a value counts only when that slot is the one thing holding it; one held only by several dead slots is listed with how many), grouped by scope; a dead slot whose value something else also holds (the shared `Window`) is left out unless `include_shared`. Needs a V8 15.6+ (Chrome 156+) capture.',
       ],
       [
         'memlab_probes',

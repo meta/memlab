@@ -339,6 +339,9 @@ const deadExpected = {
   nested: ['y'],
   generators: ['done'],
   shared: ['deadVar'],
+  aliased: ['deadVar'],
+  deadShared: ['deadTwin', 'deadVar', 'deadVar'],
+  ranked: ['deadSmall', 'deadVar', 'deadVar'],
 };
 for (const [name, expected] of Object.entries(deadExpected)) {
   await check(`dead_context_variables: ${name}`, async () => {
@@ -376,10 +379,64 @@ await check(
       snapshot: scope.shared.file,
     });
     assert(
-      /1 dead variable\(s\) whose value something live also reaches/.test(
+      /1 dead variable\(s\) whose value something other than a dead slot also holds/.test(
         plain.text,
       ),
       `note: ${plain.text.slice(0, 400)}`,
+    );
+  },
+);
+await check(
+  'dead_context_variables: a value a live slot of the same context holds frees nothing',
+  async () => {
+    const {data} = await call('memlab_dead_context_variables', {
+      snapshot: scope.aliased.file,
+      include_shared: true,
+    });
+    const fields = data.scopes.flatMap(s =>
+      s.contexts.flatMap(c => c.dead_fields),
+    );
+    const byName = Object.fromEntries(fields.map(f => [f.name, f]));
+    assert(
+      byName.deadAlias?.released_size === 0 &&
+        byName.deadAlias.dead_holders === 0 &&
+        byName.deadVar?.released_size === byName.deadVar.retained_size,
+      `released: ${JSON.stringify(fields)}`,
+    );
+  },
+);
+await check(
+  'dead_context_variables: a value held only by several dead slots is listed once per slot, freed by none alone',
+  async () => {
+    const {data, text} = await call('memlab_dead_context_variables', {
+      snapshot: scope.deadShared.file,
+    });
+    const contexts = data.scopes.flatMap(s => s.contexts);
+    const fields = contexts.flatMap(c => c.dead_fields);
+    assert(
+      fields.length === 3 &&
+        fields.every(f => f.released_size === 0 && f.dead_holders === 3) &&
+        contexts.every(c => c.released_size === 0) &&
+        data.held_only_by_dead_slots.values === 1,
+      `fields: ${JSON.stringify(data)}`,
+    );
+    assert(
+      /held only by 3 dead slots/.test(text) && !/something other/.test(text),
+      `text: ${text.slice(0, 600)}`,
+    );
+  },
+);
+await check(
+  'dead_context_variables: contexts are re-ranked after filtering',
+  async () => {
+    const {data} = await call('memlab_dead_context_variables', {
+      snapshot: scope.ranked.file,
+      min_retained_size: 3000,
+    });
+    const ids = data.scopes[0]?.contexts.map(c => c.context_id);
+    assert(
+      ids?.[0] === scope.ranked.ids.fnCall2 && ids.length === 2,
+      `order: ${JSON.stringify(data.scopes[0]?.contexts)}`,
     );
   },
 );

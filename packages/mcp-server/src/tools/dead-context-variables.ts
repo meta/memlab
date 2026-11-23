@@ -17,6 +17,7 @@ import {getSnapshot, getSnapshotByHandle} from '../heap-state.js';
 import {pageLines, paginate} from '../pagination.js';
 import {
   analyzeContexts,
+  compareContexts,
   scopeDeadBytes,
   scopeReleasedBytes,
   type ContextAnalysis,
@@ -58,8 +59,8 @@ export function deadContextAnalysis(snapshot: IHeapSnapshot): ContextAnalysis {
 
 /**
  * The scopes with only the dead fields that pass the filters. Unless
- * `includeShared`, a field whose value something live also reaches (nothing
- * freed by clearing it) is dropped and counted in `shared`.
+ * `includeShared`, a field whose value something other than dead slots also
+ * holds (nothing freed by clearing it) is dropped and counted in `shared`.
  */
 function filterScopes(
   scopes: DeadScope[],
@@ -78,7 +79,9 @@ function filterScopes(
       .map(c => {
         const deadFields = c.deadFields.filter(f => {
           if (f.retainedSize < minRetained) return false;
-          if (includeShared || f.releasedSize > 0) return true;
+          if (includeShared || f.releasedSize > 0 || f.deadHolders > 0) {
+            return true;
+          }
           shared.fields++;
           shared.bytes += f.retainedSize;
           return false;
@@ -90,7 +93,8 @@ function filterScopes(
           deadReleasedSize: deadFields.reduce((s, f) => s + f.releasedSize, 0),
         };
       })
-      .filter(c => c.deadFields.length > 0);
+      .filter(c => c.deadFields.length > 0)
+      .sort(compareContexts);
     if (contexts.length > 0) out.push({...scope, contexts});
   }
   out.sort(
@@ -147,7 +151,7 @@ export function registerDeadContextVariables(server: McpServer): void {
   server.tool(
     'memlab_dead_context_variables',
     'Find captured variables that no live code can read, heap-wide. Closures created in one scope share one Context, so a variable read only by a callback that is gone stays alive as long as ANY sibling closure does. ' +
-      'Using the source scope tree V8 embeds in the snapshot (V8 15.6+ / Chrome 156+), this checks every Context slot against the closures and suspended async frames still on the heap and reports the slots nothing live can read, grouped by scope (function and source position) and ranked by what clearing them would FREE: a value is counted only when its Context is its immediate dominator. A dead slot pointing at something live code also reaches (the shared `Window` or `Document`) frees nothing and is left out unless `include_shared` is set. ' +
+      'Using the source scope tree V8 embeds in the snapshot (V8 15.6+ / Chrome 156+), this checks every Context slot against the closures and suspended async frames still on the heap and reports the slots nothing live can read, grouped by scope (function and source position) and ranked by what clearing them would FREE: a value is counted only when the slot is the one edge into it from outside its own dominator subtree. A value held only by dead slots of several contexts (or two of one) is listed with how many hold it, since clearing them all frees it. A dead slot whose value something else also holds (the shared `Window` or `Document`) frees nothing and is left out unless `include_shared` is set. ' +
       'Each row gives the script, the scope name and source offsets, the Context id and the dead value ids, ready for `memlab_retainer_trace` or `memlab_closure_inspection`. ' +
       'Snapshots from older V8 have no scope tree; the tool then says so and lists how many contexts could not be checked. Scripts that own contexts but have no scope tree are listed at the end.',
     {
@@ -172,7 +176,7 @@ export function registerDeadContextVariables(server: McpServer): void {
         .optional()
         .default(false)
         .describe(
-          'Also list dead variables whose value something live reaches another way, so clearing them frees nothing (default false).',
+          'Also list dead variables whose value something other than a dead slot also holds, so clearing them frees nothing (default false).',
         ),
       offset: z
         .number()
@@ -255,12 +259,24 @@ export function registerDeadContextVariables(server: McpServer): void {
           (s, x) => s + scopeReleasedBytes(x),
           0,
         );
+        const jointly = new Map<number, number>();
+        for (const scope of scopes) {
+          for (const c of scope.contexts) {
+            for (const f of c.deadFields) {
+              if (f.deadHolders > 0) jointly.set(f.valueId, f.retainedSize);
+            }
+          }
+        }
+        const jointBytes = [...jointly.values()].reduce((s, b) => s + b, 0);
         const lines = [
           `**Dead captured variables:** ${formatNumber(fieldCount)} in ${formatNumber(contextCount)} contexts across ${formatNumber(scopes.length)} scopes; clearing them frees ${formatBytes(releasedBytes)}`,
           `Checked ${formatNumber(analysis.contextCount)} contexts against ${formatNumber(analysis.liveClosureCount)} live closures and suspended frames. ` +
-            '"Frees" counts a value only when its Context is its immediate dominator.' +
+            '"Frees" counts a value only when the slot is the one thing outside the value that holds it.' +
+            (jointly.size > 0
+              ? ` ${formatNumber(jointly.size)} value(s) (${formatBytes(jointBytes)} retained) are held only by several dead slots: no one slot frees them, clearing all of their dead slots does.`
+              : '') +
             (shared.fields > 0
-              ? ` ${formatNumber(shared.fields)} dead variable(s) whose value something live also reaches (${formatBytes(shared.bytes)} retained, nothing freed) are left out; \`include_shared: true\` lists them.`
+              ? ` ${formatNumber(shared.fields)} dead variable(s) whose value something other than a dead slot also holds (${formatBytes(shared.bytes)} retained, nothing freed) are left out; \`include_shared: true\` lists them.`
               : ''),
         ];
         if (scopes.length === 0) {
@@ -308,7 +324,11 @@ export function registerDeadContextVariables(server: McpServer): void {
               for (const f of ctx.deadFields.slice(0, fields_per_context)) {
                 const name = clampLabel(f.valueName, 60);
                 lines.push(
-                  `  - \`${f.name}\` → @${f.valueId} ${f.valueType} ${name} (frees ${formatBytes(f.releasedSize)}${f.releasedSize !== f.retainedSize ? ` of ${formatBytes(f.retainedSize)} retained` : ''})`,
+                  `  - \`${f.name}\` → @${f.valueId} ${f.valueType} ${name} (${
+                    f.deadHolders > 0
+                      ? `held only by ${formatNumber(f.deadHolders)} dead slots: clearing them all frees ${formatBytes(f.retainedSize)}`
+                      : `frees ${formatBytes(f.releasedSize)}${f.releasedSize !== f.retainedSize ? ` of ${formatBytes(f.retainedSize)} retained` : ''}`
+                  })`,
                 );
               }
               if (ctx.deadFields.length > fields_per_context) {
@@ -354,6 +374,7 @@ export function registerDeadContextVariables(server: McpServer): void {
             has_scope_metadata: true,
             dead_retained_size: deadBytes,
             released_size: releasedBytes,
+            held_only_by_dead_slots: {values: jointly.size, bytes: jointBytes},
             shared_left_out: shared,
             scopes: page.map(scope => ({
               scope_info_id: scope.scopeInfoId,
@@ -375,6 +396,7 @@ export function registerDeadContextVariables(server: McpServer): void {
                   value_type: f.valueType,
                   retained_size: f.retainedSize,
                   released_size: f.releasedSize,
+                  dead_holders: f.deadHolders,
                 })),
               })),
             })),

@@ -138,6 +138,7 @@ function build(mock) {
     const arr = infos.get(f.script);
     link(arr, n, 'weak', arr.edges.length);
   }
+  const fieldValues = new Map();
   for (const c of mock.contexts) {
     const n = N(c.name);
     link(n, N(c.scopeInfo), 'internal', 'scope_info');
@@ -145,6 +146,11 @@ function build(mock) {
     for (const f of c.fields) {
       if (f.shared) {
         link(n, N(f.shared), 'context', f.name);
+        continue;
+      }
+      // `sameAs: 'context.field'`: the value an earlier slot holds
+      if (f.sameAs) {
+        link(n, fieldValues.get(f.sameAs), 'context', f.name);
         continue;
       }
       // each value is a distinct object with a payload, so retained sizes show
@@ -156,6 +162,7 @@ function build(mock) {
         'elements',
       );
       link(n, v, 'context', f.name);
+      fieldValues.set(`${c.name}.${f.name}`, v);
     }
   }
   for (const c of mock.closures ?? []) {
@@ -373,6 +380,61 @@ const cases = {
     m.scripts[0].scopes[0].vars.push('sharedDead');
     m.globals = [{name: 'SharedWindow', payload: 9000}];
     m.contexts[0].fields.push({name: 'sharedDead', shared: 'SharedWindow'});
+    return m;
+  })(),
+  // a dead slot sharing its value with a live slot of the same context frees
+  // nothing: left out unless include_shared
+  aliased: (() => {
+    const m = base();
+    m.scripts[0].scopes[0].vars.push('deadAlias');
+    m.contexts[0].fields.push({name: 'deadAlias', sameAs: 'fnCall.liveVar'});
+    return m;
+  })(),
+  // one value held only by dead slots, two in one context and one in a
+  // second context: none frees it alone, all three are listed
+  deadShared: (() => {
+    const m = base();
+    m.scripts[0].scopes[0].vars.push('deadTwin');
+    m.contexts[0].fields.push({name: 'deadTwin', sameAs: 'fnCall.deadVar'});
+    m.contexts.push({
+      name: 'fnCall2',
+      scopeInfo: 'fn',
+      fields: [
+        {name: 'liveVar', value: 'LiveValue2'},
+        {name: 'deadVar', sameAs: 'fnCall.deadVar'},
+      ],
+    });
+    m.closures.push({
+      name: 'liveReaderClosure2',
+      sfi: 'liveReaderSfi',
+      context: 'fnCall2',
+    });
+    return m;
+  })(),
+  // two contexts of one scope whose order flips under min_retained_size 3000:
+  // fnCall frees 3,100 + 2,100 unfiltered, fnCall2 4,000
+  ranked: (() => {
+    const m = base();
+    m.scripts[0].scopes[0].vars.push('deadSmall');
+    m.contexts[0].fields[1].payload = 3000;
+    m.contexts[0].fields.push({
+      name: 'deadSmall',
+      value: 'Small',
+      payload: 2000,
+    });
+    m.contexts.push({
+      name: 'fnCall2',
+      scopeInfo: 'fn',
+      fields: [
+        {name: 'liveVar', value: 'LiveValue2'},
+        {name: 'deadVar', value: 'DeadValue2', payload: 3900},
+      ],
+    });
+    m.closures.push({
+      name: 'liveReaderClosure2',
+      sfi: 'liveReaderSfi',
+      context: 'fnCall2',
+    });
     return m;
   })(),
   // a context slot with no variable definition is ignored

@@ -17,10 +17,12 @@ closure from the same scope does.
 in each Context against the closures and suspended async functions still on
 the heap, and reports the variables that nothing live can read. Rows are grouped
 by scope (function and source position) and ranked by the bytes clearing them
-would free: a value counts only when its Context is its immediate dominator.
-A dead variable pointing at something live code also reaches, such as the
-page's `Window` or `Document`, frees nothing, so it is left out unless you
-pass `include_shared: true`. Each row gives the ids to pass to
+would free: a value counts only when that slot is the one thing outside the
+value that holds it. A value held only by dead slots, in several Contexts or
+twice in one, is listed with how many slots hold it: no one of them frees it,
+but clearing them all does. A dead variable whose value something else also
+holds, such as the page's `Window` or `Document`, frees nothing, so it is
+left out unless you pass `include_shared: true`. Each row gives the ids to pass to
 `memlab_retainer_trace`.
 
 This needs the source scope tree that V8 15.6 (Chrome 156) and later include

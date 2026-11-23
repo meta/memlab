@@ -57,11 +57,17 @@ export interface DeadField {
   selfSize: number;
   retainedSize: number;
   /**
-   * What clearing the slot frees, by the dominator tree: the value's retained
-   * size when the context is its immediate dominator, else 0 (something live
-   * reaches the value another way, as with a shared `Window` or `Document`).
+   * What clearing this slot alone frees: the value's retained size when the
+   * slot is the only edge into the value from outside the value's own
+   * dominator subtree, else 0.
    */
   releasedSize: number;
+  /**
+   * When the value is held only by dead slots, several of them (another
+   * context's, or a second slot of this one): how many. Clearing them all
+   * frees it. 0 otherwise, including when something else also holds it.
+   */
+  deadHolders: number;
 }
 
 export interface DeadContext {
@@ -575,6 +581,8 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
   }
 
   const scopes: DeadScope[] = [];
+  const deadSlots = new Set<string>();
+  const valueOf = new Map<DeadField, IHeapNode>();
   for (const group of groups.values()) {
     if (group == null) continue;
     const varByName = new Map(group.scope.variables.map(v => [v.name, v]));
@@ -593,35 +601,31 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
         // A slot with no definition is not ours to judge.
         if (variable == null || isUsed(fns, idx, variable)) return;
         const value = edge.toNode;
-        deadFields.push({
+        const field: DeadField = {
           name: variable.name,
           valueId: value.id,
           valueName: value.name,
           valueType: value.type,
           selfSize: value.self_size,
           retainedSize: value.retainedSize,
-          releasedSize:
-            value.dominatorNode?.id === ctx.id ? value.retainedSize : 0,
-        });
+          releasedSize: 0,
+          deadHolders: 0,
+        };
+        deadFields.push(field);
+        valueOf.set(field, value);
+        deadSlots.add(slotKey(ctx.id, variable.name));
       });
       fieldCount = Math.max(fieldCount, fields);
       if (deadFields.length === 0) continue;
-      deadFields.sort(
-        (a, b) =>
-          b.releasedSize - a.releasedSize ||
-          b.retainedSize - a.retainedSize ||
-          a.valueId - b.valueId,
-      );
       contexts.push({
         contextId: ctx.id,
         retainedSize: ctx.retainedSize,
-        deadRetainedSize: deadFields.reduce((s, f) => s + f.retainedSize, 0),
-        deadReleasedSize: deadFields.reduce((s, f) => s + f.releasedSize, 0),
+        deadRetainedSize: 0,
+        deadReleasedSize: 0,
         deadFields,
       });
     }
     if (contexts.length === 0) continue;
-    contexts.sort(compareContexts);
     const script = scan.scripts.get(group.scriptIdx);
     scopes.push({
       scopeInfoId: group.scopeInfo.id,
@@ -634,6 +638,32 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
       fieldCount,
       contexts,
     });
+  }
+  // Classified once every dead slot is known: a value can be held by dead
+  // slots of several contexts.
+  for (const scope of scopes) {
+    for (const c of scope.contexts) {
+      for (const f of c.deadFields) {
+        const value = valueOf.get(f);
+        const holders = value != null ? holdingEdges(value, deadSlots) : null;
+        if (holders == null) continue;
+        const own =
+          holders.length === 1 &&
+          holders[0].fromNode.id === c.contextId &&
+          String(holders[0].name_or_index) === f.name;
+        if (own) f.releasedSize = f.retainedSize;
+        else f.deadHolders = holders.length;
+      }
+      c.deadFields.sort(
+        (a, b) =>
+          b.releasedSize - a.releasedSize ||
+          b.retainedSize - a.retainedSize ||
+          a.valueId - b.valueId,
+      );
+      c.deadRetainedSize = c.deadFields.reduce((s, f) => s + f.retainedSize, 0);
+      c.deadReleasedSize = c.deadFields.reduce((s, f) => s + f.releasedSize, 0);
+    }
+    scope.contexts.sort(compareContexts);
   }
   scopes.sort(
     (a, b) =>
@@ -652,7 +682,43 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
   };
 }
 
-function compareContexts(a: DeadContext, b: DeadContext): number {
+const slotKey = (contextId: number, name: string) => `${contextId}:${name}`;
+
+/** Dominator-chain hops before a referrer is taken to be outside the value. */
+const MAX_DOMINATOR_HOPS = 256;
+
+/**
+ * The edges that keep `value` alive, those from outside its own dominator
+ * subtree, when every one of them is a dead slot; null as soon as one is not.
+ */
+function holdingEdges(
+  value: IHeapNode,
+  deadSlots: ReadonlySet<string>,
+): IHeapEdge[] | null {
+  const out: IHeapEdge[] = [];
+  let shared = false;
+  value.forEachReferrer((edge: IHeapEdge) => {
+    if (edge.type === 'weak') return;
+    let d: IHeapNode | null = edge.fromNode;
+    for (let hops = 0; d != null && hops < MAX_DOMINATOR_HOPS; hops++) {
+      if (d.id === value.id) return;
+      const next: IHeapNode | null = d.dominatorNode;
+      if (next == null || next.id === d.id) break;
+      d = next;
+    }
+    if (
+      edge.type !== 'context' ||
+      !deadSlots.has(slotKey(edge.fromNode.id, String(edge.name_or_index)))
+    ) {
+      shared = true;
+      return {stop: true};
+    }
+    out.push(edge);
+  });
+  return shared ? null : out;
+}
+
+export function compareContexts(a: DeadContext, b: DeadContext): number {
   return (
     b.deadReleasedSize - a.deadReleasedSize ||
     b.deadRetainedSize - a.deadRetainedSize ||
