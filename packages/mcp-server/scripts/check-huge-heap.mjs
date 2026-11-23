@@ -214,6 +214,7 @@ class Client {
       }
       this.pending.clear();
     };
+    this.die = die;
     this.proc.on('error', e => die(`server failed to start: ${e.message}`));
     this.proc.stdin.on('error', e => die(`server stdin: ${e.message}`));
     this.proc.on('exit', (code, signal) =>
@@ -243,9 +244,12 @@ class Client {
       JSON.stringify({jsonrpc: '2.0', id, method, params}) + '\n',
     );
     return new Promise((resolve, reject) => {
+      // A hung server would make every later call wait out the timeout too.
       const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`no reply in ${CALL_TIMEOUT_MS / 60_000} min`));
+        this.die(
+          `server hung: no reply to ${method} in ${CALL_TIMEOUT_MS / 60_000} min`,
+        );
+        this.proc.kill('SIGKILL');
       }, CALL_TIMEOUT_MS);
       this.pending.set(id, {
         resolve: m => {
