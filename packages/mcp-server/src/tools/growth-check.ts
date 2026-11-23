@@ -12,8 +12,14 @@ import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {getSnapshotMetadata, listSnapshots} from '../heap-state.js';
+import {
+  isolateOf,
+  isolateSample,
+  type IsolateSample,
+} from '../isolate-identity.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {
+  collectBackingSlots,
   errorResult,
   formatBytes,
   formatNumber,
@@ -33,6 +39,8 @@ const MAX_MEMBERS = 50_000;
 export interface RungMeasure {
   label: string;
   found: 'id' | 'path' | null;
+  /** Against the newest rung; ids match objects only within one isolate. */
+  isolate?: 'same' | 'other' | 'unknown';
   entries: number | null;
   retained: number;
   members: Set<number>;
@@ -43,6 +51,14 @@ export type GrowthVerdict =
 
 /** The ids an object points at directly: its entries or its fields. */
 function memberIds(node: IHeapNode): Set<number> {
+  if (COLLECTIONS.has(node.name) && node.name !== 'Array') {
+    // Browser captures type the backing-store slots `internal`.
+    return new Set(
+      collectBackingSlots(node)
+        .slice(0, MAX_MEMBERS)
+        .map(s => s.node.id),
+    );
+  }
   const out = new Set<number>();
   const visit = (n: IHeapNode) => {
     for (const e of n.references) {
@@ -76,23 +92,31 @@ function kept(first: Set<number>, later: Set<number>): number {
  * share of first-rung members still present on the last rung tells a frozen
  * buffer (≥ 95% kept) from a bounded queue whose entries are replaced (< 50%).
  */
-export function growthVerdict(rungs: RungMeasure[]): {
+export function growthVerdict(
+  rungs: RungMeasure[],
+  hasKey = true,
+): {
   verdict: GrowthVerdict;
   why: string;
 } {
   const seen = rungs.filter(r => r.found != null);
   if (seen.length < 2) {
+    const onlyLast = rungs.length >= 2 && rungs[rungs.length - 1].found != null;
+    const matchable =
+      hasKey || rungs.slice(0, -1).every(r => r.isolate === 'same');
     return {
       verdict: 'not comparable',
-      why:
-        rungs.length >= 2 && rungs[rungs.length - 1].found != null
+      why: !onlyLast
+        ? 'the holder was found on fewer than two rungs, so growth cannot be observed'
+        : matchable
           ? 'the holder is not on the earlier rungs (by id or module path): it was created since. Compare how many such holders each rung has with `memlab_collection_diff`'
-          : 'the holder was found on fewer than two rungs, so growth cannot be observed',
+          : 'the holder has no module path, and the earlier rungs may come from another session, where its id names a different object, so it cannot be found there. Compare how many such holders each rung has with `memlab_collection_diff`',
     };
   }
   const first = seen[0];
   const last = seen[seen.length - 1];
-  const size = (r: RungMeasure) => r.entries ?? r.retained;
+  const byEntries = seen.every(r => r.entries != null);
+  const size = (r: RungMeasure) => (byEntries ? (r.entries ?? 0) : r.retained);
   const a = size(first);
   const b = size(last);
   const change = a === 0 ? (b === 0 ? 0 : Infinity) : (b - a) / a;
@@ -100,7 +124,7 @@ export function growthVerdict(rungs: RungMeasure[]): {
   const monotonic = seen.every(
     (r, i) => i === 0 || size(r) >= size(seen[i - 1]),
   );
-  const what = first.entries != null ? 'entries' : 'retained bytes';
+  const what = byEntries ? 'entries' : 'retained bytes';
   if (change > 0.1 && b - a >= 2) {
     return {
       verdict: 'grows',
@@ -113,13 +137,11 @@ export function growthVerdict(rungs: RungMeasure[]): {
       why: `${what} ${formatNumber(a)} → ${formatNumber(b)}: entries are removed`,
     };
   }
-  const sameMembers = last.members.size <= first.members.size * 1.05;
-  if (
-    keptShare >= 0.95 &&
-    sameMembers &&
-    Math.abs(last.retained - first.retained) <=
-      0.02 * Math.max(1, first.retained)
-  ) {
+  const unchanged = (r: RungMeasure) =>
+    kept(first.members, r.members) >= 0.95 &&
+    r.members.size <= first.members.size * 1.05 &&
+    Math.abs(r.retained - first.retained) <= 0.02 * Math.max(1, first.retained);
+  if (first.members.size > 0 && seen.every(unchanged)) {
     return {
       verdict: 'frozen',
       why: `the same members (${(keptShare * 100).toFixed(0)}% kept) and the same retained size on every rung: nothing is appended`,
@@ -131,9 +153,14 @@ export function growthVerdict(rungs: RungMeasure[]): {
       why: `about the same size, but only ${(keptShare * 100).toFixed(0)}% of the first rung's members are still held: entries are replaced, so it is bounded`,
     };
   }
+  const peak = seen.reduce((p, r) => (size(r) > size(p) ? r : p));
+  const peaked =
+    size(peak) > Math.max(a, b) * 1.1
+      ? `, but ${formatNumber(size(peak))} on ${peak.label} between them`
+      : '';
   return {
     verdict: 'flat',
-    why: `${what} within 10% (${formatNumber(a)} → ${formatNumber(b)}), ${(keptShare * 100).toFixed(0)}% of members kept`,
+    why: `${what} within 10% (${formatNumber(a)} → ${formatNumber(b)})${peaked}, ${(keptShare * 100).toFixed(0)}% of members kept`,
   };
 }
 
@@ -155,20 +182,30 @@ function measure(
   id: number,
   name: string,
   key: string | null,
+  newest: IsolateSample | null,
 ): RungMeasure {
-  let node = snap.getNodeById(id);
+  const isolate = newest == null ? 'same' : isolateOf(snap, newest);
+  let node = isolate === 'other' ? null : snap.getNodeById(id);
   let found: RungMeasure['found'] =
     node != null && node.name === name ? 'id' : null;
   if (found == null && key != null) {
     node = resolveStableKey(snap, key);
-    found = node != null ? 'path' : null;
+    found = node != null && node.name === name ? 'path' : null;
   }
   if (found == null || node == null) {
-    return {label, found: null, entries: null, retained: 0, members: new Set()};
+    return {
+      label,
+      found: null,
+      isolate,
+      entries: null,
+      retained: 0,
+      members: new Set(),
+    };
   }
   return {
     label,
     found,
+    isolate,
     entries:
       COLLECTIONS.has(node.name) || node.type === 'array'
         ? countEntries(node)
@@ -219,26 +256,42 @@ export function registerGrowthCheck(server: McpServer): void {
           );
         }
         const newestPath = rungPaths[rungPaths.length - 1];
-        const target = await withSnapshotAt(newestPath, s => {
+        const newest = await withSnapshotAt(newestPath, s => {
           const n = s.getNodeById(node_id);
-          return n == null ? null : {name: n.name, key: stableKeyOf(s, n)};
+          if (n == null) return null;
+          const key = stableKeyOf(s, n);
+          return {
+            target: {name: n.name, key},
+            sample: isolateSample(s),
+            rung: measure(
+              s,
+              labels[labels.length - 1],
+              node_id,
+              n.name,
+              key,
+              null,
+            ),
+          };
         });
-        if (target == null) {
+        if (newest == null) {
           return errorResult(
             new Error(
               `@${node_id} is not in the newest snapshot (${labels[labels.length - 1]}).`,
             ),
           );
         }
+        const {target, sample} = newest;
         const rungs: RungMeasure[] = [];
-        for (const [i, p] of rungPaths.entries()) {
+        for (const [i, p] of rungPaths.slice(0, -1).entries()) {
           rungs.push(
             await withSnapshotAt(p, s =>
-              measure(s, labels[i], node_id, target.name, target.key),
+              measure(s, labels[i], node_id, target.name, target.key, sample),
             ),
           );
         }
-        const {verdict, why} = growthVerdict(rungs);
+        rungs.push(newest.rung);
+        const base = rungs.find(r => r.found != null);
+        const {verdict, why} = growthVerdict(rungs, target.key != null);
         const lines = [
           `## Growth check: @${node_id} ${target.name}${target.key != null ? ` (\`${target.key}\`)` : ''}`,
           '',
@@ -252,11 +305,14 @@ export function registerGrowthCheck(server: McpServer): void {
             ],
             rungs.map(r => [
               r.label,
-              r.found ?? 'not found',
+              r.found ??
+                (r.isolate === 'other'
+                  ? 'not found (other session)'
+                  : 'not found'),
               r.entries != null ? formatNumber(r.entries) : '—',
               r.found != null ? formatBytes(r.retained) : '—',
-              r.found != null && rungs[0].found != null
-                ? `${(kept(rungs[0].members, r.members) * 100).toFixed(0)}%`
+              r.found != null && base != null
+                ? `${(kept(base.members, r.members) * 100).toFixed(0)}%`
                 : '—',
             ]),
             new Set([2, 3, 4]),

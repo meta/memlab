@@ -71,6 +71,48 @@ export function compareIsolates(
   };
 }
 
+/**
+ * Sampled `[id, type, name]` of one snapshot's stable-id nodes, so another
+ * snapshot can be checked against it without both being resident.
+ */
+export type IsolateSample = Array<[number, string, string]>;
+
+const SAMPLE_NAME_CHARS = 64;
+
+export function isolateSample(snapshot: IHeapSnapshot): IsolateSample {
+  const out: IsolateSample = [];
+  const total = snapshot.nodes.length;
+  const step = Math.max(1, Math.floor(total / SAMPLE));
+  for (let i = 0; i < total; i += step) {
+    const n = snapshot.nodes.get(i);
+    if (n == null || !hasStableId(n)) continue;
+    out.push([n.id, n.type, n.name.slice(0, SAMPLE_NAME_CHARS)]);
+  }
+  return out;
+}
+
+/**
+ * Whether `snapshot` comes from the isolate `sample` was taken from: `unknown`
+ * when too few sampled ids exist in it to tell.
+ */
+export function isolateOf(
+  snapshot: IHeapSnapshot,
+  sample: IsolateSample,
+): 'same' | 'other' | 'unknown' {
+  let found = 0;
+  let matched = 0;
+  for (const [id, type, name] of sample) {
+    const n = snapshot.getNodeById(id);
+    if (n == null) continue;
+    found++;
+    if (n.type === type && n.name.slice(0, SAMPLE_NAME_CHARS) === name) {
+      matched++;
+    }
+  }
+  if (found < MIN_FOUND) return 'unknown';
+  return matched / found >= MIN_AGREEMENT ? 'same' : 'other';
+}
+
 export interface ClassChurn {
   key: string;
   type: string;
