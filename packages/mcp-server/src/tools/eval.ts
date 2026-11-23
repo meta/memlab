@@ -99,6 +99,13 @@ import {
   suggestionsSuppressed,
   truncateOutput,
 } from '../utils.js';
+import {
+  INLINE_JOB_BUDGET_MS,
+  MAX_STATUS_WAIT_MS,
+  predictEvalMs,
+  prependNote,
+  ranInlineNote,
+} from './jobs.js';
 
 /**
  * Cap for a class name returned by a HELPER (not a rendered table).
@@ -1808,7 +1815,7 @@ export function registerEval(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          'Run as a background job and return a job id at once; collect the result with memlab_job_status. For a whole-heap eval that would outlast the client tool timeout (~120 s) and be backgrounded with no handle. The code is syntax-checked first. Helper indexes the code uses (`pathTree`, and `pathLabel` / `familyOf` in a full walk) are built first in yielding chunks, so a status poll shows nodes done / total; while the code itself runs, a poll is answered when it finishes.',
+          'Run as a background job and return a job id at once; collect the result with memlab_job_status. For a whole-heap eval that would outlast the client tool timeout (~120 s) and be backgrounded with no handle. The code is syntax-checked first. Helper indexes the code uses (`pathTree`, and `pathLabel` / `familyOf` in a full walk) are built first in yielding chunks, so a status poll shows nodes done / total; while the code itself runs, a poll is answered when it finishes. On a heap small enough that a full walk is predicted under 60 s (about 20M nodes), and with no `timeout_ms` over 90 s, the eval runs inline instead and says so: a job would only add a call to collect it.',
         ),
       max_nodes: z
         .number()
@@ -1826,9 +1833,19 @@ export function registerEval(server: McpServer): void {
       } catch (err) {
         return errorResult(err);
       }
-      return background === true
-        ? startEvalJob(args)
-        : runEval({...args, ownsScanBudget: true});
+      if (background === true) {
+        const predicted = predictEvalMs(getSnapshot().nodes.length);
+        const longTimeout =
+          args.timeout_ms != null && args.timeout_ms > MAX_STATUS_WAIT_MS;
+        if (predicted >= INLINE_JOB_BUDGET_MS || longTimeout) {
+          return startEvalJob(args);
+        }
+        return prependNote(
+          await runEval({...args, ownsScanBudget: true}),
+          ranInlineNote(predicted),
+        );
+      }
+      return runEval({...args, ownsScanBudget: true});
     },
   );
 }

@@ -64,6 +64,41 @@ const MAX_JOBS = 50;
  */
 export const MAX_STATUS_WAIT_MS = 90_000;
 
+/**
+ * Work predicted to finish within this runs inline even when `async: true`
+ * was asked for. A background job costs the caller a second call to collect
+ * it, and a blocking pass (a parse, an eval walk) answers no poll until it
+ * ends anyway; in measured sessions nearly every async eval and load had
+ * finished before its first poll.
+ */
+export const INLINE_JOB_BUDGET_MS = 60_000;
+
+/** Predicted wall time of a full load: ~3 µs per node and 0.5 µs per edge. */
+export function predictLoadMs(counts: {
+  nodeCount: number;
+  edgeCount: number;
+}): number {
+  return Math.round(counts.nodeCount * 0.003 + counts.edgeCount * 0.0005);
+}
+
+/** Predicted wall time of a whole-heap eval walk: ~3 µs per node. */
+export function predictEvalMs(nodeCount: number): number {
+  return Math.round(nodeCount * 0.003);
+}
+
+/** `result` with `note` ahead of its first text block. */
+export function prependNote<T>(result: T, note: string): T {
+  const r = result as {content?: Array<{type: string; text?: string}>};
+  const first = r?.content?.find(c => c.type === 'text');
+  if (first != null) first.text = `${note}\n\n${first.text ?? ''}`;
+  return result;
+}
+
+/** The line put ahead of a result that ran inline instead of as a job. */
+export function ranInlineNote(predictedMs: number): string {
+  return `_Ran inline instead of as a background job: predicted ~${Math.max(1, Math.round(predictedMs / 1000))} s, under the ${INLINE_JOB_BUDGET_MS / 1000} s inline budget, so there is no job to collect._`;
+}
+
 /** Wall-clock time for a status line, so a late reply reads as stale. */
 export function statusTime(): string {
   return `${new Date().toISOString().slice(11, 19)} UTC`;

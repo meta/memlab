@@ -52,7 +52,13 @@ import {
 } from '../heap-state.js';
 import {makeProgressReporter} from '../progress.js';
 import {getRegisteredTool} from '../tool-registry.js';
-import {startJob} from './jobs.js';
+import {
+  INLINE_JOB_BUDGET_MS,
+  predictLoadMs,
+  prependNote,
+  ranInlineNote,
+  startJob,
+} from './jobs.js';
 import type {SnapshotEnv} from '../heap-state.js';
 import {workerTitleFromFile} from '../realm.js';
 import {detectAnonymizedStrings} from '../anonymized-snapshot.js';
@@ -1336,7 +1342,7 @@ export function registerLoadSnapshot(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          'Load as a background job and return a job id at once; collect the load report with memlab_job_status. For a 400 MB+ capture whose parse and dominator pass outlast the client tool timeout (~120 s). The parse blocks the server, so a poll sent during it is answered when that pass ends. The snapshot becomes active when the job finishes.',
+          'Load as a background job and return a job id at once; collect the load report with memlab_job_status. For a 400 MB+ capture whose parse and dominator pass outlast the client tool timeout (~120 s). The parse blocks the server, so a poll sent during it is answered when that pass ends. The snapshot becomes active when the job finishes. A load predicted to take under 60 s (from the node and edge counts in the file header) runs inline instead, and says so.',
         ),
     },
     async (
@@ -1376,6 +1382,16 @@ export function registerLoadSnapshot(server: McpServer): void {
           force_reload,
           light,
         };
+        const counts = fs.existsSync(file_path)
+          ? peekSnapshotCounts(file_path)
+          : null;
+        const predicted = counts != null ? predictLoadMs(counts) : null;
+        if (predicted != null && predicted < INLINE_JOB_BUDGET_MS) {
+          return prependNote(
+            (await self.handler(args, extra)) as ReturnType<typeof textResult>,
+            ranInlineNote(predicted),
+          );
+        }
         const job = startJob('memlab_load_snapshot', jobExtra =>
           self.handler(args, jobExtra),
         );
