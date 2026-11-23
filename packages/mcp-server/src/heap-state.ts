@@ -75,6 +75,8 @@ export interface SnapshotMetadata {
    * {@link getSnapshot}.
    */
   light: boolean;
+  /** The file's size and mtime when it was parsed, to spot a rewritten rung. */
+  fileStat?: {size: number; mtimeMs: number} | null;
 }
 
 interface LoadedSnapshot {
@@ -260,9 +262,28 @@ export function getEvalScratch(): Record<string, unknown> {
 function dropEvalScratch(handle: string | null): void {
   if (handle == null) {
     evalScratch.clear();
+    cachedHandles.clear();
     return;
   }
   evalScratch.delete(handle);
+  cachedHandles.delete(handle);
+}
+
+/**
+ * Rungs the session cache keeps parsed between calls. They are reused by path
+ * (`findResidentByPath`) but left out of `listSnapshots()`, so a tool that
+ * compares "every resident snapshot" does not start comparing rungs another
+ * call happened to read.
+ */
+const cachedHandles = new Set<string>();
+
+export function setCachedHandle(handle: string, cached: boolean): void {
+  if (cached) cachedHandles.add(handle);
+  else cachedHandles.delete(handle);
+}
+
+export function isCachedHandle(handle: string): boolean {
+  return cachedHandles.has(handle) && handle !== currentHandle;
 }
 
 /**
@@ -529,6 +550,7 @@ export function setSnapshot(
     filePath,
     ...metadata,
     light: metadata.light === true,
+    fileStat: statOrNull(filePath),
   };
   loaded.set(handle, {snapshot, metadata: full});
   currentHandle = handle;
@@ -537,8 +559,18 @@ export function setSnapshot(
   return full;
 }
 
-export function listSnapshots(): SnapshotMetadata[] {
-  return [...loaded.values()].map(l => l.metadata);
+export function listSnapshots(opts?: {
+  includeCached?: boolean;
+}): SnapshotMetadata[] {
+  return [...loaded.values()]
+    .map(l => l.metadata)
+    .filter(m => opts?.includeCached === true || !isCachedHandle(m.handle));
+}
+
+/** A fallback active handle: a snapshot the user loaded, not a cached rung. */
+function fallbackHandle(): string | null {
+  const keys = [...loaded.keys()];
+  return keys.find(h => !cachedHandles.has(h)) ?? keys[0] ?? null;
 }
 
 /**
@@ -563,6 +595,24 @@ export function clearAllSnapshots(): void {
  * derived from the file name and may have been disambiguated.
  */
 export function findResidentByPath(filePath: string): SnapshotMetadata | null {
+  const hit = residentByPath(filePath);
+  if (hit == null || hit.fileStat == null) return hit;
+  // A rung file rewritten since it was parsed (a round re-driven into the
+  // same directory) is a different capture under the same name.
+  const now = statOrNull(hit.filePath);
+  if (
+    now != null &&
+    (now.size !== hit.fileStat.size || now.mtimeMs !== hit.fileStat.mtimeMs) &&
+    isCachedHandle(hit.handle) &&
+    !pinned.has(hit.handle)
+  ) {
+    removeSnapshot(hit.handle);
+    return null;
+  }
+  return hit;
+}
+
+function residentByPath(filePath: string): SnapshotMetadata | null {
   for (const {metadata} of loaded.values()) {
     if (metadata.filePath === filePath) return metadata;
   }
@@ -573,6 +623,15 @@ export function findResidentByPath(filePath: string): SnapshotMetadata | null {
     if (realPathOrNull(metadata.filePath) === real) return metadata;
   }
   return null;
+}
+
+function statOrNull(filePath: string): {size: number; mtimeMs: number} | null {
+  try {
+    const st = fs.statSync(filePath);
+    return {size: st.size, mtimeMs: st.mtimeMs};
+  } catch {
+    return null;
+  }
 }
 
 function realPathOrNull(filePath: string): string | null {
@@ -592,6 +651,7 @@ function realPathOrNull(filePath: string): string | null {
  */
 export function retainOnlySnapshot(handle: string): boolean {
   if (!loaded.has(handle)) return false;
+  cachedHandles.delete(handle);
   for (const h of [...loaded.keys()]) {
     if (h === handle) continue;
     loaded.delete(h);
@@ -724,6 +784,7 @@ export function getMetadataByHandle(handle: string): SnapshotMetadata | null {
 
 export function setCurrentSnapshot(handle: string): boolean {
   if (!loaded.has(handle)) return false;
+  cachedHandles.delete(handle);
   currentHandle = handle;
   touch(handle);
   headerEmittedFor = null;
@@ -738,12 +799,7 @@ export function restoreCurrentHandle(handle: string | null): void {
   // The memory guard cannot evict the saved handle (borrowers pin it), but an
   // unload or a replace-mode load inside the call can still remove it. Then
   // fall back the way `removeSnapshot` does, and say so in the next result.
-  const next =
-    handle == null || loaded.has(handle)
-      ? handle
-      : loaded.size > 0
-        ? [...loaded.keys()][0]
-        : null;
+  const next = handle == null || loaded.has(handle) ? handle : fallbackHandle();
   if (handle != null && next !== handle) {
     activeNotice =
       next != null
@@ -770,7 +826,7 @@ export function removeSnapshot(handle: string): boolean {
     dropEvalScratch(handle);
   }
   if (existed && currentHandle === handle) {
-    currentHandle = loaded.size > 0 ? [...loaded.keys()][0] : null;
+    currentHandle = fallbackHandle();
     headerEmittedFor = null;
   }
   return existed;

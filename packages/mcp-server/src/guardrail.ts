@@ -16,6 +16,7 @@ import {
   snapshotRefConflict,
   withSnapshotRef,
 } from './snapshot-ref.js';
+import {runWithRungStats} from './snapshot-borrow.js';
 import {trackSdkTool} from './toolsets.js';
 import {toolsetsOf} from './tools/tools-index.js';
 import {recordCall} from './perf-stats.js';
@@ -518,6 +519,29 @@ function timeoutParam() {
     );
 }
 
+/**
+ * `rungs: k cached / n parsed` under a result that read snapshot files, so a
+ * slow call says whether it paid for parsing.
+ */
+export function withRungLine<T>(result: T, parsed: number, cached: number): T {
+  if (parsed + cached === 0) return result;
+  const content = (result as {content?: Array<{type: string; text?: string}>})
+    ?.content;
+  if (!Array.isArray(content) || content.length === 0) return result;
+  const last = content[content.length - 1];
+  if (last.type !== 'text' || typeof last.text !== 'string') return result;
+  return {
+    ...result,
+    content: [
+      ...content.slice(0, -1),
+      {
+        ...last,
+        text: `${last.text}\n\n_rungs: ${cached} cached / ${parsed} parsed_`,
+      },
+    ],
+  };
+}
+
 export function installAnalysisGuardrail(server: McpServer): void {
   installUnknownParamRejection(server);
   const origTool = (server.tool as AnyFn).bind(server) as AnyFn;
@@ -596,20 +620,26 @@ export function installAnalysisGuardrail(server: McpServer): void {
           const conflict =
             ref != null ? snapshotRefConflict(params as object) : null;
           if (conflict != null) return errorResult(new Error(conflict));
-          const result = await runWithProgress(
-            makeProgressReporter(extra, name.replace(/^memlab_/, '')),
-            () =>
-              withFileSizeLimit(fileLimitOf(params), () =>
-                runWithReadScope(async () =>
-                  ref != null
-                    ? withSnapshotRef(ref, () => inner(...hArgs))
-                    : inner(...hArgs),
+          const {result, stats: rungs} = await runWithRungStats(() =>
+            runWithProgress(
+              makeProgressReporter(extra, name.replace(/^memlab_/, '')),
+              () =>
+                withFileSizeLimit(fileLimitOf(params), () =>
+                  runWithReadScope(async () =>
+                    ref != null
+                      ? withSnapshotRef(ref, () => inner(...hArgs))
+                      : inner(...hArgs),
+                  ),
                 ),
-              ),
+            ),
           );
           return wantsJson(name, params)
             ? jsonOutput(name, params, result)
-            : trimStandingNotes(terseOutput(name, result));
+            : withRungLine(
+                trimStandingNotes(terseOutput(name, result)),
+                rungs.parsed,
+                rungs.cached,
+              );
         } catch (e) {
           if (e instanceof ScanTimeoutError) {
             const ran = Math.round(activeElapsedMs() / 1000);

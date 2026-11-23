@@ -31,6 +31,8 @@ import {
   runWithBorrowedHandle,
   unpinHandle,
   setSnapshot,
+  isCachedHandle,
+  setCachedHandle,
 } from './heap-state.js';
 import {beginAnalysisBudget} from './analysis-budget.js';
 import {
@@ -53,15 +55,56 @@ interface RungRetention {
   parses: number;
   reuses: number;
   evicted: number;
+  cap: () => number;
 }
 
 const retentionStore = new AsyncLocalStorage<RungRetention>();
 
+function capFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const n = raw == null || raw.trim() === '' ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
 /** MEMLAB_RETAIN_RUNGS caps how many rungs a scope keeps (0 disables). */
 function retainCap(): number {
-  const raw = process.env.MEMLAB_RETAIN_RUNGS;
-  const n = raw == null || raw.trim() === '' ? NaN : Number(raw);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 8;
+  return capFromEnv('MEMLAB_RETAIN_RUNGS', 8);
+}
+
+/**
+ * Rungs kept parsed between calls, for every caller with no scope of its
+ * own. Interactive ladder calls used to parse every rung on every call (a
+ * `ladder_probe` per metric re-read the same five rungs), while only the
+ * battery kept them. Bounded by `MEMLAB_SESSION_RUNGS` (0 disables) and by
+ * the free heap, and dropped by the idle unloader like any resident snapshot.
+ */
+const sessionRetention: RungRetention = {
+  handles: [],
+  parses: 0,
+  reuses: 0,
+  evicted: 0,
+  cap: () => capFromEnv('MEMLAB_SESSION_RUNGS', 6),
+};
+
+interface RungCallStats {
+  parsed: number;
+  cached: number;
+}
+const rungStatsStore = new AsyncLocalStorage<RungCallStats>();
+
+/** Count a rung read from memory by a path outside `withSnapshotAt`. */
+export function noteRungCached(): void {
+  const stats = rungStatsStore.getStore();
+  if (stats != null) stats.cached++;
+}
+
+/** Count the rungs `fn` borrows: parsed for it, or already resident. */
+export async function runWithRungStats<T>(
+  fn: () => Promise<T>,
+): Promise<{result: T; stats: RungCallStats}> {
+  const stats: RungCallStats = {parsed: 0, cached: 0};
+  const result = await rungStatsStore.run(stats, fn);
+  return {result, stats};
 }
 
 /**
@@ -91,12 +134,19 @@ export interface RungRetentionStats {
 
 /**
  * Run `fn` with borrowed rungs kept resident, within memory, until it ends.
- * Every rung still retained is dropped afterwards, except the active snapshot.
+ * The rungs still retained then pass to the session cache, which keeps as
+ * many as its cap and the free heap allow.
  */
 export async function runWithRungRetention<T>(
   fn: () => Promise<T>,
 ): Promise<{result: T; stats: RungRetentionStats}> {
-  const r: RungRetention = {handles: [], parses: 0, reuses: 0, evicted: 0};
+  const r: RungRetention = {
+    handles: [],
+    parses: 0,
+    reuses: 0,
+    evicted: 0,
+    cap: retainCap,
+  };
   try {
     const result = await retentionStore.run(r, fn);
     return {
@@ -106,7 +156,12 @@ export async function runWithRungRetention<T>(
   } finally {
     const current = getSessionHandle();
     let dropped = 0;
+    // Handed to the session cache, so the calls after the battery reuse what
+    // it parsed.
     for (const h of r.handles) {
+      if (h === current) continue;
+      const snap = getSnapshotByHandle(h);
+      if (snap != null && retain(sessionRetention, h, snap, current)) continue;
       // A pinned rung is in use by a call still running.
       if (h !== current && !isPinned(h) && removeSnapshot(h)) dropped++;
     }
@@ -126,17 +181,29 @@ function retain(
   snapshot: IHeapSnapshot,
   callerHandle: string | null,
 ): boolean {
-  const cap = retainCap();
+  const cap = r.cap();
   if (cap === 0) return false;
-  // A replacing load elsewhere may have dropped kept rungs already.
-  r.handles = r.handles.filter(h => getMetadataByHandle(h) != null);
+  const session = r === sessionRetention;
+  // A replacing load elsewhere may have dropped kept rungs already, and a
+  // cached rung the user has since loaded is theirs, not the cache's.
+  r.handles = r.handles.filter(
+    h =>
+      h !== handle &&
+      getMetadataByHandle(h) != null &&
+      (!session || isCachedHandle(h)),
+  );
   r.handles.push(handle);
+  if (session) setCachedHandle(handle, true);
   while (
     r.handles.length > 0 &&
     (r.handles.length > cap || !roomForAnother(snapshot))
   ) {
     const victim = r.handles.shift() as string;
-    if (victim === callerHandle || (victim !== handle && isPinned(victim))) {
+    if (
+      victim === callerHandle ||
+      victim === getSessionHandle() ||
+      (victim !== handle && isPinned(victim))
+    ) {
       continue;
     }
     removeSnapshot(victim);
@@ -203,13 +270,18 @@ export async function withSnapshotAt<T>(
   const resident = findResidentByPath(localPath);
   let snapshot: IHeapSnapshot | null =
     resident != null ? getSnapshotByHandle(resident.handle) : null;
+  const stats = rungStatsStore.getStore();
+  if (stats != null) {
+    if (snapshot != null) stats.cached++;
+    else stats.parsed++;
+  }
   // The SESSION's handle, not this context's: a borrow is never restored to
   // another borrow's rung, which is unloaded when that borrow ends.
   const previousHandle = getSessionHandle();
   let temporaryHandle: string | null = null;
   pinHandle(previousHandle);
 
-  const retention = retentionStore.getStore();
+  const retention = retentionStore.getStore() ?? sessionRetention;
   if (
     retention != null &&
     resident != null &&

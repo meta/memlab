@@ -15,7 +15,7 @@ import {
   resolveHandle,
   runWithBorrowedHandle,
 } from './heap-state.js';
-import {withSnapshotAt} from './snapshot-borrow.js';
+import {noteRungCached, withSnapshotAt} from './snapshot-borrow.js';
 import {resolveSnapshotPath} from './tools/load-snapshot.js';
 
 /**
@@ -97,7 +97,7 @@ export function snapshotParam() {
     .string()
     .optional()
     .describe(
-      'Run against this snapshot instead of the active one: a resident handle, or a .heapsnapshot path (loaded for this call only, then released). The active snapshot is not changed.',
+      'Run against this snapshot instead of the active one: a resident handle, or a .heapsnapshot path (parsed once and kept in the session rung cache, so the next call on the same path reuses it). The active snapshot is not changed.',
     );
 }
 
@@ -107,7 +107,10 @@ export async function withSnapshotRef<T>(
   fn: () => Promise<T> | T,
 ): Promise<T> {
   const handle = resolveHandle(ref);
-  if (handle != null) return await runWithBorrowedHandle(handle, fn);
+  if (handle != null) {
+    if (/\.heapsnapshot(\.gz)?$/.test(ref)) noteRungCached();
+    return await runWithBorrowedHandle(handle, fn);
+  }
   const {localPath} = resolveSnapshotPath(ref);
   if (!fs.existsSync(localPath)) {
     const handles = listSnapshots().map(m => m.handle);
