@@ -30,6 +30,7 @@ import {
   resolveLadderInputs,
   describeSegmentSelection,
   segmentArg,
+  settleRungForSegment,
   retentionWindowCaveat,
 } from '../run-manifest.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -969,10 +970,19 @@ export function registerLeakReport(server: McpServer): void {
         // the path without checking turns that into an UNSETTLED banner on
         // a round that has no settle evidence at all — while `settleError`
         // suppresses every leak-candidate hint below it.
+        const segmentSettle =
+          inputs.manifest != null
+            ? settleRungForSegment(
+                inputs.manifest,
+                inputs.segment,
+                inputs.segmentCount,
+              )
+            : {path: null, note: null};
         const namedSettlePath =
-          include_settle !== false
-            ? (inputs.manifest?.settleRungPath ?? null)
-            : null;
+          include_settle !== false ? segmentSettle.path : null;
+        if (include_settle !== false && segmentSettle.note != null) {
+          lines.push(`> ⚠️ **Settle:** ${segmentSettle.note}`, '');
+        }
         const settlePath =
           namedSettlePath != null && fs.existsSync(namedSettlePath)
             ? namedSettlePath

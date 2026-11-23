@@ -36,6 +36,7 @@
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
+import {snapshotExists} from './snapshot-index.js';
 
 /** How the per-rung cycle axis was obtained, for disclosure in the report. */
 export type CycleAxisSource =
@@ -136,6 +137,17 @@ export interface RunManifest {
    * should say UNSETTLED rather than quietly analysing the ladder alone.
    */
   settleRungPath: string | null;
+  /**
+   * Every settle rung of the run with the driven rung it followed: the run's
+   * own (`settle_rung`) and, in an A/B round, each arm's (`ab.<arm>.settle_rung`,
+   * or `rung_98_settle_off` on disk). A split run settles each isolate on its
+   * own, and a segment is adjudicated only against a settle rung inside it.
+   */
+  settleRungs: Array<{
+    path: string;
+    afterRung: number | null;
+    arm: string | null;
+  }>;
   /**
    * How the settle idle ran: its length, whether `auto` stopped early because
    * post-GC heap went quiet, and the post-GC readings taken during it. Null
@@ -390,6 +402,75 @@ export function workerHeapOf(workers: unknown): number | null {
   return used.length > 0 ? used.reduce((a, b) => a + b, 0) : null;
 }
 
+/** File name of an A/B round's OFF-arm settle rung, captured before the reload. */
+export const OFF_SETTLE_RUNG_BASENAME = 'rung_98_settle_off.heapsnapshot';
+
+function collectSettleRungs(
+  raw: Record<string, unknown>,
+  file: string,
+): RunManifest['settleRungs'] {
+  const out: RunManifest['settleRungs'] = [];
+  const take = (v: unknown, arm: string | null): void => {
+    const o = v as {path?: unknown; after_rung_index?: unknown} | null;
+    if (o == null || typeof o.path !== 'string') return;
+    out.push({
+      path: o.path,
+      afterRung:
+        typeof o.after_rung_index === 'number' ? o.after_rung_index : null,
+      arm,
+    });
+  };
+  take(raw.settle_rung, null);
+  const ab = raw.ab as Record<string, unknown> | undefined;
+  for (const arm of ['off', 'on']) {
+    take((ab?.[arm] as Record<string, unknown> | undefined)?.settle_rung, arm);
+  }
+  if (ab != null && !out.some(r => r.arm === 'off')) {
+    const dir = path.dirname(file);
+    for (const candidate of [
+      path.join(dir, 'snapshots', OFF_SETTLE_RUNG_BASENAME),
+      path.join(dir, OFF_SETTLE_RUNG_BASENAME),
+    ]) {
+      if (snapshotExists(candidate)) {
+        out.push({path: candidate, afterRung: null, arm: 'off'});
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The settle rung that belongs to `segment`, or why there is none.
+ *
+ * In a run that reloaded mid-ladder the round's settle rung was captured in
+ * the LAST isolate. Scoring an earlier segment against it compares two
+ * different heaps and reported "11 HELD / 3 DRAINED" for an A/B's OFF arm whose
+ * own isolate was never settled.
+ */
+export function settleRungForSegment(
+  manifest: RunManifest,
+  segment: LadderSegment | null,
+  segmentCount: number,
+): {path: string | null; note: string | null} {
+  if (segment == null || segmentCount <= 1) {
+    return {path: manifest.settleRungPath, note: null};
+  }
+  const isLast = segment.index === segmentCount - 1;
+  const inside = manifest.settleRungs.find(r =>
+    r.afterRung != null
+      ? r.afterRung >= segment.firstRung && r.afterRung <= segment.lastRung
+      : r.arm === 'off'
+        ? segment.index === 0
+        : isLast,
+  );
+  if (inside != null) return {path: inside.path, note: null};
+  return {
+    path: null,
+    note: `segment ${segment.index} (rungs ${segment.firstRung}-${segment.lastRung}) has no settle rung of its own, so it is NOT adjudicated: the round's settle rung was captured in ${isLast ? 'no segment' : `segment ${segmentCount - 1}`}'s isolate, after a reload.`,
+  };
+}
+
 export function loadRunManifest(runDir: string): RunManifest {
   const file = runDir.endsWith('.json')
     ? runDir
@@ -412,6 +493,7 @@ export function loadRunManifest(runDir: string): RunManifest {
     settleRaw != null && typeof settleRaw.path === 'string'
       ? settleRaw.path
       : null;
+  const settleRungs = collectSettleRungs(raw, file);
 
   const ageRaw = raw.isolate_age_at_baseline as
     {ms_since_navigation?: unknown} | null | undefined;
@@ -504,6 +586,7 @@ export function loadRunManifest(runDir: string): RunManifest {
       (raw.config as Record<string, unknown> | undefined)?.combos,
     ),
     settleRungPath,
+    settleRungs,
     runaway: parseRunaway(raw.samples),
     familiesFile:
       typeof raw.families_file === 'string' ? raw.families_file : null,

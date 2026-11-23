@@ -25,7 +25,13 @@ import {
   clipTableColumn,
 } from '../utils.js';
 import {normalizeClassName, splitClassKey} from './sequence-analysis.js';
-import {loadRunManifest, type SettleIdle} from '../run-manifest.js';
+import {
+  ladderSegments,
+  loadRunManifest,
+  settleRungForSegment,
+  type SettleIdle,
+} from '../run-manifest.js';
+import {readArms} from './ab-compare.js';
 
 interface ClassStats {
   count: number;
@@ -368,6 +374,57 @@ function describeSettleIdle(idle: SettleIdle | null): string {
   );
 }
 
+/** One isolate segment of a split run and the settle rung it is scored against. */
+interface SegmentSettle {
+  index: number;
+  arm: string | null;
+  firstRung: number;
+  lastRung: number;
+  busyPath: string;
+  baselinePath: string | null;
+  settledPath: string | null;
+  note: string | null;
+  cycles: number;
+}
+
+/** Per-segment settle pairs for a run that reloaded mid-ladder, else null. */
+export function segmentSettlePlan(runDir: string): SegmentSettle[] | null {
+  let manifest;
+  try {
+    manifest = loadRunManifest(runDir);
+  } catch {
+    return null;
+  }
+  const segments = ladderSegments(manifest);
+  if (segments.length <= 1) return null;
+  const armOf = new Map<string, string>();
+  try {
+    for (const arm of readArms(runDir)) {
+      for (const p of arm.paths) armOf.set(p, arm.name);
+    }
+  } catch {
+    // Not an A/B round: segments are reloads, with no arm names.
+  }
+  return segments.map(seg => {
+    const {path: settledPath, note} = settleRungForSegment(
+      manifest,
+      seg,
+      segments.length,
+    );
+    return {
+      index: seg.index,
+      arm: armOf.get(seg.paths[0]) ?? null,
+      firstRung: seg.firstRung,
+      lastRung: seg.lastRung,
+      busyPath: seg.paths[seg.paths.length - 1],
+      baselinePath: seg.paths.length > 1 ? seg.paths[0] : null,
+      settledPath,
+      note,
+      cycles: seg.spanCycles,
+    };
+  });
+}
+
 export function registerSettleCheck(server: McpServer): void {
   server.tool(
     'memlab_settle_check',
@@ -463,7 +520,251 @@ export function registerSettleCheck(server: McpServer): void {
         // Cycles driven, to rank survivors by rate (run_dir only).
         let cycles: number | null = null;
 
+        const analyzePair = async (
+          busyHist: Map<string, ClassStats>,
+          settledHist: Map<string, ClassStats>,
+          baseHist: Map<string, ClassStats> | null,
+          source: string,
+          cycles: number | null,
+          settledPathForTrace: string | null,
+          title: string,
+        ): Promise<string[]> => {
+          const rows: Array<{
+            key: string;
+            base: number;
+            busy: number;
+            idle: number;
+            verdict: Verdict;
+            reclaimed: number;
+          }> = [];
+
+          for (const [key, busyStats] of busyHist) {
+            const base = baseHist?.get(key)?.count ?? 0;
+            const idle = settledHist.get(key)?.count ?? 0;
+            const grew = busyStats.count - base;
+            if (grew < min_growth) continue;
+            rows.push({
+              key,
+              base,
+              busy: busyStats.count,
+              idle,
+              verdict: classify(base, busyStats.count, idle),
+              reclaimed: busyStats.count - idle,
+            });
+          }
+
+          // Whether a baseline EXISTS, not whether the caller named one by
+          // handle. `run_dir` resolves and loads a baseline rung itself, so
+          // keying the verdict on `baseline_handle` threw away a 1.1 GB load
+          // and reported the weaker "ranks reclamation, not leaks" wording on
+          // the path that actually had the stronger evidence.
+          const hasBaseline = baseHist != null;
+          const baselineLabel =
+            baseline_handle ?? "the run dir's baseline rung";
+
+          if (rows.length === 0) {
+            return [
+              `No class grew by at least ${formatNumber(min_growth)} between ${hasBaseline ? baselineLabel : '(no baseline)'} and ${busy_handle ?? 'the last driven rung'}. Lower min_growth, or check that the rungs are in the right order (busy, then settled).`,
+            ];
+          }
+
+          rows.sort((a, b) => b.busy - b.idle - (a.busy - a.idle));
+          const held = rows.filter(
+            r => r.verdict === 'held' || r.verdict === 'still-growing',
+          );
+          const drained = rows.filter(r => r.verdict === 'drained');
+
+          const busyTotal = totalSelfSize(busyHist);
+          const settledTotal = totalSelfSize(settledHist);
+
+          const lines: string[] = [
+            title,
+            '',
+            source,
+            `Heap self size ${formatBytes(busyTotal)} → ${formatBytes(settledTotal)} (${settledTotal <= busyTotal ? '−' : '+'}${formatBytes(Math.abs(busyTotal - settledTotal))} reclaimed by settling).`,
+            '',
+            !hasBaseline
+              ? `**No baseline given, so this ranks reclamation, not leaks.** ${drained.length} class(es) came back almost entirely (in-flight work) and ${held.length} stayed — but "stayed" here includes every large standing population that was never part of the burst, because without a pre-activity rung there is no growth to measure the reclamation against. Supply one to turn this into a leak verdict: pass \`baseline_handle\`, or use a \`run_dir\` whose round has more than one driven rung (the first is taken as the baseline).`
+              : held.length === 0
+                ? '**Everything that grew came back.** No class survived idle + GC, so the growth in this round was in-flight work, not retention. There is nothing here to fix.'
+                : `**${held.length} class(es) survived idle + GC** and ${drained.length} drained. Only the survivors are leak candidates — the drained ones were backlog and should not be reported as findings.`,
+            ...(hasBaseline && cycles != null && held.length > 0
+              ? heldPerCycleLine(held, cycles)
+              : []),
+            '',
+          ];
+
+          const headers = hasBaseline
+            ? ['Class', 'baseline', 'busy', 'settled', 'reclaimed', 'Verdict']
+            : ['Class', 'busy', 'settled', 'reclaimed', 'Verdict'];
+          const rightCols = hasBaseline
+            ? new Set([1, 2, 3, 4])
+            : new Set([1, 2, 3]);
+          const tableRows = rows.slice(0, limit).map(r => {
+            const {type, name} = splitClassKey(r.key);
+            const label = `${name} (${type})`;
+            const cells = hasBaseline
+              ? [
+                  label,
+                  formatNumber(r.base),
+                  formatNumber(r.busy),
+                  formatNumber(r.idle),
+                  formatNumber(r.reclaimed),
+                ]
+              : [
+                  label,
+                  formatNumber(r.busy),
+                  formatNumber(r.idle),
+                  formatNumber(r.reclaimed),
+                ];
+            const note = hasBaseline
+              ? VERDICT_NOTE[r.verdict]
+              : VERDICT_NOTE_NO_BASELINE[r.verdict];
+            return [...cells, `${r.verdict} — ${note}`];
+          });
+          const clippedRows = clipTableColumn(tableRows);
+          lines.push(markdownTable(headers, clippedRows.rows, rightCols));
+          if (clippedRows.footnotes.length > 0) {
+            lines.push(
+              '',
+              'Full class names of clipped rows:',
+              ...clippedRows.footnotes,
+            );
+          }
+
+          if (rows.length > limit) {
+            lines.push('', `_… and ${rows.length - limit} more; raise limit._`);
+          }
+          lines.push(
+            '',
+            '_A "drained" verdict is only as good as the settle: if the capture was taken before timers, network callbacks and storage writes finished, work still in flight will read as retention. Give it 30-60s of true idle and force GC first._',
+          );
+          if (trace_held && held.length > 0 && settledPathForTrace != null) {
+            // Only the classes that will be RENDERED. The trace is the
+            // expensive half of an already-expensive extra full load — id
+            // collection plus per-class sampling — and computing it for held
+            // classes past `limit` produced results the table then discarded.
+            const tracedKeys = held.slice(0, limit).map(r => r.key);
+            // Isolated. `trace_held` is an OPT-IN extra — a second full load of
+            // the settled rung, with path edges, which is the heaviest thing
+            // this tool can be asked to do and the likeliest to run out of
+            // memory. The HELD/DRAINED verdict above it is already computed and
+            // is the answer the caller came for; losing it to a failure in an
+            // add-on turns a slow success into a total one.
+            // `null` rather than an early return. Returning here skipped the
+            // "Next" guidance at the end of the tool — so the one output that
+            // most needs a next step, the one whose trace just failed, was the
+            // only one that did not get one.
+            let heads: Map<
+              string,
+              Array<{head: string; count: number}>
+            > | null = null;
+            try {
+              heads = await traceHeldClasses(
+                settledPathForTrace,
+                tracedKeys,
+                trace_sample,
+              );
+            } catch (e) {
+              lines.push(
+                '',
+                `> ⚠️ **\`trace_held\` failed** (${e instanceof Error ? e.message : String(e)}). It re-opens the settled rung with path edges, which is a second full load; the HELD/DRAINED verdict above did not need it and stands. Retry with a lower \`limit\`, or trace one class with \`memlab_retainer_trace\`.`,
+              );
+            }
+            if (heads != null) {
+              lines.push('', '### Where the survivors are rooted', '');
+              lines.push(
+                markdownTable(
+                  [
+                    'Class',
+                    'Sampled',
+                    'Dominant retainer path',
+                    'Share',
+                    'Distinct paths',
+                  ],
+                  held.slice(0, limit).map(r => {
+                    const rows = heads.get(r.key) ?? [];
+                    const total = rows.reduce((sum, h) => sum + h.count, 0);
+                    const top = rows[0];
+                    const {name} = splitClassKey(r.key);
+                    return [
+                      clampLabel(name, 44),
+                      formatNumber(total),
+                      top == null ? '—' : top.head,
+                      top == null || total === 0
+                        ? '—'
+                        : `${((top.count / total) * 100).toFixed(0)}%`,
+                      formatNumber(rows.length),
+                    ];
+                  }),
+                  new Set([1, 3, 4]),
+                ),
+              );
+              lines.push(
+                '',
+                '_One distinct path at 100% means ONE root cause and one fix. Several mean several — and a fix ' +
+                  'that closes the largest leaves the rest retaining the population. Each path is the nearest three ' +
+                  'NAMED hops, root-ward first; the literal top of a path is always `(GC roots)` and groups nothing. ' +
+                  'A class with 0 sampled has no traceable instance in the settled rung._',
+              );
+            }
+          }
+          if (held.length > 0 && hasBaseline) {
+            lines.push(
+              '',
+              trace_held
+                ? '**Next:** `memlab_retainer_trace` on an example instance behind the dominant head above — that is the trace worth putting in a fix.'
+                : '**Next:** for each survivor, `memlab_retainer_trace` on an example instance in the settled snapshot — that is the trace worth putting in a fix. `trace_held: true` groups every survivor by root-path head in one call instead.',
+            );
+          }
+          return lines;
+        };
+
         if (run_dir != null) {
+          const plan = segmentSettlePlan(run_dir);
+          if (plan != null) {
+            const out: string[] = [
+              `## Settle check: ${plan.length} isolate segments, each against its own settle rung`,
+              '',
+              `run_dir ${run_dir}`,
+              '_The page reloaded mid-ladder, so each segment is a different V8 isolate: a segment is scored only against a settle rung captured in it, over its own cycles._',
+            ];
+            for (const p of plan) {
+              const title = `### Segment ${p.index}${p.arm != null ? ` (${p.arm.toUpperCase()} arm)` : ''}: rungs ${p.firstRung}-${p.lastRung}, ${formatNumber(p.cycles)} cycles`;
+              if (p.settledPath == null) {
+                out.push('', title, '', `**Not adjudicated.** ${p.note ?? ''}`);
+                continue;
+              }
+              const busyH = await withSnapshotAt(p.busyPath, async snap =>
+                histogram(snap),
+              );
+              const settledH = await withSnapshotAt(p.settledPath, async snap =>
+                histogram(snap),
+              );
+              const baseH =
+                p.baselinePath != null
+                  ? await withSnapshotAt(p.baselinePath, async snap =>
+                      histogram(snap),
+                    )
+                  : null;
+              out.push(
+                '',
+                ...(await analyzePair(
+                  busyH,
+                  settledH,
+                  baseH,
+                  `busy   : ${path.basename(p.busyPath)}\nsettled: ${path.basename(p.settledPath)}` +
+                    (p.baselinePath != null
+                      ? `\nbaseline: ${path.basename(p.baselinePath)}`
+                      : ''),
+                  p.cycles > 0 ? p.cycles : null,
+                  p.settledPath,
+                  title,
+                )),
+              );
+            }
+            return toolResult(out.join('\n'));
+          }
           const pair = resolveSettlePair(run_dir);
           if (typeof pair === 'string') {
             return errorResult(new Error(pair));
@@ -538,192 +839,19 @@ export function registerSettleCheck(server: McpServer): void {
           source = `handles ${busy_handle} -> ${settled_handle}`;
         }
 
-        const rows: Array<{
-          key: string;
-          base: number;
-          busy: number;
-          idle: number;
-          verdict: Verdict;
-          reclaimed: number;
-        }> = [];
-
-        for (const [key, busyStats] of busyHist) {
-          const base = baseHist?.get(key)?.count ?? 0;
-          const idle = settledHist.get(key)?.count ?? 0;
-          const grew = busyStats.count - base;
-          if (grew < min_growth) continue;
-          rows.push({
-            key,
-            base,
-            busy: busyStats.count,
-            idle,
-            verdict: classify(base, busyStats.count, idle),
-            reclaimed: busyStats.count - idle,
-          });
-        }
-
-        // Whether a baseline EXISTS, not whether the caller named one by
-        // handle. `run_dir` resolves and loads a baseline rung itself, so
-        // keying the verdict on `baseline_handle` threw away a 1.1 GB load
-        // and reported the weaker "ranks reclamation, not leaks" wording on
-        // the path that actually had the stronger evidence.
-        const hasBaseline = baseHist != null;
-        const baselineLabel = baseline_handle ?? "the run dir's baseline rung";
-
-        if (rows.length === 0) {
-          return toolResult(
-            `No class grew by at least ${formatNumber(min_growth)} between ${hasBaseline ? baselineLabel : '(no baseline)'} and ${busy_handle ?? 'the last driven rung'}. Lower min_growth, or check that the rungs are in the right order (busy, then settled).`,
-          );
-        }
-
-        rows.sort((a, b) => b.busy - b.idle - (a.busy - a.idle));
-        const held = rows.filter(
-          r => r.verdict === 'held' || r.verdict === 'still-growing',
-        );
-        const drained = rows.filter(r => r.verdict === 'drained');
-
-        const busyTotal = totalSelfSize(busyHist);
-        const settledTotal = totalSelfSize(settledHist);
-
-        const lines: string[] = [
-          '## Settle check',
-          '',
-          source,
-          `Heap self size ${formatBytes(busyTotal)} → ${formatBytes(settledTotal)} (${settledTotal <= busyTotal ? '−' : '+'}${formatBytes(Math.abs(busyTotal - settledTotal))} reclaimed by settling).`,
-          '',
-          !hasBaseline
-            ? `**No baseline given, so this ranks reclamation, not leaks.** ${drained.length} class(es) came back almost entirely (in-flight work) and ${held.length} stayed — but "stayed" here includes every large standing population that was never part of the burst, because without a pre-activity rung there is no growth to measure the reclamation against. Supply one to turn this into a leak verdict: pass \`baseline_handle\`, or use a \`run_dir\` whose round has more than one driven rung (the first is taken as the baseline).`
-            : held.length === 0
-              ? '**Everything that grew came back.** No class survived idle + GC, so the growth in this round was in-flight work, not retention. There is nothing here to fix.'
-              : `**${held.length} class(es) survived idle + GC** and ${drained.length} drained. Only the survivors are leak candidates — the drained ones were backlog and should not be reported as findings.`,
-          ...(hasBaseline && cycles != null && held.length > 0
-            ? heldPerCycleLine(held, cycles)
-            : []),
-          '',
-        ];
-
-        const headers = hasBaseline
-          ? ['Class', 'baseline', 'busy', 'settled', 'reclaimed', 'Verdict']
-          : ['Class', 'busy', 'settled', 'reclaimed', 'Verdict'];
-        const rightCols = hasBaseline
-          ? new Set([1, 2, 3, 4])
-          : new Set([1, 2, 3]);
-        const tableRows = rows.slice(0, limit).map(r => {
-          const {type, name} = splitClassKey(r.key);
-          const label = `${name} (${type})`;
-          const cells = hasBaseline
-            ? [
-                label,
-                formatNumber(r.base),
-                formatNumber(r.busy),
-                formatNumber(r.idle),
-                formatNumber(r.reclaimed),
-              ]
-            : [
-                label,
-                formatNumber(r.busy),
-                formatNumber(r.idle),
-                formatNumber(r.reclaimed),
-              ];
-          const note = hasBaseline
-            ? VERDICT_NOTE[r.verdict]
-            : VERDICT_NOTE_NO_BASELINE[r.verdict];
-          return [...cells, `${r.verdict} — ${note}`];
-        });
-        const clippedRows = clipTableColumn(tableRows);
-        lines.push(markdownTable(headers, clippedRows.rows, rightCols));
-        if (clippedRows.footnotes.length > 0) {
-          lines.push(
-            '',
-            'Full class names of clipped rows:',
-            ...clippedRows.footnotes,
-          );
-        }
-
-        if (rows.length > limit) {
-          lines.push('', `_… and ${rows.length - limit} more; raise limit._`);
-        }
-        lines.push(
-          '',
-          '_A "drained" verdict is only as good as the settle: if the capture was taken before timers, network callbacks and storage writes finished, work still in flight will read as retention. Give it 30-60s of true idle and force GC first._',
-        );
-        if (trace_held && held.length > 0 && settledPathForTrace != null) {
-          // Only the classes that will be RENDERED. The trace is the
-          // expensive half of an already-expensive extra full load — id
-          // collection plus per-class sampling — and computing it for held
-          // classes past `limit` produced results the table then discarded.
-          const tracedKeys = held.slice(0, limit).map(r => r.key);
-          // Isolated. `trace_held` is an OPT-IN extra — a second full load of
-          // the settled rung, with path edges, which is the heaviest thing
-          // this tool can be asked to do and the likeliest to run out of
-          // memory. The HELD/DRAINED verdict above it is already computed and
-          // is the answer the caller came for; losing it to a failure in an
-          // add-on turns a slow success into a total one.
-          // `null` rather than an early return. Returning here skipped the
-          // "Next" guidance at the end of the tool — so the one output that
-          // most needs a next step, the one whose trace just failed, was the
-          // only one that did not get one.
-          let heads: Map<string, Array<{head: string; count: number}>> | null =
-            null;
-          try {
-            heads = await traceHeldClasses(
+        return toolResult(
+          (
+            await analyzePair(
+              busyHist,
+              settledHist,
+              baseHist,
+              source,
+              cycles,
               settledPathForTrace,
-              tracedKeys,
-              trace_sample,
-            );
-          } catch (e) {
-            lines.push(
-              '',
-              `> ⚠️ **\`trace_held\` failed** (${e instanceof Error ? e.message : String(e)}). It re-opens the settled rung with path edges, which is a second full load; the HELD/DRAINED verdict above did not need it and stands. Retry with a lower \`limit\`, or trace one class with \`memlab_retainer_trace\`.`,
-            );
-          }
-          if (heads != null) {
-            lines.push('', '### Where the survivors are rooted', '');
-            lines.push(
-              markdownTable(
-                [
-                  'Class',
-                  'Sampled',
-                  'Dominant retainer path',
-                  'Share',
-                  'Distinct paths',
-                ],
-                held.slice(0, limit).map(r => {
-                  const rows = heads.get(r.key) ?? [];
-                  const total = rows.reduce((sum, h) => sum + h.count, 0);
-                  const top = rows[0];
-                  const {name} = splitClassKey(r.key);
-                  return [
-                    clampLabel(name, 44),
-                    formatNumber(total),
-                    top == null ? '—' : top.head,
-                    top == null || total === 0
-                      ? '—'
-                      : `${((top.count / total) * 100).toFixed(0)}%`,
-                    formatNumber(rows.length),
-                  ];
-                }),
-                new Set([1, 3, 4]),
-              ),
-            );
-            lines.push(
-              '',
-              '_One distinct path at 100% means ONE root cause and one fix. Several mean several — and a fix ' +
-                'that closes the largest leaves the rest retaining the population. Each path is the nearest three ' +
-                'NAMED hops, root-ward first; the literal top of a path is always `(GC roots)` and groups nothing. ' +
-                'A class with 0 sampled has no traceable instance in the settled rung._',
-            );
-          }
-        }
-        if (held.length > 0 && hasBaseline) {
-          lines.push(
-            '',
-            trace_held
-              ? '**Next:** `memlab_retainer_trace` on an example instance behind the dominant head above — that is the trace worth putting in a fix.'
-              : '**Next:** for each survivor, `memlab_retainer_trace` on an example instance in the settled snapshot — that is the trace worth putting in a fix. `trace_held: true` groups every survivor by root-path head in one call instead.',
-          );
-        }
-        return toolResult(lines.join('\n'));
+              '## Settle check',
+            )
+          ).join('\n'),
+        );
       } catch (err) {
         return errorResult(err);
       }
