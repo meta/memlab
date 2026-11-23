@@ -42,40 +42,71 @@ async function ladderLines(
   limit: number,
   title: string,
 ): Promise<string[]> {
-  const perRung: Array<Map<string, NativePinGroup>> = [];
-  const totals: number[] = [];
+  // A rung that fails to load reads `—`; the rest are still measured.
+  const perRung: Array<Map<string, NativePinGroup> | null> = [];
+  const totals: Array<number | null> = [];
+  const failed: string[] = [];
   for (const p of paths) {
-    const r = await withSnapshotAt(p, snap => nativePins(snap));
-    perRung.push(new Map(r.groups.map(g => [g.label, g])));
-    totals.push(r.total);
+    try {
+      const r = await withSnapshotAt(p, snap => nativePins(snap));
+      perRung.push(new Map(r.groups.map(g => [g.label, g])));
+      totals.push(r.total);
+    } catch (err) {
+      perRung.push(null);
+      totals.push(null);
+      failed.push(
+        `${p.replace(/^.*\//, '')}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
   const axis = axisIn != null && axisIn.length === paths.length ? axisIn : null;
   const xs = axis ?? paths.map((_, i) => i);
   const unit = axis != null ? 'cycle' : 'rung';
-  const last = perRung[perRung.length - 1];
+  const slopeOf = (ys: Array<number | null>): string => {
+    const pts = ys
+      .map((y, i) => ({x: xs[i], y}))
+      .filter((pt): pt is {x: number; y: number} => pt.y != null);
+    if (pts.length < 2) return '—';
+    const {slope} = linearFit(
+      pts.map(pt => pt.x),
+      pts.map(pt => pt.y),
+    );
+    return `${slope >= 0 ? '+' : ''}${slope.toFixed(2)}`;
+  };
+  const failedLines =
+    failed.length > 0
+      ? [
+          '',
+          `${failed.length} rung(s) failed to load:`,
+          ...failed.map(f => `- ${f}`),
+        ]
+      : [];
+  const last = [...perRung].reverse().find(m => m != null);
+  if (last == null) return [title, '', 'No rung loaded.', ...failedLines];
   const labels = [...last.values()]
     .sort((a, b) => b.bytes - a.bytes)
     .slice(0, limit)
     .map(g => g.label);
   const kb = (b: number) => Math.round(b / 1024);
   const rows = labels.map(label => {
-    const series = perRung.map(m => kb(m.get(label)?.bytes ?? 0));
-    const slope = linearFit(xs, series).slope;
+    const series = perRung.map(m =>
+      m == null ? null : kb(m.get(label)?.bytes ?? 0),
+    );
     const g = last.get(label) as NativePinGroup;
     return [
       clampLabelTo(label, 90),
-      ...series.map(formatNumber),
-      `${slope >= 0 ? '+' : ''}${slope.toFixed(2)}`,
+      ...series.map(v => (v == null ? '—' : formatNumber(v))),
+      slopeOf(series),
       formatNumber(g.pinners),
       classesCell(g),
       `@${g.sample}`,
     ];
   });
-  const totalSlope = linearFit(xs, totals.map(kb)).slope;
+  const totalsKb = totals.map(t => (t == null ? null : kb(t)));
   return [
     title,
     '',
-    `Native KB pinned by JS per rung: ${totals.map(t => formatNumber(kb(t))).join(' → ')} (${totalSlope >= 0 ? '+' : ''}${totalSlope.toFixed(2)} KB/${unit}).`,
+    `Native KB pinned by JS per rung: ${totalsKb.map(t => (t == null ? '—' : formatNumber(t))).join(' → ')} (${slopeOf(totalsKb)} KB/${unit}).`,
     '',
     markdownTable(
       [
@@ -93,6 +124,7 @@ async function ladderLines(
         paths.map((_, i) => i + 1).concat([paths.length + 1, paths.length + 2]),
       ),
     ),
+    ...failedLines,
   ];
 }
 
@@ -168,8 +200,13 @@ export function registerNativePinCost(server: McpServer): void {
               '',
               '_The page reloaded mid-run, so each segment is a different V8 isolate and is read on its own._',
             ];
+            // By file name: run.json may record a rung relative to the round
+            // while the manifest resolves it.
+            const base = (p: string) => p.replace(/^.*\//, '');
             for (const seg of segs) {
-              const arm = arms.find(a => a.paths.includes(seg.paths[0]));
+              const arm = arms.find(a =>
+                a.paths.some(p => base(p) === base(seg.paths[0])),
+              );
               out.push(
                 '',
                 ...(await ladderLines(

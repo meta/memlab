@@ -51,7 +51,11 @@ function pinnerLabel(snapshot: IHeapSnapshot, n: IHeapNode): string {
   return n.name;
 }
 
-export function nativePins(snapshot: IHeapSnapshot): {
+export function nativePins(
+  snapshot: IHeapSnapshot,
+  // Totals only: skips labelling every pinner, for callers that read `total`.
+  opts: {totalOnly?: boolean} = {},
+): {
   total: number;
   unpinned: number;
   groups: NativePinGroup[];
@@ -95,6 +99,7 @@ export function nativePins(snapshot: IHeapSnapshot): {
       return;
     }
     total += node.self_size;
+    if (opts.totalOnly === true) return;
     let row = byPinner.get(p);
     if (row == null) {
       row = {bytes: 0, natives: 0, classes: new Map()};

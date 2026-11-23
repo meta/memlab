@@ -94,7 +94,7 @@ type MetricSpec = string | {code: string; cap?: number};
 const RAW_TOTAL = 'heap self KB (raw)';
 const PROD_TOTAL = 'heap self KB (production-only)';
 const NATIVE_TOTAL = 'native KB pinned by JS';
-const UASM_TOTAL = 'measureUserAgentSpecificMemory MB';
+const UASM_TOTAL = 'measureUserAgentSpecificMemory KB';
 
 /**
  * Total self size in KB (MB would sit under the verdict's 0.01/cycle noise
@@ -126,7 +126,7 @@ function heapTotals(snap: IHeapSnapshot): {
   return {
     raw: kb(raw),
     prod: reached == null ? null : kb(prod),
-    native: kb(nativePins(snap).total),
+    native: kb(nativePins(snap, {totalOnly: true}).total),
   };
 }
 
@@ -371,7 +371,8 @@ export async function abCompare({
       const manifest = loadRunManifest(run_dir);
       manifest.paths.forEach((p, i) => {
         const u = manifest.uaMemoryPerRung[i];
-        if (u != null) uasmOf.set(p, u.totalMb);
+        // KB, like the heap rows, to clear the verdict's noise floor.
+        if (u != null) uasmOf.set(p, Math.round(u.totalMb * 1024));
       });
     } catch {
       // The arms were read; a manifest this module cannot parse further

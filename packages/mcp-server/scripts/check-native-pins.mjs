@@ -82,4 +82,8 @@ test('natives are charged to the nearest JS dominator, grouped by pinner', () =>
   assert.equal(g.bytes, 500);
   assert.deepEqual(g.classes[0], ['blink::SoftNavigationContext', 300]);
   assert.equal(g.sample, 10);
+  const totalOnly = nativePins(snap, {totalOnly: true});
+  assert.equal(totalOnly.total, 500);
+  assert.equal(totalOnly.unpinned, 50);
+  assert.deepEqual(totalOnly.groups, []);
 });
