@@ -395,6 +395,59 @@ await shapeCheck(
 );
 
 await shapeCheck(
+  'eval byClass: every id resolves through getNodeById, natives included',
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: [
+        "const natives = helpers.classCounts({type: 'native'}).map(c => c.name);",
+        'let victim = null;',
+        'snapshot.nodes.forEach(n => {',
+        "  if (victim == null && n.type === 'native' && n.name === natives[0]) victim = n.id;",
+        '});',
+        // The case the class index exists for: an id the snapshot's own id
+        // index does not map.
+        'const dict = snapshot._nodeId2NodeIdx;',
+        'const at = dict.get(victim);',
+        'dict.fastStore.delete(victim);',
+        'const missingBefore = snapshot.getNodeById(victim) == null;',
+        'const ids = helpers.byClass(natives[0], {instancesOnly: false});',
+        'const strayResolves = snapshot.getNodeById(victim)?.name === natives[0];',
+        'const strayInIter = helpers.iterByClass(natives[0], {instancesOnly: false}).some(n => n.id === victim);',
+        'dict.set(victim, at);',
+        'let total = 0, resolved = 0;',
+        'for (const name of natives) {',
+        '  for (const id of helpers.byClass(name, {instancesOnly: false})) {',
+        '    total++;',
+        '    if (snapshot.getNodeById(id)?.name === name) resolved++;',
+        '  }',
+        '}',
+        'result = {classes: natives.length, total, resolved, missingBefore, listed: ids.includes(victim), strayResolves, strayInIter};',
+      ].join('\n'),
+    });
+    const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(
+      json.classes > 0 && json.total > 0,
+      `natives: ${text.slice(0, 300)}`,
+    );
+    assert(
+      json.resolved === json.total,
+      `resolved ${json.resolved}/${json.total}`,
+    );
+    assert(
+      json.missingBefore &&
+        json.listed &&
+        json.strayResolves &&
+        json.strayInIter,
+      `stray id: ${JSON.stringify(json)}`,
+    );
+    assert(
+      text.includes("1 id(s) the snapshot's id index does not map"),
+      `footer: ${text.slice(-600)}`,
+    );
+  },
+);
+
+await shapeCheck(
   'eval result: nodes, Maps and Sets come back as JSON, not [object Object]',
   async () => {
     const {text} = await call('memlab_eval', {

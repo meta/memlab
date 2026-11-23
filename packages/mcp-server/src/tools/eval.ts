@@ -636,7 +636,19 @@ let evalContext: vm.Context | null = null;
 
 function resetEdgeSkips(): void {
   edgeSkips = {iteration: 0, malformed: 0, target: 0, firstError: null};
+  idMisses = new Map();
 }
+
+/**
+ * Class-index nodes whose id the snapshot's id index does not map back to
+ * them, per class, for the eval currently running. `unresolved` ids are
+ * answered from the class index instead; `shared` ids belong to another node
+ * too, so `snapshot.getNodeById` returns that one.
+ */
+let idMisses = new Map<string, {unresolved: number; shared: number}>();
+
+/** Ids the snapshot's own index misses, mapped to their node positions. */
+const STRAY_IDS = '__strayIdIndex';
 
 function recordEdgeSkip(
   kind: 'iteration' | 'malformed' | 'target',
@@ -910,6 +922,22 @@ function toNodeId(x: NodeRef): number {
   return (x as {id?: number}).id ?? ((x as {ref?: number}).ref as number);
 }
 
+/**
+ * `snapshot.getNodeById`, falling back to the ids the class index found the
+ * snapshot's id index missing. A helper that returns an id must return one
+ * this resolves.
+ */
+function nodeByIdOrStray(
+  snapshot: IHeapSnapshot,
+  id: number,
+): IHeapNode | null {
+  const hit = snapshot.getNodeById(id);
+  if (hit != null) return hit;
+  const strays = getEvalScratch()[STRAY_IDS] as Map<number, number> | undefined;
+  const at = strays?.get(id);
+  return at == null ? null : (snapshot.nodes.get(at) ?? null);
+}
+
 function wrapSnapshot(snapshot: unknown, budget: VisitBudget): unknown {
   return new Proxy(snapshot as object, {
     get(target, prop, receiver) {
@@ -921,10 +949,8 @@ function wrapSnapshot(snapshot: unknown, budget: VisitBudget): unknown {
       // refuse to report a census whose walk skipped edges.
       if (prop === '__skippedEdges') return edgeSkipReport();
       if (prop === 'getNodeById') {
-        const orig = (
-          target as Record<string, (...args: unknown[]) => unknown>
-        ).getNodeById.bind(target);
-        return (x: NodeRef) => wrapNode(orig(toNodeId(x)));
+        return (x: NodeRef) =>
+          wrapNode(nodeByIdOrStray(target as IHeapSnapshot, toNodeId(x)));
       }
       if (prop === 'nodes') {
         const nodes = Reflect.get(target, prop, receiver);
@@ -1743,7 +1769,7 @@ export function registerEval(server: McpServer): void {
             'pathBetween(fromId, toId, {maxNodes?})->{found,exhausted,path[]}, ' +
             'save(name, value) / load(name, {allowCrossSnapshot?}) / listSaved() (SESSION-scoped, survives loading another snapshot) }), ' +
             'and standard JS built-ins. ' +
-            'NOTE: `helpers.byClass()` returns IDS, and not every id resolves — `snapshot.getNodeById()` returns null for many native classes (AudioContext, OpusRecorder, …), so `byClass(x).map(id => getNodeById(id).referrers)` throws on the first try. Use `helpers.nodesByClass(name)` / `helpers.iterByClass(name)`, which return node objects and skip the unresolvable ones. `helpers.props()` on an unresolvable node now returns `{__unavailable: true}` rather than `{}`, so "no properties" and "could not read properties" are distinguishable. ' +
+            'NOTE: `helpers.byClass()` returns IDS, and every one resolves through `snapshot.getNodeById()`, natives included (an id the snapshot index misses is resolved from the class index, and the footer counts them). `helpers.nodesByClass(name)` / `helpers.iterByClass(name)` return the node objects directly. `helpers.props()` on an unresolvable node returns `{__unavailable: true}` rather than `{}`, so "no properties" and "could not read properties" are distinguishable. ' +
             'NOTE: `node.retainedSize` / `node.retained_size` THROW inside eval — they can read back ~0 for every node on some loads, so a silent wrong number is refused; use helpers.retainedSize(id). `node.self_size` is reliable. ' +
             'Node traversal: use node.references (outgoing) and node.referrers (incoming) with for-of or array methods (.filter/.map/.find/.length); node.props is {name: node}. A top-level `return` sets result. ' +
             'Edge properties: .name_or_index, .type, .toNode, .fromNode.',
@@ -2496,7 +2522,7 @@ export async function runEval({
       nodeOrId: NodeRef | null | undefined,
     ): IHeapNode | null => {
       if (nodeOrId == null) return null;
-      return snapshot.getNodeById(toNodeId(nodeOrId));
+      return nodeByIdOrStray(snapshot, toNodeId(nodeOrId));
     };
 
     // `<Module>.<edge>.<edge>` — the same name at every rung, unlike an id.
@@ -3279,9 +3305,8 @@ export async function runEval({
         return {
           __unavailable: true,
           __reason:
-            'node not resolvable in the active snapshot — ids from ' +
-            'helpers.byClass() are not all resolvable (natives especially); ' +
-            'use helpers.iterByClass() to get node objects directly',
+            'node not resolvable in the active snapshot — an id from ' +
+            'another snapshot, or not a node id at all',
         };
       }
       const out: Record<string, unknown> = {};
@@ -3383,12 +3408,16 @@ export async function runEval({
     // only valid for the active snapshot (the scratch is keyed to it).
     const scratch = getEvalScratch();
     interface ClassTypeIndex {
+      /** Class name -> node POSITIONS (nodeIndex), not ids. */
       byClass: Map<string, number[]>;
       byTypename: Map<string, number[]>;
+      /** Classes whose ids have been checked against the id index. */
+      checked: Set<string>;
+      of: IHeapSnapshot;
     }
     const buildClassTypeIndex = (): ClassTypeIndex => {
       const cached = scratch.__classTypeIndex as ClassTypeIndex | undefined;
-      if (cached) return cached;
+      if (cached != null && cached.of === snapshot) return cached;
       const byClass = new Map<string, number[]>();
       const byTypename = new Map<string, number[]>();
       snapshot.nodes.forEach((node: IHeapNode) => {
@@ -3407,7 +3436,7 @@ export async function runEval({
           a = [];
           byClass.set(node.name, a);
         }
-        a.push(node.id);
+        a.push(node.nodeIndex);
         // `__typename` is a JS object property, so only object nodes can
         // carry one; skipping the edge walk for other types keeps the
         // widened index roughly as cheap as the object-only one.
@@ -3444,9 +3473,52 @@ export async function runEval({
           return false;
         });
       });
-      const idx: ClassTypeIndex = {byClass, byTypename};
+      const idx: ClassTypeIndex = {
+        byClass,
+        byTypename,
+        checked: new Set(),
+        of: snapshot,
+      };
       scratch.__classTypeIndex = idx;
       return idx;
+    };
+    /**
+     * The nodes of class `name`, straight from the index's positions, after
+     * checking once that each one's id resolves back to it. An id the
+     * snapshot's own index misses is added to the stray map, so
+     * `snapshot.getNodeById` resolves it too; an id another node also
+     * carries cannot be, and is counted.
+     */
+    const classNodes = (name: string): IHeapNode[] => {
+      const index = buildClassTypeIndex();
+      const nodes: IHeapNode[] = [];
+      for (const at of index.byClass.get(name) ?? []) {
+        const n = snapshot.nodes.get(at);
+        if (n != null) nodes.push(n);
+      }
+      if (!index.checked.has(name)) {
+        index.checked.add(name);
+        let unresolved = 0;
+        let shared = 0;
+        for (const n of nodes) {
+          const back = snapshot.getNodeById(n.id);
+          if (back == null) {
+            let strays = scratch[STRAY_IDS] as Map<number, number> | undefined;
+            if (strays == null) {
+              strays = new Map();
+              scratch[STRAY_IDS] = strays;
+            }
+            if (!strays.has(n.id)) strays.set(n.id, n.nodeIndex);
+            unresolved++;
+          } else if (back.nodeIndex !== n.nodeIndex) {
+            shared++;
+          }
+        }
+        if (unresolved + shared > 0) {
+          idMisses.set(name, {unresolved, shared});
+        }
+      }
+      return nodes;
     };
     /**
      * A class index entry is not necessarily an INSTANCE of that class. V8 names
@@ -3459,9 +3531,7 @@ export async function runEval({
      * `instancesOnly` (default true) drops those three shapes. Pass false to get
      * the raw index back.
      */
-    const isClassScaffolding = (id: number, className: string): boolean => {
-      const n = snapshot.getNodeById(id);
-      if (!n) return false;
+    const isClassScaffolding = (n: IHeapNode, className: string): boolean => {
       if (isCertainScaffolding(n, className)) return true;
       // A closure named like the class with a `prototype` property: the
       // constructor of a function-style class. An ordinary function has one
@@ -3507,23 +3577,23 @@ export async function runEval({
       name: string,
       opts?: {type?: string; instancesOnly?: boolean},
     ): number[] => {
-      const raw = buildClassTypeIndex().byClass.get(name) ?? [];
+      return classMembers(name, opts).map(n => n.id);
+    };
+    const classMembers = (
+      name: string,
+      opts?: {type?: string; instancesOnly?: boolean},
+    ): IHeapNode[] => {
       const want = opts?.type;
-      const ids =
-        want == null
-          ? raw
-          : raw.filter(id => snapshot.getNodeById(id)?.type === want);
-      if (opts?.instancesOnly === false) return ids;
-      const filtered = ids.filter(id => !isClassScaffolding(id, name));
+      const all = classNodes(name);
+      const typed = want == null ? all : all.filter(n => n.type === want);
+      if (opts?.instancesOnly === false) return typed;
+      const filtered = typed.filter(n => !isClassScaffolding(n, name));
       if (filtered.length > 0) return filtered;
       // The filter emptied the class. That is right when only certain
       // scaffolding was dropped (a class with no live instances counts 0); if
       // anything else was dropped, the heuristic is wrong for this shape, so
       // hand that back rather than report "not present".
-      return ids.filter(id => {
-        const n = snapshot.getNodeById(id);
-        return n != null && !isCertainScaffolding(n, name);
-      });
+      return typed.filter(n => !isCertainScaffolding(n, name));
     };
     const byTypename = (name: string): number[] =>
       buildClassTypeIndex().byTypename.get(name) ?? [];
@@ -4424,21 +4494,17 @@ export async function runEval({
     const nodesFromIds = (ids: number[]): IHeapNode[] => {
       const out: IHeapNode[] = [];
       for (const id of ids) {
-        const n = snapshot.getNodeById(id);
+        const n = nodeByIdOrStray(snapshot, id);
         if (n) out.push(n);
       }
       return out;
     };
+    // Node objects from the index's positions, so a node whose id another
+    // node shares is still returned as itself.
     const iterByClass = (
       name: string,
       opts?: {type?: string; instancesOnly?: boolean},
-    ) => nodesFromIds(byClass(name, opts)).map(wrapNode);
-    // Same thing under the name people actually reach for. `byClass` returns
-    // IDS, and not all of them resolve through `snapshot.getNodeById` — native
-    // classes (AudioContext, OpusRecorder, Recorder) come back null, so the
-    // reflexive `byClass(x).map(id => getNodeById(id).referrers)` throws
-    // "Cannot read properties of null" on the first attempt, every time. This
-    // returns node objects and skips the unresolvable ones.
+    ) => classMembers(name, opts).map(wrapNode);
     const nodesByClass = iterByClass;
     const iterByType = (type: string) =>
       nodesFromIds(buildTypeIndex().get(type) ?? []).map(wrapNode);
@@ -5724,6 +5790,22 @@ export async function runEval({
     }
 
     const footer: string[] = [];
+    for (const [cls, miss] of idMisses) {
+      footer.push(
+        `ℹ️ \`${cls}\`: ` +
+          [
+            miss.unresolved > 0
+              ? `${formatNumber(miss.unresolved)} id(s) the snapshot's id index does not map, resolved from the class index instead (\`snapshot.getNodeById\` and every helper accept them)`
+              : null,
+            miss.shared > 0
+              ? `${formatNumber(miss.shared)} id(s) another node also carries, so \`snapshot.getNodeById\` returns that node — use \`helpers.iterByClass\`, which returns these nodes themselves`
+              : null,
+          ]
+            .filter(x => x != null)
+            .join('; ') +
+          '.',
+      );
+    }
     const heapBytes = getSnapshotMetadata()?.totalSize ?? 0;
     const implausible = implausibleByteFields(sandbox.result, heapBytes);
     if (implausible.length > 0) {
