@@ -118,6 +118,12 @@ globalThis.__fixtureModels = [
   new FixtureMsg('fixture-m1'),
   new FixtureMsg('fixture-m1'),
 ];
+// A promise that never settles, gaining `.then` reactions between snapshots.
+function fixturePendingHandler() {}
+globalThis.__fixturePending = new Promise(() => {});
+for (let i = 0; i < 5; i++) {
+  globalThis.__fixturePending.then(fixturePendingHandler);
+}
 // Retained errors: one template held twice, plus error text in a string.
 globalThis.__fixtureErrors = [
   new Error('fixture-error id=1'),
@@ -131,6 +137,9 @@ const nodeSnapshot = v8.writeHeapSnapshot(path.join(tmp, 'node.heapsnapshot'));
 globalThis.__fixtureLongStrings = Array.from({length: 5}, (_, i) =>
   JSON.parse(JSON.stringify(`fixture-long-string-${i}-`.padEnd(400, 'z'))),
 );
+for (let i = 0; i < 3; i++) {
+  globalThis.__fixturePending.then(fixturePendingHandler);
+}
 globalThis.__fixtureErrors.push(
   new Error('fixture-error id=3'),
   new RangeError('fixture-late 5'),
@@ -534,6 +543,44 @@ await shapeCheck(
       ),
       `string template: ${text.slice(0, 1500)}`,
     );
+  },
+);
+
+await shapeCheck(
+  'pending_promises: reactions per creator across rungs, and handlers in eval',
+  async () => {
+    const {text} = await call('memlab_pending_promises', {
+      paths: [nodeSnapshot, nodeSnapshotLater],
+      group_by: 'creator',
+    });
+    assert(
+      /`?fixturePendingHandler — [^|]*\| +5 \| +8 \| +\+3\.000 \|/.test(text),
+      `creator row: ${text.slice(0, 1200)}`,
+    );
+    const byPromise = await call('memlab_pending_promises', {
+      paths: [nodeSnapshot, nodeSnapshotLater],
+    });
+    assert(
+      /First handler/.test(byPromise.text) &&
+        /fixturePendingHandler — /.test(byPromise.text),
+      `first handler column: ${byPromise.text.slice(0, 1200)}`,
+    );
+    await call('memlab_load_snapshot', {file_path: nodeSnapshotLater});
+    const ev = await call('memlab_eval', {
+      code: [
+        "const p = helpers.allByEdgeName('__fixturePending')[0].target;",
+        'const r = helpers.promiseReactions(p);',
+        'result = {count: r.count, state: r.state, fns: r.handlers.map(h => h.fn)};',
+      ].join('\n'),
+    });
+    const json = JSON.parse(ev.text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(
+      json.count === 8 &&
+        json.state === 'pending' &&
+        json.fns.includes('fixturePendingHandler'),
+      `promiseReactions: ${JSON.stringify(json)}`,
+    );
+    await call('memlab_load_snapshot', {file_path: nodeSnapshot});
   },
 );
 

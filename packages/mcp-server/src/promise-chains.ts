@@ -122,3 +122,31 @@ export function reactionNativeCost(
   }
   return {attributions: natives.size, softNavContexts: softNav.size, bytes};
 }
+
+/**
+ * The handler closures of a promise's first `limit` reactions, each once:
+ * the `.then` callbacks a never-settling promise keeps alive.
+ */
+export function reactionHandlers(promise: IHeapNode, limit = 20): IHeapNode[] {
+  const out: IHeapNode[] = [];
+  const seen = new Set<number>();
+  const visited = new Set<number>();
+  let cur = firstReaction(promise);
+  while (cur != null && !visited.has(cur.id) && visited.size < limit) {
+    visited.add(cur.id);
+    let next: IHeapNode | null = null;
+    for (const e of cur.references) {
+      const t = e.toNode;
+      if (t.name === REACTION) {
+        if (next == null && !visited.has(t.id)) next = t;
+        continue;
+      }
+      if (t.type === 'closure' && !seen.has(t.id)) {
+        seen.add(t.id);
+        out.push(t);
+      }
+    }
+    cur = next;
+  }
+  return out;
+}

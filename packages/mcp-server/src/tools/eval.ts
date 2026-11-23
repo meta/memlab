@@ -23,7 +23,8 @@ import {
 } from '../dev-edges.js';
 import {sizeInput, withSizeHint} from '../byte-size.js';
 import {minifiedSignal} from '../minified.js';
-import {promiseReactions} from '../promise-chains.js';
+import {promiseReactions, reactionHandlers} from '../promise-chains.js';
+import {whereOf} from './error-callsites.js';
 import {readProbeSets} from '../probe-sets.js';
 import {isDetachedElementName} from '../dom-names.js';
 import {
@@ -1745,7 +1746,7 @@ export function registerEval(server: McpServer): void {
             'stringsBySize({minLen=1000, limit=1000})->[{id, length}] (flat string nodes longest first, from an index built once per snapshot; Node.js snapshots truncate string contents at 1024 characters), ' +
             'scripts({match?})->[{id, url, sourceId, length}] (every script and its source string, longest first; read one with stringValue(sourceId, {maxLen}) — a source search over these does not scan every string node), ' +
             'stringsWithPrefix(prefix, {limit?})->ids[] (string nodes whose value starts with prefix, e.g. "blob:"; bucketed once per snapshot, so repeated prefix questions do not re-walk the heap — for a per-rung COUNT across a ladder, `memlab_string_prefix_census` answers from the sidecar index without loading at all), ' +
-            'promiseReactions(promiseOrId, {cap?})->{count, ids, truncated}|null (the `.then` reactions attached to an UNSETTLED promise, walked by node type — count 0 means it settled), ' +
+            'promiseReactions(promiseOrId, {cap?})->{count, ids, truncated, state, handlers: [{id, fn, where}]}|null (the `.then` reactions attached to an UNSETTLED promise, walked by node type — count 0 / state "settled" means it settled; handlers are the first 20 distinct `.then` callbacks with module and position), ' +
             'pathTree()->{subtreeBytes(id), parent(id), children(id, {minBytes?, limit?})->[{id,name,edge,bytes}], roots()} (the shortest-path tree with app bytes per subtree — it partitions the heap, so shared caches keep their size; built ONCE per snapshot and kept across calls), ' +
             "familyOf(nodeOrId)->family|null (nearest framework family on the dominator chain, as memlab_memory_partition counts it), pathLabel(nodeOrId)->`module:<Name>.<export>`|`global:<name>`|… (first owner on the shortest path; minification-safe), shapeFamily(nodeOrId)->family|null (the node's own record family by property names) — all memoized per snapshot, " +
             'rootPathAvoidingDev(nodeOrId)->[{id,name,type,edge}]|null (shortest GC-root path using no React DEV/Fast Refresh/devtools edge; null = the node does not exist in a production build; throws if the analysis budget runs out first), ' +
@@ -2749,7 +2750,16 @@ export async function runEval({
     ) => {
       const node = resolveNode(nodeOrId);
       if (node == null) return null;
-      return promiseReactions(node, opts?.cap);
+      const r = promiseReactions(node, opts?.cap);
+      return {
+        ...r,
+        state: r.count > 0 ? 'pending' : 'settled',
+        handlers: reactionHandlers(node, 20).map(fn => ({
+          id: fn.id,
+          fn: fn.name || '(anonymous)',
+          where: whereOf(snapshot, fn),
+        })),
+      };
     };
 
     // Derived whole-heap structures, built once per snapshot and kept by the
