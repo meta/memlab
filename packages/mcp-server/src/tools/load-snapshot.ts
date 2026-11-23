@@ -1903,7 +1903,6 @@ export function registerLoadSnapshot(server: McpServer): void {
           const limitMB = getOldSpaceLimitMB();
           lines.push(
             `Memory: ~${formatNumber(headroomAfterMB)} MB of the ~${formatNumber(limitMB)} MB old-space limit still free after this load.`,
-            ...(appPriorsNote() != null ? [appPriorsNote() as string] : []),
           );
           // Report PREDICTED vs ACTUAL. The ceilings and the file-size floor are
           // all sized off `estimateLoadHeapMB`, so when it is wrong a loadable
@@ -1947,6 +1946,8 @@ export function registerLoadSnapshot(server: McpServer): void {
             }
           }
         }
+        const priorsNote = appPriorsNote();
+        if (priorsNote != null) lines.push(priorsNote);
         const captured = extractCaptureTime(fileName);
         if (captured) {
           const iso = captured.toISOString().slice(0, 10);
