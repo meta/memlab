@@ -72,6 +72,12 @@ import {
   suggestionsSuppressed,
   envLabelOf,
 } from '../utils.js';
+import {
+  ORIENT_MAX_NODES,
+  orientationLines,
+  shortNextStepMenu,
+} from './orientation.js';
+import {ScanTimeoutError} from '../analysis-budget.js';
 import {appPriorsNote} from '../app-priors.js';
 
 // The bucket the Nest auto-capture + the Manifold links in diffs use, so a
@@ -1108,6 +1114,7 @@ function quickDiagnosis(
  * for this purpose.
  */
 let menuEmitted = false;
+let orientationEmitted = false;
 
 // Loads run one at a time, in the order they arrive. Two loads issued in one
 // message used to interleave: a replace-mode load that finished second evicted
@@ -1338,6 +1345,12 @@ export function registerLoadSnapshot(server: McpServer): void {
         .describe(
           'Count-only load: parse the graph but SKIP the dominator / retained-size / shortest-path pass (default false). Roughly halves load time (measured on a 380 MB / 4.19M-node capture: 18s → 8s) for questions that only need counts, names, types, self sizes or string values. The saving is time, not memory — the parsed graph is the bulk of the working set. A light snapshot REFUSES any tool that needs retained sizes, dominators or retainer paths (memlab_retainer_trace, memlab_detached_dom, memlab_largest_objects, memlab_dominator_*, …) instead of silently reporting zeros; reload without light to run those. Light-safe: memlab_class_histogram (include_retained_size:false), memlab_search_nodes, memlab_search_strings, memlab_string_patterns, memlab_snapshot_summary, memlab_snapshot_header, memlab_snapshots.',
         ),
+      orient: z
+        .boolean()
+        .optional()
+        .describe(
+          `Append an Orientation block (default: on the first load of the session only, so a ladder's later rungs do not pay for it again): the app-attributable split (app vs bundle, code, dev-only, other realms), the realms present, and the three largest shape populations by what cutting them frees. Costs a few seconds and replaces the first-look calls to app_heap, native_contexts and shape tools. Skipped on a light load and above ${formatNumber(ORIENT_MAX_NODES)} nodes.`,
+        ),
       async: z
         .boolean()
         .optional()
@@ -1359,6 +1372,7 @@ export function registerLoadSnapshot(server: McpServer): void {
         force,
         force_reload,
         light,
+        orient,
         async: background,
       },
       extra: unknown,
@@ -1980,13 +1994,35 @@ export function registerLoadSnapshot(server: McpServer): void {
             );
           }
         }
+        const oriented =
+          (orient ?? !orientationEmitted) &&
+          !light &&
+          snapshot.nodes.length <= ORIENT_MAX_NODES;
+        if (oriented) {
+          orientationEmitted = true;
+          try {
+            lines.push('', ...orientationLines(snapshot));
+          } catch (err) {
+            if (err instanceof ScanTimeoutError) {
+              lines.push(
+                '',
+                '_Orientation skipped: it ran past the scan budget. `memlab_sweep` covers it._',
+              );
+            } else {
+              throw err;
+            }
+          }
+        }
         if (
           !suggestionsSuppressed('memlab_load_snapshot') &&
           !orientationSuppressed
         ) {
           if (!menuEmitted) {
             menuEmitted = true;
-            lines.push('', ...nextStepMenu());
+            lines.push(
+              '',
+              ...(oriented ? shortNextStepMenu() : nextStepMenu()),
+            );
           } else {
             lines.push(
               '',

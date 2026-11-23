@@ -11,9 +11,12 @@ what to know when you work with more than one snapshot.
 1. **Load the snapshot.**
    "Load the heap snapshot at `/tmp/my-app.heapsnapshot`."
 2. **See what the heap is made of.**
-   "What is this heap made of?" The assistant splits the heap into your app's
-   data, bundle source and V8 internals (`memlab_app_heap`), then looks at a
-   class histogram and the largest retainers.
+   The first load of a session already answers this: its reply ends with an
+   Orientation block giving how much is your app's data (versus bundle
+   source, compiled code, DevTools-only memory and other realms such as
+   browser extensions), which realms the heap holds, and the three largest
+   populations by what removing them would free. For more, the assistant runs
+   `memlab_app_heap`, a class histogram and the largest retainers.
 3. **Find what is growing.**
    With a series of snapshots taken while an interaction repeats: "Which
    classes grow in every snapshot?"
