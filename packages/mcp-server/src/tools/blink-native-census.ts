@@ -11,6 +11,7 @@
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapEdge, IHeapNode, IHeapSnapshot} from '@memlab/core';
 import {z} from 'zod';
+import {BOUNDED_BUFFERS} from '../bounded-buffers.js';
 import {withSnapshotAt} from '../snapshot-borrow.js';
 import {loadRunManifest} from '../run-manifest.js';
 import {resolveLadderPaths} from './ladder.js';
@@ -33,24 +34,6 @@ import {
  * Without the split every one of them reads as a leak candidate, and the
  * bounded browser buffers among them come back every round.
  */
-
-/**
- * Browser buffers with a fixed capacity: growth that stops at the cap is the
- * buffer filling, not a leak. Capacities are the specs' defaults.
- */
-const BOUNDED_BUFFERS: ReadonlyMap<string, {cap: number; what: string}> =
-  new Map([
-    ['PerformanceEventTiming', {cap: 150, what: 'Event Timing buffer'}],
-    ['LayoutShift', {cap: 150, what: 'Layout Instability buffer'}],
-    [
-      'LayoutShiftAttribution',
-      {cap: 750, what: 'Layout Instability buffer (5 sources per shift)'},
-    ],
-    ['LargestContentfulPaint', {cap: 150, what: 'LCP buffer'}],
-    ['PerformanceResourceTiming', {cap: 250, what: 'Resource Timing buffer'}],
-    ['PerformanceLongTaskTiming', {cap: 200, what: 'Long Tasks buffer'}],
-    ['PerformanceLongAnimationFrameTiming', {cap: 200, what: 'LoAF buffer'}],
-  ]);
 
 /**
  * Browser holders with no cap that have grown without bound in real rounds.

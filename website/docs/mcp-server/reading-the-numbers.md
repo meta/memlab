@@ -44,7 +44,10 @@ Other tools apply similar rules:
 
 - `memlab_settle_check` says "grew further at rest" only when a class gained
   more than 10% of its growth (and more than two instances) between the last
-  busy rung and the settle rung.
+  busy rung and the settle rung. A survivor that is a capped browser buffer
+  still under its cap (Blink's console message storage keeps 1,000 messages,
+  the Resource Timing buffer 250 entries) is reported as `bounded`, with its
+  fill and the cycle at which it reaches the cap, not as a leak candidate.
 - **A whole-number rate points to a cause.** `memlab_compare_rounds` lists
   every population whose rate is a whole number per cycle, or per step the
   round drove, with the step it matches. For example, an interaction that

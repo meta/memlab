@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
 import {getSnapshotByHandle} from '../heap-state.js';
+import {boundedFill} from '../bounded-buffers.js';
 import {excludableFamilies, excludedFamilies} from '../excluded-families.js';
 import {loadFamilies, type KnownFamily} from '../known-families.js';
 import {withSnapshotAt} from '../snapshot-borrow.js';
@@ -56,7 +57,8 @@ function histogram(snapshot: IHeapSnapshot): Map<string, ClassStats> {
   return hist;
 }
 
-type Verdict = 'drained' | 'mostly-drained' | 'held' | 'still-growing';
+type Verdict =
+  'drained' | 'mostly-drained' | 'held' | 'still-growing' | 'bounded';
 
 /**
  * Did the population really grow while idle? A handful more instances after
@@ -86,6 +88,7 @@ const VERDICT_NOTE: Record<Verdict, string> = {
   'mostly-drained': 'mostly transient; small residue',
   held: 'survives idle + GC — leak candidate',
   'still-growing': 'grew further while idle — background accumulation',
+  bounded: 'a capped browser buffer filling — NOT a leak',
 };
 
 const VERDICT_NOTE_NO_BASELINE: Record<Verdict, string> = {
@@ -93,6 +96,7 @@ const VERDICT_NOTE_NO_BASELINE: Record<Verdict, string> = {
   'mostly-drained': 'largely reclaimed by settling',
   held: 'largely retained — cannot tell growth from standing population here',
   'still-growing': 'larger after idle than during the burst',
+  bounded: 'a capped browser buffer filling',
 };
 
 /** Where the runner writes the settle rung (see hunt_runner.Runner.settle). */
@@ -538,6 +542,7 @@ export function registerSettleCheck(server: McpServer): void {
             idle: number;
             verdict: Verdict;
             reclaimed: number;
+            bound?: string;
           }> = [];
 
           for (const [key, busyStats] of busyHist) {
@@ -545,13 +550,29 @@ export function registerSettleCheck(server: McpServer): void {
             const idle = settledHist.get(key)?.count ?? 0;
             const grew = busyStats.count - base;
             if (grew < min_growth) continue;
+            const verdict = classify(base, busyStats.count, idle);
+            // A survivor of a capped buffer below its cap is the buffer
+            // filling: it stops at the cap, so a per-cycle rate is wrong.
+            const fill =
+              verdict === 'held' || verdict === 'still-growing'
+                ? boundedFill(splitClassKey(key).name, base, idle, cycles)
+                : null;
             rows.push({
               key,
               base,
               busy: busyStats.count,
               idle,
-              verdict: classify(base, busyStats.count, idle),
+              verdict: fill != null ? 'bounded' : verdict,
               reclaimed: busyStats.count - idle,
+              bound:
+                fill == null
+                  ? undefined
+                  : `${formatNumber(idle)}/${formatNumber(fill.cap)} in the ${fill.what}` +
+                    (fill.saturatesAtCycle != null
+                      ? `, saturates at cycle ~${formatNumber(fill.saturatesAtCycle)}`
+                      : idle >= fill.cap
+                        ? ', full'
+                        : ''),
             });
           }
 
@@ -575,6 +596,7 @@ export function registerSettleCheck(server: McpServer): void {
             r => r.verdict === 'held' || r.verdict === 'still-growing',
           );
           const drained = rows.filter(r => r.verdict === 'drained');
+          const bounded = rows.filter(r => r.verdict === 'bounded');
 
           const busyTotal = totalSelfSize(busyHist);
           const settledTotal = totalSelfSize(settledHist);
@@ -592,6 +614,19 @@ export function registerSettleCheck(server: McpServer): void {
                 : `**${held.length} class(es) survived idle + GC** and ${drained.length} drained. Only the survivors are leak candidates — the drained ones were backlog and should not be reported as findings.`,
             ...(hasBaseline && cycles != null && held.length > 0
               ? heldPerCycleLine(held, cycles)
+              : []),
+            ...(bounded.length > 0
+              ? [
+                  '',
+                  `**Bounded, not survivors:** ${bounded
+                    .map(r => {
+                      const {type, name} = splitClassKey(r.key);
+                      return `${name} (${type}): ${r.bound}`;
+                    })
+                    .join(
+                      ' · ',
+                    )}. A capped browser buffer stops growing at its cap.`,
+                ]
               : []),
             '',
           ];
@@ -622,7 +657,10 @@ export function registerSettleCheck(server: McpServer): void {
             const note = hasBaseline
               ? VERDICT_NOTE[r.verdict]
               : VERDICT_NOTE_NO_BASELINE[r.verdict];
-            return [...cells, `${r.verdict} — ${note}`];
+            return [
+              ...cells,
+              `${r.verdict} — ${note}${r.bound != null ? ` (${r.bound})` : ''}`,
+            ];
           });
           const clippedRows = clipTableColumn(tableRows);
           lines.push(markdownTable(headers, clippedRows.rows, rightCols));
