@@ -76,20 +76,35 @@ function stringOf(node: IHeapNode | null): string | null {
   return node.toStringNode()?.stringValue ?? node.name;
 }
 
-/** What a host element shows: its single text child, or its text fibers joined. */
+/** An element child's text: its single string child, else its subtree's. */
+function elementText(fiber: IHeapNode): string {
+  const props = edgeTo(fiber, 'memoizedProps');
+  const single = props != null ? stringOf(edgeTo(props, 'children')) : null;
+  return single ?? fiberSubtreeText(fiber, 100);
+}
+
+/**
+ * What a host element shows: its single text child, or, with two or more text
+ * fibers, its children's text joined, element children (`<b>Alice</b>`)
+ * included.
+ */
 function hostText(fiber: IHeapNode): string | null {
   const props = edgeTo(fiber, 'memoizedProps');
   if (props == null) return null;
   const single = stringOf(edgeTo(props, 'children'));
-  if (single != null) return single;
+  // A span holding only a separator (` · ` between a time and an icon) is
+  // a separator, not a row that lost its values.
+  if (single != null) return /^\s*[&,·]\s*$/.test(single) ? null : single;
   const parts: string[] = [];
+  let texts = 0;
   let child = edgeTo(fiber, 'child');
   for (let i = 0; child != null && i < 200; i++) {
     const t = stringOf(edgeTo(child, 'memoizedProps'));
-    if (t != null) parts.push(t);
+    if (t != null) texts++;
+    parts.push(t ?? elementText(child));
     child = edgeTo(child, 'sibling');
   }
-  return parts.length > 1 ? parts.join('') : null;
+  return texts > 1 ? parts.join('') : null;
 }
 
 /**
@@ -144,7 +159,8 @@ export function renderedTextFindings(
   snapshot: IHeapSnapshot,
 ): Map<string, TextFinding> {
   const out = new Map<string, TextFinding>();
-  const seenPair = new Set<number>();
+  // Per finding, the fiber pairs already counted.
+  const pairsOf = new Map<string, Set<number>>();
   snapshot.nodes.forEach((node: IHeapNode) => {
     if (node.type !== 'object' || !isFiberNode(node)) return;
     const type = edgeTo(node, 'type');
@@ -169,8 +185,8 @@ export function renderedTextFindings(
         const owner = ownerComponent(node);
         const key = `${rule.id}\u0000${owner}\u0000${where}\u0000${text}`;
         const f = out.get(key);
-        const pairKey = pairId * 31 + TEXT_RULES.indexOf(rule);
-        if (f == null) {
+        const pairs = pairsOf.get(key);
+        if (f == null || pairs == null) {
           out.set(key, {
             rule: rule.id,
             owner,
@@ -179,9 +195,9 @@ export function renderedTextFindings(
             count: 1,
             sample: node.id,
           });
-          seenPair.add(pairKey);
-        } else if (!seenPair.has(pairKey)) {
-          seenPair.add(pairKey);
+          pairsOf.set(key, new Set([pairId]));
+        } else if (!pairs.has(pairId)) {
+          pairs.add(pairId);
           f.count++;
         }
       }
@@ -298,16 +314,27 @@ export function registerRenderedTextAudit(server: McpServer): void {
           const segs = ladderSegments(manifest);
           if (segs.length > 1) {
             let arms: Array<{name: string; paths: string[]}> = [];
+            let armsError: string | null = null;
             try {
               arms = readArms(run_dir);
-            } catch {
-              arms = [];
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              // A reload without an A/B section is not an error.
+              if (!/has no `ab` section/.test(msg)) armsError = msg;
             }
             const out = [
               `## Rendered text audit: ${segs.length} isolate segments`,
+              ...(armsError != null
+                ? ['', `_Arms not labelled: ${armsError}_`]
+                : []),
             ];
+            // By file name: run.json may record a rung relative to the round
+            // while the manifest resolves it.
+            const base = (p: string) => p.replace(/^.*\//, '');
             for (const seg of segs) {
-              const arm = arms.find(a => a.paths.includes(seg.paths[0]));
+              const arm = arms.find(a =>
+                a.paths.some(p => base(p) === base(seg.paths[0])),
+              );
               out.push(
                 '',
                 ...(await ladderLines(

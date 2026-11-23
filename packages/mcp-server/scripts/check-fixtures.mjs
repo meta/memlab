@@ -149,6 +149,35 @@ function FixtureChatRow() {}
   span.sibling = ok;
   globalThis.__fixtureFibers = [owner, span, ok, ...parts];
 }
+// Rows that read fine: names in <b> between text fibers, a lone separator
+// span, and two rows sharing a text and a title placeholder.
+function FixtureMixedRow() {}
+{
+  const owner = new FiberNode(FixtureMixedRow, {});
+  const mixed = new FiberNode('span', {});
+  const kids = [
+    new FiberNode(null, 'You added '),
+    new FiberNode('b', {children: 'Brian'}),
+    new FiberNode(null, ' & '),
+    new FiberNode('b', {children: 'Alice'}),
+  ];
+  mixed.child = kids[0];
+  kids.forEach((k, i) => {
+    k.return = mixed;
+    k.sibling = kids[i + 1] ?? null;
+  });
+  const sep = new FiberNode('span', {children: ' · '});
+  const rows = [0, 1].map(
+    () => new FiberNode('span', {children: '{count} items', title: '{name}'}),
+  );
+  const top = [mixed, sep, ...rows];
+  owner.child = mixed;
+  top.forEach((f, i) => {
+    f.return = owner;
+    f.sibling = top[i + 1] ?? null;
+  });
+  globalThis.__fixtureMixedFibers = [owner, ...top, ...kids];
+}
 // A promise that never settles, gaining `.then` reactions between snapshots.
 function fixturePendingHandler() {}
 globalThis.__fixturePending = new Promise(() => {});
@@ -793,6 +822,16 @@ await shapeCheck(
     assert(
       !/Alice·&·Bob/.test(text),
       `clean row flagged: ${text.slice(0, 1200)}`,
+    );
+    assert(
+      !/empty parameter +\| FixtureMixedRow /.test(text),
+      `element children or a separator span flagged: ${text.slice(0, 1500)}`,
+    );
+    assert(
+      /unreplaced placeholder +\| FixtureMixedRow +\| title +\| `\{name\}` +\| +2 /.test(
+        text,
+      ),
+      `title placeholder counted on both rows: ${text.slice(0, 1500)}`,
     );
   },
 );
