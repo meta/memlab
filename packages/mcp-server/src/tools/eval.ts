@@ -1479,7 +1479,7 @@ nearest dominator carrying a class identity — \`node.dominatorNode\` is usuall
 Splits a class that is really several record types. \`shapeKeys\` returns a Set of
 own JS properties only.
 
-    const shapes = {};
+    const shapes = Object.create(null);
     for (const id of helpers.byClass('Object', {type: 'object'})) {
       const keys = Array.from(helpers.shapeKeys(id));
       if (keys.length === 0 || keys.length > 12) continue;
@@ -1507,7 +1507,7 @@ returns IDS, so take nodes when you need a field off them.
 
 ### 9. Strings that appear many times (interning candidates)
 
-    const counts = {};
+    const counts = Object.create(null);
     snapshot.nodes.forEach(node => {
       if (!node.isString) return;
       const v = node.toStringNode && node.toStringNode();
@@ -1552,7 +1552,7 @@ chain on ONE promise, which a count of unsettled promises cannot show.
 A queue's \`dispatch\` is held as a closure variable named after the setter, so
 the setter names the state even where no fiber is in reach.
 
-    const bySetter = {};
+    const bySetter = Object.create(null);
     for (const qid of helpers.withProp('pending', {edgeTypes: ['property']})) {
       const dispatch = helpers.edgeTarget(qid, 'dispatch');
       const head = helpers.edgeTarget(qid, 'pending');
@@ -1571,7 +1571,7 @@ the setter names the state even where no fiber is in reach.
 Each live object URL pins its Blob OFF the heap. (\`memlab_object_urls\` does
 this per rung; this is the one-snapshot form.)
 
-    const holders = {};
+    const holders = Object.create(null);
     let urls = 0;
     snapshot.nodes.forEach(node => {
       if (!node.isString || !node.name.startsWith('blob:')) return;
@@ -1612,7 +1612,7 @@ owner names the buffer that never drains.
 A buffer that only grows is usually stuck in one status. Read the status field
 as a string.
 
-    const byStatus = {};
+    const byStatus = Object.create(null);
     for (const id of helpers.withProp('status', {edgeTypes: ['property']})) {
       const st = helpers.edgeTarget(id, 'status');
       const k = st != null && st.isString ? helpers.stringValue(st) : '(non-string)';
@@ -1642,7 +1642,7 @@ Node ids mean nothing in another capture, but a stable key
 (\`<Module>.<edge>…\` from the module scope) names the same collection in
 both. Save a \`{stableKey → entries}\` map on the first snapshot:
 
-    const counts = {};
+    const counts = Object.create(null);
     for (const cls of ['Map', 'Set']) {
       for (const node of helpers.nodesByClass(cls, {type: 'object'})) {
         const n = helpers.entries(node).length;
@@ -1719,7 +1719,7 @@ export function registerEval(server: McpServer): void {
       '// Set: helpers.setElements(setId, 10)\n```\n' +
       '**Example — dedup / composition of a Relay record type:**\n' +
       '```\nconst ids = helpers.byTypename("AdCreativeFeatureSpecAttachment");\n' +
-      'const sigs = {};\n' +
+      'const sigs = Object.create(null);\n' +
       'for (const id of ids) { const s = helpers.shapeSignature(id); sigs[s] = (sigs[s]||0)+1; }\n' +
       'result = {count: ids.length, distinct: Object.keys(sigs).length};\n```\n' +
       '**Multi-step exploration:** pass `save_as` to keep a result set server-side and `helpers.load(name)` to read it back in a later call, so intermediate id lists never have to be printed to the transcript. `mode:"list_saved"` lists them. ' +
@@ -6423,6 +6423,9 @@ function lintEval(code: string): string {
   for (const r of arrayMethodMisuse(stripComments(code))) {
     lines.push(`- ❌ ${r}`);
   }
+  for (const r of protoKeyTrap(stripComments(code))) {
+    lines.push(`- ⚠ ${r}`);
+  }
 
   lines.push(
     '',
@@ -6656,6 +6659,29 @@ export function arrayMethodMisuse(code: string): string[] {
   return [...out];
 }
 
+/**
+ * `const by = {}; … by[node.name] …`: a plain object keyed by heap names. A
+ * key of `constructor`, `toString` or `__proto__` reads the prototype, so
+ * `by[k].push(…)` throws or `by[k] ??= []` skips it, partway through a scan.
+ */
+export function protoKeyTrap(code: string): string[] {
+  const out: string[] = [];
+  const decl = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\{\s*\}/g;
+  for (let m = decl.exec(code); m != null; m = decl.exec(code)) {
+    const name = m[1];
+    // A computed key that is not a literal: a name read off the heap.
+    const dynamic = new RegExp(
+      `(?<![\\w$])${name.replace(/\$/g, '\\$')}\\[\\s*(?!['"\`\\d])[^\\]]+\\]`,
+    );
+    if (dynamic.test(code.slice(m.index + m[0].length))) {
+      out.push(
+        `\`${name}\` is a plain \`{}\` indexed by computed keys. A heap name such as \`constructor\`, \`toString\` or \`__proto__\` reads its prototype instead of a missing key (so \`${name}[k].push\` throws partway through a scan). Use \`new Map()\` or \`Object.create(null)\`.`,
+      );
+    }
+  }
+  return out;
+}
+
 function describeEnvLines(): string[] {
   return [
     '# memlab_eval environment',
@@ -6665,6 +6691,7 @@ function describeEnvLines(): string[] {
     '- Iterate all nodes with `snapshot.nodes.forEach(node => { ... })` and all edges with `snapshot.edges.forEach(...)`. `snapshot.nodes` is NOT a for-of iterable.',
     '- `node.references` (outgoing) and `node.referrers` (incoming) ARE for-of iterable, and also take `.filter`, `.map`, `.find`, `.some`, `.every`, `.reduce`, `.slice`, `.flatMap`, `.at`, `.forEach` and `.length` (`.toArray()` for a plain array).',
     '- `node.props` is `{name: node}` for its property edges and, on a context, its variables (the first edge of each name).',
+    "- Key a tally by heap names with `new Map()` or `Object.create(null)`, not `{}`: a class or property named `constructor`, `toString` or `__proto__` reads the plain object's prototype.",
     '',
     '## In-scope globals',
     '- `snapshot` — IHeapSnapshot: `.nodes.forEach(cb)`, `.edges.forEach(cb)`, `.getNodeById(id)`.',
@@ -6795,7 +6822,7 @@ function describeEnvLines(): string[] {
     '',
     '## Runnable example',
     '```',
-    'const counts = {};',
+    'const counts = Object.create(null);',
     'snapshot.nodes.forEach(node => { counts[node.type] = (counts[node.type] || 0) + 1; });',
     'result = counts;',
     '```',

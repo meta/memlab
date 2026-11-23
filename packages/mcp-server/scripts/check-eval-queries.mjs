@@ -30,7 +30,7 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {composeQueries} = await import(pathToFileURL(built).href);
+const {composeQueries, protoKeyTrap} = await import(pathToFileURL(built).href);
 
 const run = queries => {
   const ctx = {result: undefined};
@@ -65,4 +65,19 @@ test("queries do not see each other's locals", () => {
     {name: 'b', code: 'return typeof shared;'},
   ]);
   assert.deepEqual(out, {a: 1, b: 'undefined'});
+});
+
+test('lint: a plain {} keyed by heap names is flagged, a literal key is not', () => {
+  assert.equal(
+    protoKeyTrap(
+      'const by = {}; snapshot.nodes.forEach(n => { (by[n.name] ??= []).push(n.id); });',
+    ).length,
+    1,
+  );
+  assert.deepEqual(protoKeyTrap("const by = {}; by['a'] = 1; by[0] = 2;"), []);
+  assert.deepEqual(
+    protoKeyTrap('const by = Object.create(null); by[k] = 1;'),
+    [],
+  );
+  assert.equal(protoKeyTrap('let $c = {}; $c[k] = 1;').length, 1);
 });
