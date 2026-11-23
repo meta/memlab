@@ -111,5 +111,6 @@ test('the third arm says whether the effect reverses', () => {
   assert.match(abaNote(fix, 10, 1, 9), /\*\*reverses\*\*/);
   assert.match(abaNote(fix, 10, 1, 2), /does \*\*NOT\*\* reverse/);
   assert.equal(abaNote('NO EFFECT', 10, 9, 10), '');
-  assert.equal(abaNote(fix, 10, 1, null), '');
+  assert.match(abaNote(fix, 10, 1, null), /reversal is unchecked/);
+  assert.equal(abaNote('NO EFFECT', 10, 9, null), '');
 });

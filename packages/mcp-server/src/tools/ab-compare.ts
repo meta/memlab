@@ -239,8 +239,13 @@ export function abaNote(
   on: number | null,
   off2: number | null,
 ): string {
-  if (off2 == null || off == null || on == null) return '';
+  if (off == null || on == null) return '';
   if (!/FIX EFFECTIVE|PARTIAL/.test(verdict)) return '';
+  // Called only for a round with an OFF-again arm: no rate there means the
+  // reversal went unchecked, which must not read as a plain verdict.
+  if (off2 == null) {
+    return '; the OFF-again arm has no rate (too few measured rungs), so reversal is unchecked';
+  }
   const gap = off - on;
   if (gap <= 0) return '';
   return off2 - on >= 0.5 * gap
