@@ -553,9 +553,16 @@ export function registerSettleCheck(server: McpServer): void {
             const verdict = classify(base, busyStats.count, idle);
             // A survivor of a capped buffer below its cap is the buffer
             // filling: it stops at the cap, so a per-cycle rate is wrong.
+            // Without a baseline the count is a standing population, not a
+            // fill rate, so no saturation cycle is projected.
             const fill =
               verdict === 'held' || verdict === 'still-growing'
-                ? boundedFill(splitClassKey(key).name, base, idle, cycles)
+                ? boundedFill(
+                    splitClassKey(key).name,
+                    base,
+                    idle,
+                    baseHist != null ? cycles : null,
+                  )
                 : null;
             rows.push({
               key,
