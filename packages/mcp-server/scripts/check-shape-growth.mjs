@@ -76,3 +76,15 @@ test('ranks shapes by count growth, matching on constructor and property set', (
   );
   assert.equal(rows[0].selfDelta, 600 * 32);
 });
+
+test("a key containing ',' is a different shape from the keys it joins", () => {
+  const before = heap([['Object', ['a', 'b'], 500]]);
+  const after = heap([
+    ['Object', ['a', 'b'], 500],
+    ['Object', ['a,b'], 400],
+  ]);
+  assert.deepEqual(
+    shapeGrowth(before, after).map(r => [r.props, r.before, r.after]),
+    [[['a,b'], 0, 400]],
+  );
+});
