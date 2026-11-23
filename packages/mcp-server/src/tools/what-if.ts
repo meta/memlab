@@ -9,7 +9,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
+import type {IHeapEdge, IHeapNode, IHeapSnapshot} from '@memlab/core';
 import memlabCore from '@memlab/core';
 import {z} from 'zod';
 import {fromResultParam, resolveSavedNodeIds} from '../result-handles.js';
@@ -25,6 +25,7 @@ import {
   typenameOf,
 } from '../utils.js';
 import {matchesShape} from './unit-cost.js';
+import {collectDevRoots} from './dev-artifacts.js';
 
 const {NumericSet} = memlabCore;
 
@@ -171,6 +172,100 @@ export function freedByReleasing(
     bytes += snapshot.getNodeById(id)?.self_size ?? 0;
   }
   return {bytes, nodes};
+}
+
+const STRUCTURAL = new Set(['__proto__', 'map', 'constructor', 'prototype']);
+const GENERIC_CONTAINERS = new Set(['Array', 'Object', 'Map', 'Set']);
+const NOT_PAYLOAD_TYPES = new Set(['code', 'hidden', 'synthetic', 'native']);
+/** A holder group this small is a cut someone can make (a cache, a console). */
+const CUTTABLE_HOLDERS = 100;
+
+interface CoHolder {
+  label: string;
+  holders: Set<number>;
+  children: number;
+  bytes: number;
+}
+
+function edgeLabel(e: IHeapEdge): string {
+  const raw = String(e.name_or_index);
+  return /^\d+$/.test(raw) ? '[i]' : `.${raw}`;
+}
+
+/** `Owner.field[i]` for a generic container, `Class.field` otherwise. */
+function holderLabel(from: IHeapNode, e: IHeapEdge): string {
+  if (GENERIC_CONTAINERS.has(from.name)) {
+    for (const up of from.referrers) {
+      if (up.type === 'weak' || up.type === 'shortcut') continue;
+      const owner = up.fromNode;
+      if (NOT_PAYLOAD_TYPES.has(owner.type) || owner.name.startsWith('(')) {
+        continue;
+      }
+      return `${owner.name}${edgeLabel(up)}${edgeLabel(e)}`;
+    }
+  }
+  return `${from.name || `(${from.type})`}${edgeLabel(e)}`;
+}
+
+/**
+ * When a population points at far more than it frees, who else holds what it
+ * points at: the referrers of its direct children that are not in it, grouped
+ * by `holder.edge`, ranked by the bytes of the children they share.
+ */
+export function coHoldersOf(
+  snapshot: IHeapSnapshot,
+  ids: readonly number[],
+  maxChildren = 200,
+): {payload: number; groups: CoHolder[]} {
+  const pop = new Set(ids);
+  const children = new Map<number, IHeapNode>();
+  for (const id of ids) {
+    const n = snapshot.getNodeById(id);
+    if (n == null) continue;
+    for (const e of n.references) {
+      if (e.type === 'weak' || e.type === 'shortcut') continue;
+      if (STRUCTURAL.has(String(e.name_or_index))) continue;
+      const c = e.toNode;
+      if (c.id <= 3 || pop.has(c.id)) continue;
+      if (NOT_PAYLOAD_TYPES.has(c.type) || c.name.startsWith('system /')) {
+        continue;
+      }
+      children.set(c.id, c);
+    }
+  }
+  const top = [...children.values()]
+    .sort((a, b) => b.retainedSize - a.retainedSize)
+    .slice(0, maxChildren);
+  let payload = 0;
+  const groups = new Map<string, CoHolder>();
+  for (const c of top) {
+    payload += c.retainedSize;
+    const counted = new Set<string>();
+    for (const r of c.referrers) {
+      if (r.type === 'weak' || r.type === 'shortcut') continue;
+      const from = r.fromNode;
+      if (pop.has(from.id) || from.id === c.id) continue;
+      if (NOT_PAYLOAD_TYPES.has(from.type) || from.name.startsWith('(')) {
+        continue;
+      }
+      const label = holderLabel(from, r);
+      let g = groups.get(label);
+      if (g == null) {
+        g = {label, holders: new Set(), children: 0, bytes: 0};
+        groups.set(label, g);
+      }
+      g.holders.add(from.id);
+      if (!counted.has(label)) {
+        counted.add(label);
+        g.children++;
+        g.bytes += c.retainedSize;
+      }
+    }
+  }
+  return {
+    payload,
+    groups: [...groups.values()].sort((a, b) => b.bytes - a.bytes),
+  };
 }
 
 export function registerWhatIf(server: McpServer): void {
@@ -444,6 +539,58 @@ export function registerWhatIf(server: McpServer): void {
                 : `The cascade walk found ${formatBytes(-extra)} LESS than the dominator figure claims is exclusively dominated. That is a discrepancy, not a saving — it means part of the dominated set stays reachable in this walk, most likely through an edge type the walk skips (weak) or a root the walk did not start from (${formatNumber(roots.length)} found). Trust the dominator figure and treat this cascade run as inconclusive.`,
             '',
             '_Reachability only. It does not model finalizers, and it treats weak edges as non-retaining (which is correct for collectability but means a WeakMap value shown as freed is freed only if its key also dies)._',
+          );
+        }
+
+        const co = coHoldersOf(snapshot, ids);
+        if (co.payload >= 64 * 1024 && retained < 0.1 * co.payload) {
+          const top = co.groups.slice(0, 3);
+          const cuttable = top.filter(g => g.holders.size <= CUTTABLE_HOLDERS);
+          const reach = reachabilityOf(snapshot);
+          const joint = freedByReleasing(
+            snapshot,
+            [...ids, ...cuttable.flatMap(g => [...g.holders])],
+            reach,
+          );
+          const devIds = [...collectDevRoots(snapshot).byId.keys()];
+          const withoutDev =
+            devIds.length > 0
+              ? freedByReleasing(snapshot, [...ids, ...devIds], reach)
+              : null;
+          lines.push(
+            '',
+            '### Why so little comes back',
+            '',
+            `The population points at **${formatBytes(co.payload)}** (the retained size of its largest direct children) but frees ${formatBytes(retained)}: other objects hold the same children. Do not write "frees 0 B" or "pins ${formatBytes(co.payload)}" from either number alone.`,
+            '',
+            top.length > 0
+              ? markdownTable(
+                  [
+                    'Other holder (class.edge)',
+                    'Holders',
+                    'Children co-held',
+                    'Their retained',
+                  ],
+                  top.map(g => [
+                    g.label.length > 60 ? `${g.label.slice(0, 57)}…` : g.label,
+                    formatNumber(g.holders.size),
+                    formatNumber(g.children),
+                    formatBytes(g.bytes),
+                  ]),
+                  new Set([1, 2, 3]),
+                )
+              : '_No other holder found among the direct children: the bytes are held further down._',
+            '',
+            cuttable.length > 0
+              ? `**Cutting the population and the ${cuttable.length} small holder group(s) above together frees ${formatBytes(joint.bytes)}** (${formatNumber(joint.nodes)} nodes, a reachability walk). That joint cut is the fix to size.`
+              : top.length > 0
+                ? `Every holder group above has more than ${CUTTABLE_HOLDERS} holders, so no single joint cut is measured: the children are shared widely, not pinned by one owner.`
+                : '',
+            ...(withoutDev != null && withoutDev.bytes - retained >= 64 * 1024
+              ? [
+                  `Without the DevTools / automation roots as well, the population frees ${formatBytes(withoutDev.bytes)}: the difference is held only through tooling a production page would not have.`,
+                ]
+              : []),
           );
         }
 
