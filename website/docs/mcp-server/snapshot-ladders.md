@@ -108,6 +108,12 @@ is at least 25% larger than any scanned so far.
   is marked "unchanged since rN" and doesn't make the round CAVEATED. In an
   A/B round, the reload between the two arms is expected: each arm must be
   continuous and have at least 2 rungs.
+- A structure found once to be dev-only or capped (a profiler list, a trace
+  buffer) can be registered in the round's families file with
+  `"kind": "dev_only"` or `"bounded_window"` and a `"locator"` (the stable key
+  `helpers.stableKey` prints). `memlab_leak_report`, `memlab_artifact_budget`
+  and `memlab_settle_check` then subtract what it retains before computing
+  rates, and say how much they took out.
 - `memlab_hypothesis({run_dir, predicates, watch: true})` keeps predicates for
   the rest of the sweep. Every later battery checks them again and names any
   whose PASS or FAIL changed since the previous round. `unwatch: [label]`

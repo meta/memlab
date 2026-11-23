@@ -378,6 +378,7 @@ function buildPlan(
   hasControls = false,
   hasInvariants = false,
   windows: Array<{name: string; edge: string; value_keys: string[]}> = [],
+  familiesFile: string | null = null,
 ): Step[] {
   const ladder: Step[] = [
     // FIRST, deliberately. On one app 59-75% of the heap is not the
@@ -391,6 +392,7 @@ function buildPlan(
         target: finalRung,
         baseline: baseRung,
         ...(windows.length > 0 ? {windows} : {}),
+        ...(familiesFile != null ? {families: familiesFile} : {}),
       },
     },
     {tool: 'memlab_round_audit', args: {run_dir: runDir}},
@@ -1687,6 +1689,7 @@ export function registerAnalysisBattery(server: McpServer): void {
           manifest.positiveControls
             .filter(c => c.kind === 'map-size')
             .map(c => ({name: c.name, edge: c.edge, value_keys: c.valueKeys})),
+          manifest.familiesFile,
         );
         const ab = abSegments(run_dir, manifest);
         const optimizationReason =

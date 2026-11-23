@@ -23,6 +23,18 @@ export interface KnownFamily {
   label: string;
   /** Plain objects having ALL of the props of any one of these shapes. */
   shapes: string[][];
+  /**
+   * `dev_only` (a structure only a dev build keeps) or `bounded_window` (a
+   * buffer the app caps). With `locator`, the ladder tools subtract what the
+   * family retains before computing rates.
+   */
+  kind?: 'dev_only' | 'bounded_window';
+  /**
+   * Where the family's root lives, as a stable key: a module name plus the
+   * edge path from its scope (`WAWebProfiler.seen`), the form
+   * `helpers.stableKey` prints.
+   */
+  locator?: string;
   /** e.g. "known", "fixed", "bounded". */
   status?: string;
   /** Where it was found or tracked (a round, an issue, a doc). */
@@ -46,20 +58,32 @@ export function loadFamilies(file: string): KnownFamily[] {
   }
   return raw.families.map((f: unknown, i: number) => {
     const fam = f as Partial<KnownFamily>;
+    const hasLocator = typeof fam.locator === 'string' && fam.locator !== '';
     if (
       typeof fam.id !== 'string' ||
       typeof fam.label !== 'string' ||
-      !Array.isArray(fam.shapes) ||
-      fam.shapes.length === 0 ||
-      !fam.shapes.every(
-        s => Array.isArray(s) && s.every(p => typeof p === 'string'),
-      )
+      (fam.shapes == null && !hasLocator) ||
+      (fam.shapes != null &&
+        (!Array.isArray(fam.shapes) ||
+          (fam.shapes.length === 0 && !hasLocator) ||
+          !fam.shapes.every(
+            s => Array.isArray(s) && s.every(p => typeof p === 'string'),
+          )))
     ) {
       throw new Error(
-        `${file}: family ${i} needs a string id and label and a non-empty shapes list of string arrays`,
+        `${file}: family ${i} needs a string id and label, and a non-empty shapes list of string arrays or a locator`,
       );
     }
-    return fam as KnownFamily;
+    if (
+      fam.kind != null &&
+      fam.kind !== 'dev_only' &&
+      fam.kind !== 'bounded_window'
+    ) {
+      throw new Error(
+        `${file}: family ${i} kind must be "dev_only" or "bounded_window"`,
+      );
+    }
+    return {...fam, shapes: fam.shapes ?? []} as KnownFamily;
   });
 }
 

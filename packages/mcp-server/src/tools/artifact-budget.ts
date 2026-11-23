@@ -9,6 +9,8 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
+import {excludableFamilies, excludedFamilies} from '../excluded-families.js';
+import {loadFamilies} from '../known-families.js';
 import {z} from 'zod';
 import {artifactLabel} from '../artifact-classes.js';
 import {computeHeapBudget, devFamilyBytes} from '../heap-budget.js';
@@ -123,8 +125,14 @@ export function registerArtifactBudget(server: McpServer): void {
         .describe(
           "Collections the app bounds by a retention window (a 30-minute trace buffer, a TTL cache), as `{name, edge, value_keys?}`: the edge that binds the Map/Set/Array, and the property names its values carry for a minified build. With `baseline`, their retained growth is reported and `app_delta` is also given without it. The battery passes the round's `map-size` positive controls.",
         ),
+      families: z
+        .string()
+        .optional()
+        .describe(
+          'A known-families JSON file. Families with `kind` ("dev_only" or "bounded_window") and a `locator` (a stable key such as `Profiler.seen`) are measured by what their root retains, and `app_delta` is also given without them. The battery passes run.json `families_file`.',
+        ),
     },
-    async ({target, baseline, max_file_size_mb, windows}) => {
+    async ({target, baseline, max_file_size_mb, windows, families}) => {
       try {
         const paths = baseline != null ? [baseline, target] : [target];
         const {rungs, largestMB} = resolveRungs(paths, max_file_size_mb);
@@ -136,11 +144,17 @@ export function registerArtifactBudget(server: McpServer): void {
         const scanBudgetMs = scaledTimeoutMs(largestMB);
 
         const declared = windows ?? [];
+        const excludable =
+          families != null ? excludableFamilies(loadFamilies(families)) : [];
         const measure = (snap: IHeapSnapshot) => {
           // The unremoved reachability walk is the same for every window.
           let reach: Reachability | null = null;
           return {
             budget: computeHeapBudget(snap),
+            excluded:
+              excludable.length > 0
+                ? excludedFamilies(snap, excludable, () => '')
+                : [],
             windows: declared.map(w => {
               const hit = findDeclaredCollection(
                 snap,
@@ -303,6 +317,21 @@ export function registerArtifactBudget(server: McpServer): void {
           lines.push(
             `**app_delta: ${signed(appDelta)}**${share}.${exclWindows}`,
           );
+          if (measured.excluded.length > 0) {
+            const famDelta = measured.excluded.reduce(
+              (n, f, i) => n + f.bytes - (base?.excluded[i]?.bytes ?? 0),
+              0,
+            );
+            lines.push(
+              '',
+              `Without registered families (${measured.excluded
+                .map(
+                  (f, i) =>
+                    `\`${f.family.label}\` ${f.root == null ? 'not found' : signed(f.bytes - (base?.excluded[i]?.bytes ?? 0))}`,
+                )
+                .join('; ')}): **app_delta ${signed(appDelta - famDelta)}**.`,
+            );
+          }
           const unresolved = windowRows.filter(r => r.delta == null);
           if (unresolved.length > 0) {
             lines.push(
@@ -344,6 +373,17 @@ export function registerArtifactBudget(server: McpServer): void {
               new Set([1, 2]),
             ),
           );
+          if (measured.excluded.length > 0) {
+            lines.push(
+              '',
+              `Registered families inside the app figure: ${measured.excluded
+                .map(
+                  f =>
+                    `\`${f.family.label}\` ${f.root == null ? 'not found' : formatBytes(f.bytes)}`,
+                )
+                .join('; ')}.`,
+            );
+          }
         }
         lines.push('');
 

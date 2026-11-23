@@ -213,6 +213,8 @@ export async function computeSequenceTrends(
     // silence is indistinguishable from a hang — which is what pushed three
     // measured calls past the tool timeout into backgrounding.
     progress?: ProgressReporter;
+    /** Runs on the per-rung histograms before any trend is computed. */
+    adjust?: (steps: SequenceStep[]) => Promise<void>;
   },
 ): Promise<SequenceTrends> {
   const toolName = opts.toolName ?? 'memlab_sequence_analysis';
@@ -360,6 +362,7 @@ export async function computeSequenceTrends(
     });
   }
 
+  if (opts.adjust != null) await opts.adjust(steps);
   const n = steps.length;
 
   // Union of non-noise class keys.

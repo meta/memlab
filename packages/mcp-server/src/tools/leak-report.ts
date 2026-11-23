@@ -62,6 +62,12 @@ import {
 } from './sequence-analysis.js';
 import {resolveRungs, withSnapshotAt} from '../snapshot-borrow.js';
 import {
+  excludableFamilies,
+  excludedFamilies,
+  excludedSection,
+  type ExcludedFamily,
+} from '../excluded-families.js';
+import {
   collectDevRoots,
   computeReachableWithoutDevRoots,
 } from './dev-artifacts.js';
@@ -628,7 +634,7 @@ export function registerLeakReport(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          'Path to a known-families JSON file (`{"families": [{id, label, shapes: [[prop, ...]], status?, finding?, retainer?}]}`). Each family is counted per rung from the rung sidecars (plain objects having all the props of one of its shapes, so it matches on minified builds and loads no graph), and the report opens with a "Known families" table and how many new plain objects they leave unexplained. Defaults to run.json `families_file` when `run_dir` is given.',
+          'Path to a known-families JSON file (`{"families": [{id, label, shapes: [[prop, ...]], status?, finding?, retainer?}]}`). Each family is counted per rung from the rung sidecars (plain objects having all the props of one of its shapes, so it matches on minified builds and loads no graph), and the report opens with a "Known families" table and how many new plain objects they leave unexplained. A family with `kind` ("dev_only" or "bounded_window") and a `locator` (a stable key such as `Profiler.seen`, the form `helpers.stableKey` prints) is subtracted instead: what its root retains comes out of every rung before rates are computed, and the report says how much. Defaults to run.json `families_file` when `run_dir` is given.',
         ),
       include_artifacts: z
         .boolean()
@@ -738,12 +744,50 @@ export function registerLeakReport(server: McpServer): void {
         if (contentFromRun) content = inputs.manifest?.content ?? undefined;
         const ladderSpanS =
           inputs.spanSeconds ?? ladderSpanSeconds(inputs.manifest);
+        const familiesFile = families ?? inputs.manifest?.familiesFile ?? null;
+        let knownFamilies: KnownFamily[] = [];
+        let familiesError: string | null = null;
+        if (familiesFile != null) {
+          try {
+            knownFamilies = loadFamilies(familiesFile);
+          } catch (err: unknown) {
+            familiesError = err instanceof Error ? err.message : String(err);
+          }
+        }
+        const excludable = excludableFamilies(knownFamilies);
+        const excluded: ExcludedFamily[][] = [];
         const {steps, rows, cachedRungs} = await computeSequenceTrends(paths, {
           minGrowthCount: min_growth_count,
           monotonicOnly: monotonic_only,
           maxFileSizeMB: max_file_size_mb,
           toolName: 'memlab_leak_report',
           progress: makeProgressReporter(extra, 'leak_report'),
+          adjust:
+            excludable.length > 0
+              ? async rungs => {
+                  for (const st of rungs) {
+                    const ex = await withSnapshotAt(st.localPath, snap =>
+                      excludedFamilies(
+                        snap,
+                        excludable,
+                        node =>
+                          `${node.type}::${normalizeClassName(node.name)}`,
+                      ),
+                    );
+                    excluded.push(ex);
+                    for (const fam of ex) {
+                      st.totalSize -= fam.bytes;
+                      st.nodeCount -= fam.nodes;
+                      for (const [k, c] of fam.byClass) {
+                        const h = st.hist.get(k);
+                        if (h == null) continue;
+                        h.count = Math.max(0, h.count - c.count);
+                        h.selfSize = Math.max(0, h.selfSize - c.selfSize);
+                      }
+                    }
+                  }
+                }
+              : undefined,
         });
 
         const n = steps.length;
@@ -769,13 +813,25 @@ export function registerLeakReport(server: McpServer): void {
             ? samplesSection(run_dir, inputs.manifest?.runaway ?? null)
             : null;
         if (between != null) lines.push(...between);
-        const familiesFile = families ?? inputs.manifest?.familiesFile ?? null;
-        let knownFamilies: KnownFamily[] = [];
-        if (familiesFile != null) {
+        if (excluded.length > 0) {
+          lines.push(
+            ...excludedSection(
+              excluded,
+              steps.map(st => st.label),
+            ),
+          );
+        }
+        if (familiesError != null) {
+          lines.push(
+            `> ⚠️ Known families not read from ${familiesFile}: ${familiesError}`,
+            '',
+          );
+        }
+        const shapeFamilies = knownFamilies.filter(f => f.shapes.length > 0);
+        if (familiesFile != null && shapeFamilies.length > 0) {
           try {
             const rungPaths = steps.map(st => st.localPath);
-            knownFamilies = loadFamilies(familiesFile);
-            const rows = await familyCounts(rungPaths, knownFamilies);
+            const rows = await familyCounts(rungPaths, shapeFamilies);
             if (rows.length > 0) {
               lines.push(
                 ...familiesSection(
@@ -783,7 +839,7 @@ export function registerLeakReport(server: McpServer): void {
                   rows,
                   await plainObjectTotals(rungPaths),
                   typeof cycles === 'number' ? cycles : undefined,
-                  await explainedTotals(rungPaths, knownFamilies),
+                  await explainedTotals(rungPaths, shapeFamilies),
                 ),
               );
             }

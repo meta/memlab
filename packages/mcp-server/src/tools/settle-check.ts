@@ -14,6 +14,8 @@ import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
 import {getSnapshotByHandle} from '../heap-state.js';
+import {excludableFamilies, excludedFamilies} from '../excluded-families.js';
+import {loadFamilies, type KnownFamily} from '../known-families.js';
 import {withSnapshotAt} from '../snapshot-borrow.js';
 import {
   clampLabel,
@@ -720,6 +722,52 @@ export function registerSettleCheck(server: McpServer): void {
           return lines;
         };
 
+        // Registered dev-only / bounded families come out of every histogram
+        // before anything is classified.
+        let excl: KnownFamily[] = [];
+        if (run_dir != null) {
+          try {
+            const file = loadRunManifest(run_dir).familiesFile;
+            if (file != null) excl = excludableFamilies(loadFamilies(file));
+          } catch {
+            excl = [];
+          }
+        }
+        const exclNotes = new Map<string, string>();
+        const hist = (snap: IHeapSnapshot, file: string) => {
+          const h = histogram(snap);
+          if (excl.length === 0) return h;
+          const ex = excludedFamilies(
+            snap,
+            excl,
+            node => `${node.type}::${normalizeClassName(node.name)}`,
+          );
+          for (const fam of ex) {
+            for (const [k, c] of fam.byClass) {
+              const e = h.get(k);
+              if (e == null) continue;
+              e.count = Math.max(0, e.count - c.count);
+              e.selfSize = Math.max(0, e.selfSize - c.selfSize);
+            }
+          }
+          exclNotes.set(
+            path.basename(file),
+            ex
+              .map(
+                f =>
+                  `${f.family.label} ${f.root == null ? 'not found' : `−${formatBytes(f.bytes)}`}`,
+              )
+              .join(', '),
+          );
+          return h;
+        };
+        const exclusionLine = (): string =>
+          exclNotes.size > 0
+            ? `\nexcluded (registered families): ${[...exclNotes]
+                .map(([f, n]) => `${f}: ${n}`)
+                .join('; ')}`
+            : '';
+
         if (run_dir != null) {
           const plan = segmentSettlePlan(run_dir);
           if (plan != null) {
@@ -736,15 +784,15 @@ export function registerSettleCheck(server: McpServer): void {
                 continue;
               }
               const busyH = await withSnapshotAt(p.busyPath, async snap =>
-                histogram(snap),
+                hist(snap, p.busyPath),
               );
               const settledH = await withSnapshotAt(p.settledPath, async snap =>
-                histogram(snap),
+                hist(snap, p.settledPath as string),
               );
               const baseH =
                 p.baselinePath != null
                   ? await withSnapshotAt(p.baselinePath, async snap =>
-                      histogram(snap),
+                      hist(snap, p.baselinePath as string),
                     )
                   : null;
               out.push(
@@ -763,6 +811,8 @@ export function registerSettleCheck(server: McpServer): void {
                 )),
               );
             }
+            const excludedLine = exclusionLine();
+            if (excludedLine !== '') out.splice(4, 0, excludedLine.trim());
             return toolResult(out.join('\n'));
           }
           const pair = resolveSettlePair(run_dir);
@@ -771,16 +821,17 @@ export function registerSettleCheck(server: McpServer): void {
           }
           busyHist = await withSnapshotAt(
             pair.busyPath,
-            async (snap: IHeapSnapshot) => histogram(snap),
+            async (snap: IHeapSnapshot) => hist(snap, pair.busyPath),
           );
           settledHist = await withSnapshotAt(
             pair.settledPath,
-            async (snap: IHeapSnapshot) => histogram(snap),
+            async (snap: IHeapSnapshot) => hist(snap, pair.settledPath),
           );
           if (pair.baselinePath != null) {
+            const basePath = pair.baselinePath;
             baseHist = await withSnapshotAt(
-              pair.baselinePath,
-              async (snap: IHeapSnapshot) => histogram(snap),
+              basePath,
+              async (snap: IHeapSnapshot) => hist(snap, basePath),
             );
           }
           settledPathForTrace = pair.settledPath;
@@ -803,7 +854,8 @@ export function registerSettleCheck(server: McpServer): void {
               ? `\nbaseline: ${path.basename(pair.baselinePath)}`
               : '') +
             idleNote +
-            cyclesNote;
+            cyclesNote +
+            exclusionLine();
         } else {
           if (busy_handle == null || settled_handle == null) {
             return errorResult(
