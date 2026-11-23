@@ -23,6 +23,7 @@ import {
 } from '../utils.js';
 import {collectDevRoots, type DevRoots} from './dev-artifacts.js';
 import {devModuleNodes, devStepReason} from '../dev-edges.js';
+import {NodeIndexSet} from '../node-index-set.js';
 
 /**
  * A live -> island edge: one reason the island is still reachable, and one
@@ -94,30 +95,30 @@ function isSyntheticRoot(node: IHeapNode): boolean {
  * references, but the document is reached from a child by referrers, and a
  * one-directional walk silently returns a fraction of the island.
  */
-function buildIsland(seeds: IHeapNode[]): Set<number> {
-  const island = new Set<number>();
+function buildIsland(
+  snapshot: IHeapSnapshot,
+  seeds: IHeapNode[],
+): NodeIndexSet {
+  const island = new NodeIndexSet(snapshot.nodes.length);
   const stack: IHeapNode[] = [];
   for (const seed of seeds) {
-    if (!island.has(seed.id)) {
-      island.add(seed.id);
-      stack.push(seed);
-    }
+    if (island.add(seed)) stack.push(seed);
   }
   while (stack.length > 0) {
     const node = stack.pop() as IHeapNode;
     tickAnalysis();
     node.forEachReference((edge: IHeapEdge) => {
       const to = edge.toNode;
-      if (to == null || island.has(to.id)) return;
+      if (to == null || island.has(to)) return;
       if (!to.is_detached && !to.name.startsWith('Detached ')) return;
-      island.add(to.id);
+      island.add(to);
       stack.push(to);
     });
     for (const edge of node.referrers) {
       const from = edge.fromNode;
-      if (from == null || island.has(from.id)) continue;
+      if (from == null || island.has(from)) continue;
       if (!from.is_detached && !from.name.startsWith('Detached ')) continue;
-      island.add(from.id);
+      island.add(from);
       stack.push(from);
     }
   }
@@ -141,16 +142,14 @@ function buildIsland(seeds: IHeapNode[]): Set<number> {
  * failure of the premise, not truncated silently.
  */
 function buildReachableIsland(
+  snapshot: IHeapSnapshot,
   seeds: IHeapNode[],
   maxNodes: number,
-): {island: Set<number>; capped: boolean} {
-  const island = new Set<number>();
+): {island: NodeIndexSet; capped: boolean} {
+  const island = new NodeIndexSet(snapshot.nodes.length);
   const stack: IHeapNode[] = [];
   for (const seed of seeds) {
-    if (!island.has(seed.id)) {
-      island.add(seed.id);
-      stack.push(seed);
-    }
+    if (island.add(seed)) stack.push(seed);
   }
   let capped = false;
   while (stack.length > 0) {
@@ -162,10 +161,10 @@ function buildReachableIsland(
     tickAnalysis();
     node.forEachReference((edge: IHeapEdge) => {
       const to = edge.toNode;
-      if (to == null || island.has(to.id) || to.id <= 3) return;
+      if (to == null || island.has(to) || to.id <= 3) return;
       if (edge.type === 'weak') return;
       if (!isDataEdge(edge, to)) return;
-      island.add(to.id);
+      island.add(to);
       stack.push(to);
     });
   }
@@ -221,35 +220,38 @@ function isDataEdge(edge: IHeapEdge, to: IHeapNode): boolean {
 function buildDominatedIsland(
   snapshot: IHeapSnapshot,
   seeds: IHeapNode[],
-): Set<number> {
-  const childrenOf = new Map<number, number[]>();
+): NodeIndexSet {
+  // Dominator children as compressed rows over node indexes: `first[d]` ..
+  // `first[d + 1]` slice `children`. A Map of child lists overflows on large
+  // heaps.
+  const n = snapshot.nodes.length;
+  const dominatorOf = new Int32Array(n).fill(-1);
+  const first = new Int32Array(n + 1);
   snapshot.nodes.forEach(node => {
     tickAnalysis();
     if (node.id <= 3) return;
     const dom = node.dominatorNode;
-    if (dom == null || dom.id === node.id) return;
-    let a = childrenOf.get(dom.id);
-    if (!a) {
-      a = [];
-      childrenOf.set(dom.id, a);
-    }
-    a.push(node.id);
+    if (dom == null || dom.nodeIndex === node.nodeIndex) return;
+    dominatorOf[node.nodeIndex] = dom.nodeIndex;
+    first[dom.nodeIndex + 1]++;
   });
-  const island = new Set<number>();
+  for (let i = 0; i < n; i++) first[i + 1] += first[i];
+  const children = new Int32Array(first[n]);
+  const fill = first.slice(0, n);
+  for (let i = 0; i < n; i++) {
+    const d = dominatorOf[i];
+    if (d >= 0) children[fill[d]++] = i;
+  }
+  const island = new NodeIndexSet(n);
   const stack: number[] = [];
   for (const seed of seeds) {
-    if (!island.has(seed.id)) {
-      island.add(seed.id);
-      stack.push(seed.id);
-    }
+    if (island.add(seed)) stack.push(seed.nodeIndex);
   }
   while (stack.length > 0) {
-    const id = stack.pop() as number;
+    const i = stack.pop() as number;
     tickAnalysis();
-    for (const child of childrenOf.get(id) ?? []) {
-      if (island.has(child)) continue;
-      island.add(child);
-      stack.push(child);
+    for (let c = first[i]; c < first[i + 1]; c++) {
+      if (island.addIndex(children[c])) stack.push(children[c]);
     }
   }
   return island;
@@ -319,10 +321,14 @@ function populationOwners(
  */
 function findDoors(
   snapshot: IHeapSnapshot,
-  island: Set<number>,
+  island: NodeIndexSet,
   devRoots: DevRoots,
 ): {doors: Map<string, Door>; excluded: Excluded; liveNodes: number} {
-  const reachedById = new Set<number>();
+  const reached = new NodeIndexSet(snapshot.nodes.length);
+  const isReachedId = (id: number): boolean => {
+    const node = snapshot.getNodeById(id);
+    return node != null && reached.has(node);
+  };
   const doors = new Map<string, Door>();
   const excluded: Excluded = {devOnly: 0, weak: 0, deadKeyEphemeron: 0};
   const stack: IHeapNode[] = [];
@@ -334,8 +340,7 @@ function findDoors(
 
   snapshot.nodes.forEach(node => {
     if (!isSyntheticRoot(node)) return;
-    if (reachedById.has(node.id)) return;
-    reachedById.add(node.id);
+    if (!reached.add(node)) return;
     if (!devRoots.byId.has(node.id)) stack.push(node);
   });
 
@@ -393,25 +398,24 @@ function findDoors(
     const to = edge.toNode;
     if (to == null) return;
     if (edge.type === 'weak') {
-      if (island.has(to.id)) excluded.weak++;
+      if (island.has(to)) excluded.weak++;
       return;
     }
     if (devStepReason(edge, from, devModules) != null) {
-      if (island.has(to.id)) excluded.devOnly++;
+      if (island.has(to)) excluded.devOnly++;
       else devEdgeTargets.push(to);
       return;
     }
     const eph = parseEphemeronEdge(String(edge.name_or_index));
-    if (eph != null && !reachedById.has(eph.keyId)) {
+    if (eph != null && !isReachedId(eph.keyId)) {
       deferred.push({from, edge, keyId: eph.keyId});
       return;
     }
-    if (island.has(to.id)) {
+    if (island.has(to)) {
       recordDoor(from, edge, to);
       return;
     }
-    if (reachedById.has(to.id)) return;
-    reachedById.add(to.id);
+    if (!reached.add(to)) return;
     if (!devRoots.byId.has(to.id)) stack.push(to);
   };
 
@@ -433,7 +437,7 @@ function findDoors(
     let progressed = false;
     for (const item of pending) {
       tickAnalysis();
-      if (!reachedById.has(item.keyId)) {
+      if (!isReachedId(item.keyId)) {
         deferred.push(item);
         continue;
       }
@@ -445,7 +449,7 @@ function findDoors(
   }
   for (const item of deferred) {
     const to = item.edge.toNode;
-    if (to != null && island.has(to.id)) excluded.deadKeyEphemeron++;
+    if (to != null && island.has(to)) excluded.deadKeyEphemeron++;
   }
 
   // Crossings into the island from anything reachable only through a dev root
@@ -453,12 +457,12 @@ function findDoors(
   // Fast Refresh path (`$RefreshSig$ -> allSignaturesByType -> getCustomHooks
   // -> ... -> div`), which read as "no dev retention" next to an empty door
   // list.
-  const devVisited = new Set<number>();
+  const devVisited = new NodeIndexSet(snapshot.nodes.length);
   const devStack: IHeapNode[] = [];
   const pushDev = (n: IHeapNode) => {
-    if (reachedById.has(n.id) && !devRoots.byId.has(n.id)) return;
-    if (island.has(n.id) || devVisited.has(n.id)) return;
-    devVisited.add(n.id);
+    if (reached.has(n) && !devRoots.byId.has(n.id)) return;
+    if (island.has(n) || devVisited.has(n)) return;
+    devVisited.add(n);
     devStack.push(n);
   };
   for (const [rootId] of devRoots.byId) {
@@ -472,12 +476,12 @@ function findDoors(
     node.forEachReference((edge: IHeapEdge) => {
       const to = edge.toNode;
       if (to == null || edge.type === 'weak') return;
-      if (island.has(to.id)) excluded.devOnly++;
+      if (island.has(to)) excluded.devOnly++;
       else pushDev(to);
     });
   }
 
-  return {doors, excluded, liveNodes: reachedById.size};
+  return {doors, excluded, liveNodes: reached.size};
 }
 
 export function registerIslandDoors(server: McpServer): void {
@@ -606,10 +610,14 @@ export function registerIslandDoors(server: McpServer): void {
           island_mode === 'detached' ? seeds.length - detachedSeeds.length : 0;
 
         let islandCapped = false;
-        let island: Set<number>;
+        let island: NodeIndexSet;
         let ownersInfo: ReturnType<typeof populationOwners> | null = null;
         if (island_mode === 'reachable') {
-          const built = buildReachableIsland(usedSeeds, max_island_nodes);
+          const built = buildReachableIsland(
+            snapshot,
+            usedSeeds,
+            max_island_nodes,
+          );
           island = built.island;
           islandCapped = built.capped;
         } else if (island_mode === 'dominated') {
@@ -625,12 +633,11 @@ export function registerIslandDoors(server: McpServer): void {
           }
           island = buildDominatedIsland(snapshot, ownersInfo.owners);
         } else {
-          island = buildIsland(usedSeeds);
+          island = buildIsland(snapshot, usedSeeds);
         }
         let islandSelf = 0;
-        for (const id of island) {
-          const node = snapshot.getNodeById(id);
-          if (node != null) islandSelf += node.self_size;
+        for (const i of island.indexes()) {
+          islandSelf += snapshot.nodes.get(i)?.self_size ?? 0;
         }
 
         const devRoots = collectDevRoots(snapshot);
