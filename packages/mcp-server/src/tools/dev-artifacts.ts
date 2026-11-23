@@ -1024,16 +1024,23 @@ function namedDevPatterns(
   return out;
 }
 
+export function toolingVerdict(r: ToolingSplit): string {
+  if (r.appReachable && r.path == null) {
+    return 'weakly held: no strong production path reaches it';
+  }
+  if (r.appReachable && r.toolingOnly >= 1024) {
+    return 'mixed: a production path exists, part of what it dominates is held only via tooling';
+  }
+  if (r.appReachable) return 'app-held: a production path exists';
+  if (r.appHeld < 1024) return 'tooling-only';
+  return 'mixed: the object is tooling-only, part of what it dominates is not';
+}
+
 function formatToolingSplit(
   rows: readonly ToolingSplit[],
   asked: number,
   rootsLine: string,
 ): string {
-  const verdict = (r: ToolingSplit): string => {
-    if (r.appReachable) return 'app-held: a production path exists';
-    if (r.appHeld < 1024) return 'tooling-only';
-    return 'mixed: the object is tooling-only, part of what it dominates is not';
-  };
   const lines = [
     '## Held by tooling, or by the app?',
     '',
@@ -1052,7 +1059,7 @@ function formatToolingSplit(
         formatBytes(r.node.retainedSize),
         formatBytes(r.toolingOnly),
         formatBytes(r.appHeld),
-        verdict(r),
+        toolingVerdict(r),
       ]),
       new Set([1, 2, 3]),
     ),
@@ -1146,22 +1153,16 @@ export function registerDevArtifacts(server: McpServer): void {
         const totalSize = meta?.totalSize ?? 0;
         const devRoots = collectDevRoots(snapshot);
 
-        if (
-          devRoots.byId.size === 0 &&
-          node_ids != null &&
-          node_ids.length > 0
-        ) {
-          return toolResult(
-            'No dev/extension globals, console handles or accessibility caches were found, so nothing in this snapshot is held only by tooling: every byte of these objects is app-held. Do not file them as a tooling artifact.',
-          );
-        }
-        if (devRoots.byId.size === 0) {
-          // The hook-guard pattern needs no dev root, so it is still checked.
-          const patterns = namedDevPatterns(snapshot, devRoots, {
+        const askedIds = node_ids != null && node_ids.length > 0;
+        // The hook-guard pattern needs no dev root, so it is still checked.
+        const rootlessPatterns = () =>
+          namedDevPatterns(snapshot, devRoots, {
             nodes: 0,
             retained: 0,
             byCategory: new Map(),
           });
+        if (devRoots.byId.size === 0 && !askedIds) {
+          const patterns = rootlessPatterns();
           return toolResult(
             'No dev/extension globals (__REACT_DEVTOOLS_GLOBAL_HOOK__, __REDUX_DEVTOOLS_EXTENSION__, window.Debug, …) or accessibility caches (AXObjectCacheImpl, …) found in this snapshot. ' +
               'Either this is a production/clean capture, or none were installed — large retainers here are NOT dev/automation artifacts.' +
@@ -1179,12 +1180,17 @@ export function registerDevArtifacts(server: McpServer): void {
         const reached = computeReachableWithoutDevRoots(snapshot, devRoots);
 
         if (node_ids != null && node_ids.length > 0) {
+          const patterns = devRoots.byId.size === 0 ? rootlessPatterns() : [];
           return toolResult(
             formatToolingSplit(
               toolingSplit(snapshot, devRoots, reached, node_ids),
-              node_ids.length,
+              new Set(node_ids).size,
               summarizeDevRoots(devRoots, show_roots),
-            ),
+            ) +
+              (patterns.length > 0
+                ? '\n\n**Named dev-build patterns** (tag — what it is):\n' +
+                  patterns.map(p => `- ${p}`).join('\n')
+                : ''),
           );
         }
 

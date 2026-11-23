@@ -1178,7 +1178,7 @@ export function registerDetachedDom(server: McpServer): void {
                     '(React Fast Refresh, DevTools, or the automation bridge) and do not exist in ' +
                     'production. Subtract them before quoting a total: a measured capture read 98.3% ' +
                     'Fast Refresh while every per-node check still said "pinned — actionable leak". ' +
-                    `**The other ${formatNumber(totalDetached - devOnlyTotal)} stay held by the app** once those holders are removed: ` +
+                    `**${formatNumber(split.pinnedCount - split.devOnlyIds.length)} pinned node(s) stay held by the app** once those holders are removed: ` +
                     'an "artifact" verdict covers only the dev-only part.',
                 ]
               : []),

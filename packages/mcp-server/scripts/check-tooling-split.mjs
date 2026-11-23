@@ -29,8 +29,12 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {collectDevRoots, computeReachableWithoutDevRoots, toolingSplit} =
-  await import(pathToFileURL(built).href);
+const {
+  collectDevRoots,
+  computeReachableWithoutDevRoots,
+  toolingSplit,
+  toolingVerdict,
+} = await import(pathToFileURL(built).href);
 
 function graph() {
   const list = [];
@@ -190,4 +194,39 @@ test('production paths label the selected strong edge at every hop', () => {
     row.path,
     '(GC roots).root → Window / https://example.test.app → Store.items → @17',
   );
+});
+
+test('the verdict names a tooling-only part and a weak-only hold', () => {
+  const snapshot = heap();
+  const devRoots = collectDevRoots(snapshot);
+  const reached = computeReachableWithoutDevRoots(snapshot, devRoots);
+  const [win, store, held] = toolingSplit(
+    snapshot,
+    devRoots,
+    reached,
+    [5, 9, 11],
+  );
+  assert.match(toolingVerdict(win), /^mixed: a production path exists/);
+  assert.match(toolingVerdict(store), /^app-held/);
+  assert.equal(toolingVerdict(held), 'tooling-only');
+
+  const g = graph();
+  const root = g.node(1, '(GC roots)', 0, 'synthetic');
+  const win2 = g.node(5, 'Window / https://example.test', 100);
+  const cache = g.node(9, 'Cache', 200);
+  g.edge(root, win2, 'root');
+  g.edge(win2, cache, 'cache', 'weak');
+  root.dominatorNode = root;
+  win2.dominatorNode = root;
+  cache.dominatorNode = win2;
+  g.finish();
+  const roots2 = collectDevRoots(g.snapshot);
+  const [row] = toolingSplit(
+    g.snapshot,
+    roots2,
+    computeReachableWithoutDevRoots(g.snapshot, roots2),
+    [9],
+  );
+  assert.equal(row.path, null);
+  assert.match(toolingVerdict(row), /^weakly held/);
 });
