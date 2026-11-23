@@ -47,7 +47,7 @@ const FRAME_OBJECT_RE = /StackFrameInfo|CallSiteInfo/;
  * The Error's frames array, `'formatted'` when `.stack` was already read (the
  * symbol then holds the string), or null for a non-Error.
  */
-function frameArrayOf(err: IHeapNode): IHeapNode | 'formatted' | null {
+export function frameArrayOf(err: IHeapNode): IHeapNode | 'formatted' | null {
   let formatted = false;
   for (const e of err.references) {
     if (!String(e.name_or_index).includes('symbol')) continue;
@@ -67,7 +67,7 @@ function frameArrayOf(err: IHeapNode): IHeapNode | 'formatted' | null {
 }
 
 /** The frames' closures, innermost first. */
-function frameClosures(arr: IHeapNode): IHeapNode[] {
+export function frameClosures(arr: IHeapNode): IHeapNode[] {
   const out: IHeapNode[] = [];
   for (const e of arr.references) {
     if (e.type !== 'element' && e.type !== 'internal' && e.type !== 'hidden') {
@@ -85,7 +85,7 @@ function frameClosures(arr: IHeapNode): IHeapNode[] {
   return out;
 }
 
-function messageOf(err: IHeapNode): string | null {
+export function messageOf(err: IHeapNode): string | null {
   for (const e of err.references) {
     if (e.type === 'property' && e.name_or_index === 'message') {
       const t = e.toNode;
@@ -172,7 +172,7 @@ function scriptOf(fn: IHeapNode): string | null {
 }
 
 /** Module when the closure has one, else the script file; plus position. */
-function whereOf(snapshot: IHeapSnapshot, fn: IHeapNode): string {
+export function whereOf(snapshot: IHeapSnapshot, fn: IHeapNode): string {
   const src = sourceOfNode(snapshot, fn, 0);
   const loc =
     src.location != null

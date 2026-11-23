@@ -75,6 +75,12 @@ JavaScript heap, where analyses ranked by size don't notice them:
   (Blink) objects per rung and rates a fixed list of browser holders that
   have no cap, such as performance entries, User Timing marks, style caches
   and observer registrations. It is left out on A/B rounds.
+- **Retained errors:** `memlab_retained_errors` groups retained Error objects
+  and error text by message template, on the first and last rung. It gives
+  the change per cycle, marks templates that are new, and says when only an
+  attached DevTools console holds a template. Errors are too small for any
+  size-ranked analysis to show, but a template that grows every cycle is an
+  error raised per interaction, which is often a visible bug.
 - **Workers:** when the round recorded
   `performance.measureUserAgentSpecificMemory()` per rung (the page must be
   cross-origin isolated), the digest gives its first and last value, with the

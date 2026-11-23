@@ -439,6 +439,9 @@ function buildPlan(
     // Native growth is invisible to every JS-side step above: a Blink
     // scope tree adding 19 entries per cycle was found only by hand.
     {tool: 'memlab_blink_native_census', args: {run_dir: runDir}},
+    // Errors are too small for any size-ranked step to show, and an error
+    // template that grows per cycle is often a user-visible bug.
+    {tool: 'memlab_retained_errors', args: {run_dir: runDir}},
     ...(hasControls
       ? [{tool: 'memlab_positive_controls', args: {run_dir: runDir}}]
       : []),

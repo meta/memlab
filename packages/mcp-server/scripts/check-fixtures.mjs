@@ -118,12 +118,22 @@ globalThis.__fixtureModels = [
   new FixtureMsg('fixture-m1'),
   new FixtureMsg('fixture-m1'),
 ];
+// Retained errors: one template held twice, plus error text in a string.
+globalThis.__fixtureErrors = [
+  new Error('fixture-error id=1'),
+  new Error('fixture-error id=2'),
+  JSON.parse(JSON.stringify('TypeError: fixture text failed at step 7')),
+];
 const nodeSnapshot = v8.writeHeapSnapshot(path.join(tmp, 'node.heapsnapshot'));
 // Distinct long strings that exist only in the second snapshot. A flat
 // string's class name is its content, so each is a "class" that grew.
 // `padEnd` alone makes a concatenated string, which is not named by content.
 globalThis.__fixtureLongStrings = Array.from({length: 5}, (_, i) =>
   JSON.parse(JSON.stringify(`fixture-long-string-${i}-`.padEnd(400, 'z'))),
+);
+globalThis.__fixtureErrors.push(
+  new Error('fixture-error id=3'),
+  new RangeError('fixture-late 5'),
 );
 const nodeSnapshotLater = v8.writeHeapSnapshot(
   path.join(tmp, 'node-later.heapsnapshot'),
@@ -499,6 +509,30 @@ await shapeCheck(
       /Δ extras vs first/.test(ladder.text) &&
         /`FixtureMsg` +\| `fixture-m1` +\| +2 \| +2 \|/.test(ladder.text),
       `ladder: ${ladder.text.slice(0, 1200)}`,
+    );
+  },
+);
+
+await shapeCheck(
+  'retained_errors: templates with counts at both ends, new ones marked',
+  async () => {
+    const {text} = await call('memlab_retained_errors', {
+      paths: [nodeSnapshot, nodeSnapshotLater],
+      limit: 50,
+    });
+    assert(
+      /`Error: fixture-error id=<n>` +\| +2 \| +3 \|/.test(text),
+      `grown template: ${text.slice(0, 1500)}`,
+    );
+    assert(
+      /🆕 `RangeError: fixture-late <n>` +\| +0 \| +1 \|/.test(text),
+      `new template: ${text.slice(0, 1500)}`,
+    );
+    assert(
+      /`TypeError: fixture text failed at step <n>` +\| +(\d) \| +\1 \|/.test(
+        text,
+      ),
+      `string template: ${text.slice(0, 1500)}`,
     );
   },
 );

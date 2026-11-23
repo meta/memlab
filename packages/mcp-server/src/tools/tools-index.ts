@@ -484,6 +484,10 @@ const GROUPS: Group[] = [
         'Where retained Error objects were created, from the stack frames V8 captured (survives a truncated `.stack`); groups by top frames, names the JSX site of React `_debugStack` Errors.',
       ],
       [
+        'memlab_retained_errors',
+        'Retained Errors and error text by message template, with first app frame and whether only the DevTools console holds them; with `run_dir` the change per cycle and templates new since the first rung.',
+      ],
+      [
         'memlab_model_duplicates',
         'Records of one class that share an identity value (`identity_path`, e.g. `__x_id._serialized`): copies of a one-per-id model, where the extras are held and what they retain; one id across model types is listed apart, not as a copy; per-rung counts and change with `run_dir`.',
       ],

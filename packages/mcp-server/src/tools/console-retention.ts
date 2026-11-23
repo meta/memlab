@@ -47,7 +47,7 @@ interface HeldKind {
 }
 
 /** Keep only the console roots, so the question asked is about the console alone. */
-function consoleOnlyRoots(devRoots: DevRoots): DevRoots {
+export function consoleOnlyRoots(devRoots: DevRoots): DevRoots {
   const byId = new Map<number, string>();
   const categoryById = new Map<number, 'console'>();
   for (const [id, category] of devRoots.categoryById) {
