@@ -54,6 +54,15 @@ const cases = [
     /past the end/,
   ],
   ['TypeError: ids.filter is not a function', /not an array/],
+  ['TypeError: snapshot.nodes.filter is not a function', /nodes\.forEach/],
+  [
+    "TypeError: Cannot read properties of undefined (reading 'add')",
+    /g = new Set\(\)\)\); g\.add\(x\)/,
+  ],
+  [
+    "TypeError: Cannot read properties of undefined (reading 'push')",
+    /Object\.create\(null\)/,
+  ],
   [
     'TypeError: (x.value.name || x.value).toString is not a function',
     /String\(x\)/,
@@ -68,4 +77,20 @@ for (const [message, want] of cases) {
 
 test('an unrelated error gets no hint', () => {
   assert.equal(evalErrorHint('RangeError: Invalid array length'), null);
+});
+
+test('an undefined `.type` is not blamed on edge indexing', () => {
+  assert.equal(
+    evalErrorHint(
+      "TypeError: Cannot read properties of undefined (reading 'type')",
+    ),
+    null,
+  );
+});
+
+test('the snapshot.nodes hint does not suggest Array.from', () => {
+  assert.doesNotMatch(
+    evalErrorHint('TypeError: snapshot.nodes.map is not a function') ?? '',
+    /Wrap it with `Array\.from/,
+  );
 });

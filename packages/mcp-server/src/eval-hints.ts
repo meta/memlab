@@ -193,12 +193,15 @@ export function evalErrorHint(message: string): string | null {
   ) {
     return 'An edge or property NAME used as a key of a plain `{}` collides with `Object.prototype` (`constructor`, `toString`, `__proto__`, …), so `groups[name]` is a function, not your array. Key by a `new Map()`, or create the object with `Object.create(null)`.';
   }
-  if (
-    /Cannot read properties of undefined \(reading '(push|add|set)'\)/.test(
+  const missing =
+    /Cannot read properties of undefined \(reading '(push|add|set)'\)/.exec(
       message,
-    )
-  ) {
-    return 'The group was never created: initialise it on first use, e.g. `(groups[key] ??= []).push(x)`, or use a `new Map()`.';
+    );
+  if (missing != null) {
+    const method = missing[1];
+    const init =
+      method === 'push' ? '[]' : method === 'add' ? 'new Set()' : 'new Map()';
+    return `The group was never created: initialise it on first use. With a \`new Map()\`: \`let g = groups.get(key); if (g == null) groups.set(key, (g = ${init})); g.${method}(x)\`. On an object, create it with \`Object.create(null)\` first: on a plain \`{}\` an inherited key such as \`constructor\` is not nullish, so \`(groups[key] ??= ${init})\` keeps it.`;
   }
   if (
     /Cannot read properties of null \(reading '(references|referrers|id|name|type|self_size|retainedSize|toNode|fromNode|dominatorNode)'\)/.test(
@@ -208,11 +211,18 @@ export function evalErrorHint(message: string): string | null {
     return '`snapshot.getNodeById(id)` (and every helper that resolves an id) returns null for an id that is not in THIS snapshot. Ids differ between snapshots, and an id printed from another one is not here. Check for null before using the node.';
   }
   if (
-    /Cannot read properties of undefined \(reading '(toNode|fromNode|name_or_index|type)'\)/.test(
+    /Cannot read properties of undefined \(reading '(toNode|fromNode|name_or_index)'\)/.test(
       message,
     )
   ) {
     return 'An edge read past the end of a list: `node.references[i]` is undefined when `i` is out of range. Iterate with `for (const e of node.references)`, or check `.length` first.';
+  }
+  if (
+    /\bsnapshot\.nodes\.(filter|map|reduce|slice|some|every|find) is not a function/.test(
+      message,
+    )
+  ) {
+    return '`snapshot.nodes` is neither an array nor iterable, so `[...x]` and `Array.from(x)` fail too. Collect inside `snapshot.nodes.forEach(n => { ... })`, or start from an indexed helper (`helpers.byClass(name)`, `helpers.withProp(name)`).';
   }
   if (
     /\.(filter|map|reduce|forEach|slice|some|every|find) is not a function/.test(
