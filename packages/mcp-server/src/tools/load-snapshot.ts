@@ -1353,7 +1353,7 @@ export function registerLoadSnapshot(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          `Append an Orientation block (default: on the first load of the session only, so a ladder's later rungs do not pay for it again): the app-attributable split (app vs bundle, code, dev-only, other realms), the realms present, and the three largest shape populations by what cutting them frees. Costs a few seconds and replaces the first-look calls to app_heap, native_contexts and shape tools. Skipped on a light load and above ${formatNumber(ORIENT_MAX_NODES)} nodes.`,
+          `Append an Orientation block (default: on the first load of the session only, so a ladder's later rungs do not pay for it again, and not in a \`quiet\` or terse session): the app-attributable split (app vs bundle, code, dev-only, other realms), the realms present, and the three largest shape populations by what cutting them frees. Costs a few seconds and replaces the first-look calls to app_heap, native_contexts and shape tools. Skipped on a light load and above ${formatNumber(ORIENT_MAX_NODES)} nodes.`,
         ),
       async: z
         .boolean()
@@ -2000,7 +2000,7 @@ export function registerLoadSnapshot(server: McpServer): void {
           }
         }
         const oriented =
-          (orient ?? !orientationEmitted) &&
+          (orient ?? (!orientationEmitted && !orientationSuppressed)) &&
           !light &&
           snapshot.nodes.length <= ORIENT_MAX_NODES;
         if (oriented) {

@@ -556,7 +556,7 @@ Load and parse a `.heapsnapshot` (or `.heapsnapshot.gz`) file. Builds indexes, c
 - **Concurrent loads:** loads run one at a time, in arrival order. Every reply ends with the snapshots resident after that load. A replace-mode load that unloads a snapshot loaded in the last two minutes warns, naming it.
 - **Size ceilings:** `max_file_size_mb`, `max_nodes` and `max_edges` override the defaults, and `force: true` bypasses the ceilings and the headroom guard (see [Prerequisites](#prerequisites)).
 - **Light loads:** `light: true` skips the dominator / retained-size / shortest-path pass.
-- **Orientation:** the first full load of a session ends with an Orientation block: the app-attributable split (app vs bundle source, code, dev-only, other realms), the realms present, and the three largest shape populations by what cutting them frees. It costs a few seconds (about 4 s on a 2M-node heap). `orient: true` asks for it on a later load and `orient: false` skips it; heaps over 20M nodes skip it.
+- **Orientation:** the first full load of a session ends with an Orientation block: the app-attributable split (app vs bundle source, code, dev-only, other realms), the realms present, and the three largest shape populations by what cutting them frees. It costs a few seconds (about 4 s on a 2M-node heap). `orient: true` asks for it on a later load or in a `quiet` or terse session, and `orient: false` skips it; heaps over 20M nodes skip it.
 - **Session output controls:** `quiet` and `suppress_suggestions` trim repeated boilerplate.
 
 ```
