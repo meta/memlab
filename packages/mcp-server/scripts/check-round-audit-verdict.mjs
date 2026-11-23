@@ -212,3 +212,28 @@ test('a round-quality caveat is never standing', () => {
   assert.equal(status(s, 'per-step landing'), 'caveat');
   assert.equal(s.verdict, 'CAVEATED');
 });
+
+test('a standing check must match the earlier detail, not just its name', () => {
+  const absent = (...props) => ({
+    gating_summary: {
+      declared: 2,
+      verified: 2 - props.length,
+      absent: props.length,
+      absent_props: props,
+    },
+  });
+  const dir = sweep({
+    r9: {...base(), ...absent('web_x'), ...warm},
+    r10: {
+      ...base(),
+      ...absent('web_y'),
+      isolate_age_at_baseline: {ms_since_navigation: 900_000},
+    },
+  });
+  const m = JSON.parse(fs.readFileSync(path.join(dir, 'r10', 'run.json')));
+  const s = withStanding(path.join(dir, 'r10'), m, auditManifest(m));
+  assert.equal(status(s, 'gating'), 'caveat');
+  assert.equal(s.verdict, 'CAVEATED');
+  // An older warm isolate is the same caveat.
+  assert.equal(status(s, 'baseline isolate age'), 'info');
+});

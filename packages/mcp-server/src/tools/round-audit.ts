@@ -735,6 +735,17 @@ const STANDING_ELIGIBLE = new Set([
   'prod-like build',
 ]);
 
+/**
+ * What must match the earlier round's check for this one to be unchanged: the
+ * detail, so a new absent prop is new. The isolate age itself differs every
+ * round, so only which branch of that check fired is compared.
+ */
+function standingKey(c: AuditCheck): string {
+  return c.name === 'baseline isolate age'
+    ? c.detail.replace(/^[\d,.]+s since navigation/, '')
+    : c.detail;
+}
+
 export interface StandingResult {
   checks: AuditCheck[];
   verdict: Verdict;
@@ -766,8 +777,8 @@ function earlierRounds(runDir: string, maxBack = 50): string[] {
 
 /**
  * Re-adjudicate `audit` against the sweep's earlier rounds: an environment
- * caveat the previous round already had (same check, same status; or the same
- * recorded caveat text) is reported once as standing, "unchanged since rN",
+ * caveat the previous round already had (same check, status and detail; or the
+ * same recorded caveat text) is reported once as standing, "unchanged since rN",
  * and no longer decides this round's verdict.
  */
 export function withStanding(
@@ -781,11 +792,12 @@ export function withStanding(
   );
   const checkSince = new Map<string, string>();
   const caveatSince = new Map<string, string>();
-  let openChecks = new Set(
+  const keyOf = new Map(
     audit.checks
       .filter(c => c.status === 'caveat' && STANDING_ELIGIBLE.has(c.name))
-      .map(c => c.name),
+      .map((c): [string, string] => [c.name, standingKey(c)]),
   );
+  let openChecks = new Set(keyOf.keys());
   let openCaveats = new Set(own);
   for (const dir of earlierRounds(runDir)) {
     if (openChecks.size === 0 && openCaveats.size === 0) break;
@@ -798,13 +810,15 @@ export function withStanding(
       break;
     }
     const label = prev.run_id ?? path.basename(dir);
-    const prevChecks = new Set(
+    const prevChecks = new Map(
       auditManifest(prev)
         .checks.filter(c => c.status === 'caveat')
-        .map(c => c.name),
+        .map((c): [string, string] => [c.name, standingKey(c)]),
     );
     const prevCaveats = new Set(prev.caveats ?? []);
-    openChecks = new Set([...openChecks].filter(n => prevChecks.has(n)));
+    openChecks = new Set(
+      [...openChecks].filter(n => prevChecks.get(n) === keyOf.get(n)),
+    );
     openCaveats = new Set([...openCaveats].filter(c => prevCaveats.has(c)));
     for (const n of openChecks) checkSince.set(n, label);
     for (const c of openCaveats) caveatSince.set(c, label);
