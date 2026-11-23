@@ -10,7 +10,8 @@
 
 /**
  * Unit tests for OFF → ON → OFF rounds (tools/ab-compare.ts `readArms`,
- * `abaNote`; run-manifest.ts `settleRungForSegment`).
+ * `abaNote`; run-manifest.ts `settleRungForSegment`), and for the battery on
+ * split rounds (tools/analysis-battery.ts `batterySegment`, `segmentPlan`).
  *
  *   npm run build-pkg && npm run test-units
  *
@@ -37,7 +38,7 @@ const {readArms, abaNote} = await import(
 const {loadRunManifest, ladderSegments, settleRungForSegment} = await import(
   pathToFileURL(path.join(dist, 'run-manifest.js')).href
 );
-const {abSegments} = await import(
+const {abSegments, batterySegment, segmentPlan} = await import(
   pathToFileURL(path.join(dist, 'tools', 'analysis-battery.js')).href
 );
 
@@ -135,4 +136,54 @@ test('the third arm says whether the effect reverses', () => {
   assert.equal(abaNote('NO EFFECT', 10, 9, 10), '');
   assert.match(abaNote(fix, 10, 1, null), /reversal is unchecked/);
   assert.equal(abaNote('NO EFFECT', 10, 9, null), '');
+});
+
+function reloadedRun(splits) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'split-'));
+  const rungs = [0, 1, 2, 3, 4].map(index => ({
+    index,
+    path: path.join(dir, `rung_${index}.heapsnapshot`),
+    cycles: index * 20,
+  }));
+  fs.writeFileSync(
+    path.join(dir, 'run.json'),
+    JSON.stringify({
+      rungs,
+      totals: {cycles: 80},
+      ladder_splits_after_rung: splits,
+    }),
+  );
+  return dir;
+}
+
+test('a split round runs its ladder steps on the longest segment', () => {
+  assert.equal(batterySegment(loadRunManifest(reloadedRun([]))), null);
+  const longest = batterySegment(loadRunManifest(reloadedRun([0])));
+  assert.deepEqual([longest.firstRung, longest.lastRung], [1, 4]);
+  // On a tie, the later segment: the deep dive reads the last rung.
+  const tie = batterySegment(loadRunManifest(reloadedRun([0, 2, 3])));
+  assert.deepEqual([tie.firstRung, tie.lastRung], [1, 2]);
+
+  const dir = reloadedRun([0]);
+  const plan = segmentPlan(
+    [
+      {tool: 'memlab_leak_report', args: {run_dir: dir}},
+      {tool: 'memlab_ladder_probe', args: {run_dir: dir, probes: 'p'}},
+      {tool: 'memlab_positive_controls', args: {run_dir: dir, segment: 0}},
+      {
+        tool: 'memlab_census_diff',
+        args: {baseline: 'rung_0', target: 'rung_4'},
+      },
+      {tool: 'memlab_round_audit', args: {run_dir: dir}},
+    ],
+    longest,
+  );
+  assert.equal(plan[0].args.segment, 1);
+  assert.equal(plan[1].args.segment, 1);
+  assert.equal(plan[2].args.segment, 0, 'an explicit segment is kept');
+  assert.deepEqual(
+    [plan[3].args.baseline, plan[3].args.target].map(p => path.basename(p)),
+    ['rung_1.heapsnapshot', 'rung_4.heapsnapshot'],
+  );
+  assert.equal(plan[4].args.segment, undefined);
 });

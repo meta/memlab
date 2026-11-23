@@ -40,7 +40,7 @@ import os from 'os';
 import path from 'path';
 import {z} from 'zod';
 import {watchedFor} from '../hypothesis-watch.js';
-import type {RunManifest} from '../run-manifest.js';
+import type {LadderSegment, RunManifest} from '../run-manifest.js';
 import {
   ladderSegments,
   loadRunManifest,
@@ -741,6 +741,50 @@ export function perArmPlan(
   }
   if (!placed) out.unshift(compare);
   return out;
+}
+
+/**
+ * The segment a split round's ladder steps run on: the one with the most
+ * rungs, the later one on a tie. Null for an unsplit round.
+ */
+export function batterySegment(manifest: RunManifest): LadderSegment | null {
+  const segments = ladderSegments(manifest);
+  if (segments.length < 2) return null;
+  return segments.reduce((best, sg) =>
+    sg.paths.length >= best.paths.length ? sg : best,
+  );
+}
+
+/**
+ * A split round's plan: the ladder steps on one segment, and the two-snapshot
+ * steps between that segment's first and last rung. Run on the whole round,
+ * every ladder step refuses with "pass `segment`".
+ */
+export function segmentPlan(
+  plan: readonly Step[],
+  segment: LadderSegment,
+): Step[] {
+  return plan.map(st => {
+    const a = st.args;
+    if (
+      (SEGMENTED_TOOLS.has(st.tool) || st.tool === 'memlab_ladder_probe') &&
+      a.run_dir != null &&
+      a.segment == null
+    ) {
+      return {...st, args: {...a, segment: segment.index}};
+    }
+    if (PAIRED_TOOLS.has(st.tool) && a.target != null && a.baseline != null) {
+      return {
+        ...st,
+        args: {
+          ...a,
+          baseline: segment.paths[0],
+          target: segment.paths[segment.paths.length - 1],
+        },
+      };
+    }
+    return st;
+  });
 }
 
 /**
@@ -1726,6 +1770,7 @@ export function registerAnalysisBattery(server: McpServer): void {
           manifest.familiesFile,
         );
         const ab = abSegments(run_dir, manifest);
+        const splitSegment = ab == null ? batterySegment(manifest) : null;
         const optimizationReason =
           profile === 'standard' && ab == null
             ? sweepOptimizationReason(run_dir, finalRung)
@@ -1749,7 +1794,9 @@ export function registerAnalysisBattery(server: McpServer): void {
         } = applySkip(
           ab != null
             ? perArmPlan(basePlan, ab, run_dir, probeSet?.name ?? null)
-            : basePlan,
+            : splitSegment != null
+              ? segmentPlan(basePlan, splitSegment)
+              : basePlan,
           skip,
         );
 
@@ -2091,7 +2138,10 @@ export function registerAnalysisBattery(server: McpServer): void {
           } else if (manifest.splitAfterRung.length > 0) {
             lines.push(
               `> ⚠️ **LADDER SPLIT after rung ${manifest.splitAfterRung.join(', ')}** — rungs across that ` +
-                'boundary are different V8 isolates and must not be compared. Analyze each segment on its own.',
+                'boundary are different V8 isolates and must not be compared. Analyze each segment on its own.' +
+                (splitSegment != null
+                  ? ` The ladder steps below ran on segment ${splitSegment.index} (rungs ${splitSegment.firstRung}-${splitSegment.lastRung}, the longest); pass \`segment\` to a tool for another.`
+                  : ''),
               '',
             );
           }
