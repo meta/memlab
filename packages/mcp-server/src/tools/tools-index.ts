@@ -76,7 +76,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_app_heap',
-        'START HERE on an unfamiliar app: splits the heap into application data vs bundle source vs V8 machinery. On one app this showed ~55% of the heap was JS bundle source, which reframed every number that followed.',
+        'START HERE on an unfamiliar app: splits the heap into application data vs bundle source vs V8 machinery vs other realms (extensions, frames). On one app this showed ~55% of the heap was JS bundle source, which reframed every number that followed.',
       ],
       [
         'memlab_memory_partition',

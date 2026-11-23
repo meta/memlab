@@ -72,6 +72,15 @@ function budgetRows(budget: HeapBudget): string[][] {
       pct(budget.devOnly),
     ],
     ['Known artifacts', formatBytes(budget.artifact), pct(budget.artifact)],
+    ...(budget.otherRealms > 0
+      ? [
+          [
+            'Other realms',
+            formatBytes(budget.otherRealms),
+            pct(budget.otherRealms),
+          ],
+        ]
+      : []),
   ];
 }
 
@@ -212,6 +221,16 @@ export function registerArtifactBudget(server: McpServer): void {
               baseBudget.artifact,
               budget.artifact,
             ],
+            ...(baseBudget.otherRealms > 0 || budget.otherRealms > 0
+              ? [
+                  [
+                    'Other realms',
+                    'otherRealms',
+                    baseBudget.otherRealms,
+                    budget.otherRealms,
+                  ],
+                ]
+              : []),
             ['TOTAL', 'total', baseBudget.total, budget.total],
           ] as Array<[string, string, number, number]>;
           lines.push(

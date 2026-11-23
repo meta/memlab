@@ -11,6 +11,7 @@
 import {moduleHeadOf, RAW_PATH_DESCRIPTION} from '../module-labels.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapEdge} from '@memlab/core';
+import {realmNotice} from '../realm-tags.js';
 import {z} from 'zod';
 import {
   retainerTree,
@@ -497,6 +498,8 @@ export function registerRetainerTrace(server: McpServer): void {
           `${rerouted ? 'Production retainer trace' : 'Retainer trace'} for @${node_id} (${fullLength} nodes${depthNote}):`,
           ...(headLine != null ? [headLine] : []),
         ];
+        const realm = realmNotice(snapshot, node);
+        if (realm != null) lines.push(realm);
         if (show_sizes) {
           lines.push(
             head != null

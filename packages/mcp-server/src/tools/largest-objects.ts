@@ -10,6 +10,7 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode} from '@memlab/core';
+import {realmTag} from '../realm-tags.js';
 import {z} from 'zod';
 import {nodeRef, structuredResult} from '../structured.js';
 import {offsetParam, openPageFooter} from '../pagination.js';
@@ -188,7 +189,12 @@ export function registerLargestObjects(server: McpServer): void {
               : '';
           return [
             `@${n.id}`,
-            truncateNodeName(n.name, n.type, n.self_size, 60),
+            [
+              truncateNodeName(n.name, n.type, n.self_size, 60),
+              realmTag(snapshot, n),
+            ]
+              .filter(Boolean)
+              .join(' '),
             n.type,
             formatBytes(n.self_size),
             formatBytes(n.retainedSize),

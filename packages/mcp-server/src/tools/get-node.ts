@@ -10,6 +10,7 @@
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
+import {realmNotice} from '../realm-tags.js';
 import {z} from 'zod';
 import {nodeDistances} from '../node-distance.js';
 import {structuredResult} from '../structured.js';
@@ -107,6 +108,8 @@ export function registerGetNode(server: McpServer): void {
           `**Distance from root:** ${dist >= 0 ? `${formatNumber(dist)} hop(s)` : 'unreachable over strong edges'}`,
           `**Dominator:** ${d.dominator_id != null ? `@${d.dominator_id}` : 'none'}`,
         ];
+        const realm = realmNotice(snapshot, node);
+        if (realm != null) lines.push(realm);
         if (d.location) {
           lines.push(
             `**Location:** script ${d.location.script_id}, line ${d.location.line}, col ${d.location.column}`,

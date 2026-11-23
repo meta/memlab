@@ -53,7 +53,7 @@ function extraNativeLine(snapshot: IHeapSnapshot): string[] {
 export function registerAppHeap(server: McpServer): void {
   server.tool(
     'memlab_app_heap',
-    'Report APP-ATTRIBUTABLE heap: total self size minus bundle/code memory, minus dev-build artifacts, minus measurement-harness content — the part of the heap that is actually the application. ' +
+    'Report APP-ATTRIBUTABLE heap: total self size minus bundle/code memory, minus dev-build artifacts, minus measurement-harness content, minus objects owned by realms other than the page (browser extensions, other frames, isolated worlds) — the part of the heap that is actually the application. ' +
       'On a dev build the raw number is mostly not the app: a measured WhatsApp Web capture had bundle source text (`system / ExternalStringData`) at 56% of a 311 MB heap and code-related memory at roughly two thirds of the total. A leak-hunt threshold expressed against the raw total therefore mostly measures how much bundle has loaded, and is not comparable to production at all. ' +
       'Use this as the number to drive a hunt against and to quote in a report; use memlab_leak_report for whether anything is actually growing.',
     {
@@ -77,8 +77,16 @@ export function registerAppHeap(server: McpServer): void {
         const snapshot = getSnapshot();
         const meta = getSnapshotMetadata();
 
-        const {total, app, appNodes, bundle, code, devOnly, artifact} =
-          computeHeapBudget(snapshot);
+        const {
+          total,
+          app,
+          appNodes,
+          bundle,
+          code,
+          devOnly,
+          artifact,
+          otherRealms,
+        } = computeHeapBudget(snapshot);
 
         const pct = (n: number): string =>
           total > 0 ? `${((n / total) * 100).toFixed(1)}%` : '—';
@@ -90,6 +98,11 @@ export function registerAppHeap(server: McpServer): void {
             (meta ? ` in \`${meta.fileName}\`` : '') +
             '.',
           ...extraNativeLine(snapshot),
+          ...(otherRealms > 0
+            ? [
+                `Excludes ${formatBytes(otherRealms)} owned by realms other than the page (browser extensions, other frames, isolated worlds); \`memlab_native_contexts\` lists them.`,
+              ]
+            : []),
           '',
         ];
 
@@ -128,6 +141,16 @@ export function registerAppHeap(server: McpServer): void {
                   pct(artifact),
                   'CDP/a11y/warmup families',
                 ],
+                ...(otherRealms > 0
+                  ? [
+                      [
+                        'Other realms',
+                        formatBytes(otherRealms),
+                        pct(otherRealms),
+                        'Owned by an extension, frame or isolated world, not the page',
+                      ],
+                    ]
+                  : []),
               ],
               new Set([1, 2]),
             ),

@@ -9,6 +9,7 @@
  */
 
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
+import {realmClasses} from './realm-tags.js';
 import {classifyArtifact} from './artifact-classes.js';
 import type {ArtifactKind} from './artifact-classes.js';
 import {
@@ -70,6 +71,8 @@ export interface HeapBudget {
   code: number;
   devOnly: number;
   artifact: number;
+  /** Self bytes owned by a realm other than the page (extensions, frames). */
+  otherRealms: number;
   /** Known-artifact self bytes split by family (warmup / ax / cdp-* / …). */
   artifactByKind: Map<ArtifactKind, number>;
   /** Dev-only totals split by root family, or null when no dev roots exist. */
@@ -106,6 +109,7 @@ export function computeHeapBudget(snapshot: IHeapSnapshot): HeapBudget {
   let bundle = 0;
   let devOnly = 0;
   let artifact = 0;
+  let otherRealms = 0;
   let app = 0;
   let appNodes = 0;
   const artifactByKind = new Map<ArtifactKind, number>();
@@ -113,6 +117,12 @@ export function computeHeapBudget(snapshot: IHeapSnapshot): HeapBudget {
   const isDevOnly = (node: IHeapNode): boolean =>
     reached != null && reached[node.nodeIndex] === 0;
   const scriptSource = scriptSourceStringData(snapshot);
+  const realms = realmClasses(snapshot);
+  const isOtherRealm = (node: IHeapNode): boolean => {
+    if (realms == null || realms.page < 0) return false;
+    const o = realms.owner[node.nodeIndex];
+    return o >= 0 && o !== realms.page;
+  };
 
   snapshot.nodes.forEach((node: IHeapNode) => {
     if (node.id <= 3) return;
@@ -141,6 +151,10 @@ export function computeHeapBudget(snapshot: IHeapSnapshot): HeapBudget {
       artifactByKind.set(kind, (artifactByKind.get(kind) ?? 0) + size);
       return;
     }
+    if (isOtherRealm(node)) {
+      otherRealms += size;
+      return;
+    }
     app += size;
     appNodes++;
   });
@@ -153,6 +167,7 @@ export function computeHeapBudget(snapshot: IHeapSnapshot): HeapBudget {
     code,
     devOnly,
     artifact,
+    otherRealms,
     artifactByKind,
     devOnlyTotals:
       reached != null ? summarizeDevOnly(snapshot, devRoots, reached) : null,
