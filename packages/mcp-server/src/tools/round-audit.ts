@@ -664,18 +664,28 @@ function faultCheck(m: RunManifest): AuditCheck | null {
       ? kinds.map(k => [k, matched[k] ?? 0])
       : [[kinds.join('+'), m.faults?.failed_requests ?? 0]];
   const none = counts.filter(([, n]) => n === 0);
+  const missed = (kind: string) =>
+    none.some(([k]) => k.split('+').includes(kind));
   const patterns = m.faults?.xhr_patterns;
-  const where =
-    patterns != null && patterns.length > 0
+  const where = (k: string) =>
+    k.split('+').includes('xhr-fail') && patterns != null && patterns.length > 0
       ? ` (xhr pattern ${patterns.map(p => `\`${p}\``).join(', ')})`
       : '';
+  const fixes = [
+    missed('xhr-fail')
+      ? 'Re-drive it with a `--fault-xhr-pattern` the app requests.'
+      : null,
+    missed('codeload-fail')
+      ? 'codeload-fail fails Script/Stylesheet loads, so re-drive it with a combo that loads code while faulted, or a longer `--fault-dwell`.'
+      : null,
+  ].filter(f => f != null);
   return none.length > 0
     ? {
         name: 'faults',
         status: 'blocking',
         detail:
-          `${none.map(([k]) => `fault ${k} matched 0 requests`).join('; ')}${where}. ` +
-          'The round ran unfaulted. Re-drive it with a `--fault-xhr-pattern` the app requests.',
+          `${none.map(([k]) => `fault ${k} matched 0 requests${where(k)}`).join('; ')}. ` +
+          `The round ran without ${none.length === 1 && !none[0][0].includes('+') ? 'that fault' : 'those faults'}. ${fixes.join(' ')}`,
       }
     : {
         name: 'faults',

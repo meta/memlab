@@ -150,6 +150,21 @@ test('a request fault that matched nothing blocks', () => {
   assert.equal(status(auditManifest(hidden), 'faults'), undefined);
 });
 
+test('a codeload-fail miss is not blamed on the xhr pattern', () => {
+  const m = {
+    ...base(),
+    faults: {
+      kinds: ['codeload-fail', 'xhr-fail'],
+      matched_requests: {'codeload-fail': 0, 'xhr-fail': 76},
+      xhr_patterns: ['*/api/*'],
+    },
+  };
+  const detail = auditManifest(m).checks.find(c => c.name === 'faults').detail;
+  assert.match(detail, /fault codeload-fail matched 0 requests\. /);
+  assert.match(detail, /--fault-dwell/);
+  assert.doesNotMatch(detail, /xhr pattern|--fault-xhr-pattern/);
+});
+
 function sweep(rounds) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-standing-'));
   for (const [name, m] of Object.entries(rounds)) {
