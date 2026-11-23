@@ -710,6 +710,27 @@ await check('retained_errors: templates and first app frames', async () => {
 });
 
 await shapeCheck(
+  'a ladder call promoted to a job keeps the foreground output shape',
+  async () => {
+    const started = await call('memlab_retained_errors', {
+      paths: [nodeSnapshot, nodeSnapshotLater],
+      background: true,
+    });
+    const id = started.text.match(/job_id: "([0-9a-f]+)"/)?.[1];
+    assert(id != null, `no job id: ${started.text.slice(0, 300)}`);
+    const {text} = await call('memlab_job_status', {
+      job_id: id,
+      wait_ms: 100_000,
+    });
+    assert(
+      /## Retained errors/.test(text) &&
+        /_rungs: \d+ cached \/ \d+ parsed_/.test(text),
+      `job result: ${text.slice(-400)}`,
+    );
+  },
+);
+
+await shapeCheck(
   'pending_promises: reactions per creator across rungs, and handlers in eval',
   async () => {
     const {text} = await call('memlab_pending_promises', {

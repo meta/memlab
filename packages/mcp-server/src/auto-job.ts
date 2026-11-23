@@ -63,12 +63,14 @@ export interface RungEstimate {
 }
 
 function sizeMB(p: string): number | null {
+  // A gzipped rung (pruned, or passed as `.gz`) parses at ~4x its size.
+  const mb = (f: string, gz: boolean) =>
+    (fs.statSync(f).size * (gz ? 4 : 1)) / (1024 * 1024);
   try {
-    return fs.statSync(p).size / (1024 * 1024);
+    return mb(p, p.endsWith('.gz'));
   } catch {
     try {
-      // A pruned rung is read from its archive, ~4x the size inflated.
-      return (fs.statSync(`${p}.gz`).size * 4) / (1024 * 1024);
+      return mb(`${p}.gz`, true);
     } catch {
       return null;
     }

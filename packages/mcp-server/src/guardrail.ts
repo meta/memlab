@@ -635,17 +635,32 @@ export function installAnalysisGuardrail(server: McpServer): void {
           const conflict =
             ref != null ? snapshotRefConflict(params as object) : null;
           if (conflict != null) return errorResult(new Error(conflict));
+          // The same output shaping for a foreground call and a promoted job.
+          const finish = (
+            result: unknown,
+            rungs: {parsed: number; cached: number},
+          ): unknown =>
+            wantsJson(name, params)
+              ? jsonOutput(name, params, result)
+              : withRungLine(
+                  trimStandingNotes(terseOutput(name, result)),
+                  rungs.parsed,
+                  rungs.cached,
+                );
           const est = shouldAutoJob(name, params);
           if (est != null) {
-            const job = startJob(name, jobExtra =>
-              withFileSizeLimit(fileLimitOf(params), () =>
-                runWithReadScope(async () =>
-                  ref != null
-                    ? withSnapshotRef(ref, () => inner(params, jobExtra))
-                    : inner(params, jobExtra),
+            const job = startJob(name, async jobExtra => {
+              const {result, stats} = await runWithRungStats(() =>
+                withFileSizeLimit(fileLimitOf(params), () =>
+                  runWithReadScope(async () =>
+                    ref != null
+                      ? withSnapshotRef(ref, () => inner(params, jobExtra))
+                      : inner(params, jobExtra),
+                  ),
                 ),
-              ),
-            );
+              );
+              return finish(result, stats);
+            });
             if (typeof job !== 'string') {
               return toolResult(
                 autoJobReply(
@@ -671,13 +686,7 @@ export function installAnalysisGuardrail(server: McpServer): void {
                 ),
             ),
           );
-          return wantsJson(name, params)
-            ? jsonOutput(name, params, result)
-            : withRungLine(
-                trimStandingNotes(terseOutput(name, result)),
-                rungs.parsed,
-                rungs.cached,
-              );
+          return finish(result, rungs);
         } catch (e) {
           if (e instanceof ScanTimeoutError) {
             const ran = Math.round(activeElapsedMs() / 1000);

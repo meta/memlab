@@ -110,3 +110,18 @@ test('rung files come from paths, run_dir or a snapshot path', () => {
   assert.deepEqual(rungFilesOf({snapshot: a}), [a]);
   assert.deepEqual(rungFilesOf({snapshot: 'handle-name'}), []);
 });
+
+test('a .gz rung is priced at its inflated size', () => {
+  const gz = path.join(dir, 'rung_02.heapsnapshot.gz');
+  fs.writeFileSync(gz, Buffer.alloc(512 * 1024));
+  const plain = rung('rung_03.heapsnapshot');
+  const g = shouldAutoJob('memlab_ladder_probe', {
+    snapshot: gz,
+    background: true,
+  });
+  const p = shouldAutoJob('memlab_ladder_probe', {
+    snapshot: plain,
+    background: true,
+  });
+  assert.equal(g.ms, p.ms);
+});
