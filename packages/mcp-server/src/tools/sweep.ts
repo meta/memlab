@@ -674,7 +674,14 @@ export function residualCall(leads: Lead[], cap: number): string | null {
     const key = l.edge ?? (l.ids ?? []).join(',');
     if (key === '' || seen.has(key)) continue;
     seen.add(key);
-    const raw = l.label.replace(/["\\]/g, "'");
+    // memlab_residual requires a label on every entry; a holder with no name
+    // still needs one the reader can match back to the lead.
+    const named = (l.label ?? '').trim();
+    const raw = (
+      named !== ''
+        ? named
+        : (l.edge ?? `§${l.section} @${(l.ids ?? []).join(',@')}`)
+    ).replace(/["\\]/g, "'");
     let label = raw.length > 40 ? `${raw.slice(0, 12)}…${raw.slice(-27)}` : raw;
     // Entries sharing a label are merged by memlab_residual; keep them apart.
     for (let k = 2; labels.has(label); k++) label = `${clip(raw, 36)} #${k}`;

@@ -137,6 +137,27 @@ test('the cap bounds the call, and quotes cannot break it', () => {
   assert.equal(got[0].label, "say 'x' 0");
 });
 
+test('every entry has a non-empty label, even for a nameless holder', () => {
+  const got = entries(
+    residualCall(
+      [
+        {label: '', bytes: 3, ids: [11], section: 2},
+        {label: '   ', bytes: 2, edge: 'Object.src', section: 3},
+        {label: undefined, bytes: 1, ids: [12, 13], section: 10},
+      ],
+      10,
+    ),
+  );
+  assert.equal(got.length, 3);
+  for (const e of got)
+    assert.ok(typeof e.label === 'string' && e.label.length > 0);
+  assert.deepEqual(got.map(e => e.label).sort(), [
+    'Object.src',
+    '§10 @12,@13',
+    '§2 @11',
+  ]);
+});
+
 test('fields of one record type fold into one row; counts are summed', () => {
   const {foldFields} = sweep;
   const rows = [
