@@ -36,27 +36,35 @@ const ALWAYS = new Set([
   'memlab_job_status',
 ]);
 
-/** The everyday investigation set. */
+/**
+ * The everyday investigation set: the tools that made up most calls in
+ * measured investigations (the first pass, eval, the retainer and cut tools,
+ * the coverage check), plus the claim checks they should be making.
+ */
 export const CORE_TOOLS = new Set([
-  'memlab_snapshot_summary',
+  'memlab_sweep',
   'memlab_app_heap',
-  'memlab_quick_diagnosis',
-  'memlab_auto_investigate',
-  'memlab_class_histogram',
-  'memlab_largest_objects',
-  'memlab_query_objects',
-  'memlab_get_node',
+  'memlab_eval',
+  'memlab_eval_across',
+  'memlab_retainer_trace',
+  'memlab_trace_all',
+  'memlab_trace_dominators',
+  'memlab_what_if',
+  'memlab_residual',
+  'memlab_island_doors',
+  'memlab_object_shape',
+  'memlab_get_value',
   'memlab_get_references',
   'memlab_get_referrers',
-  'memlab_retainer_trace',
-  'memlab_retainer_layers',
-  'memlab_dominator_chain',
-  'memlab_detached_dom',
-  'memlab_diff_snapshots',
-  'memlab_sequence_analysis',
   'memlab_closure_inspection',
-  'memlab_duplicated_strings',
-  'memlab_eval',
+  'memlab_map_entries',
+  'memlab_shape_histogram',
+  'memlab_detached_dom',
+  'memlab_native_contexts',
+  'memlab_collection_diff',
+  'memlab_explain_delta',
+  'memlab_validate_finding',
+  'memlab_coverage_check',
 ]);
 
 function parseSelection(raw: string | undefined): Set<string> | null {
