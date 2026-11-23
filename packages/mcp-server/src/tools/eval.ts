@@ -53,6 +53,7 @@ import {
   nearestFiber,
 } from '../react-shapes.js';
 import {shapeKeyOf, shapeText} from './shape-clusters.js';
+import {fiberSubtreeText} from './rendered-text-audit.js';
 import {edgeNameIndex, isIndexedEdgeName} from '../edge-name-index.js';
 import {readElements as readElementsInfo} from '../heap-shapes.js';
 import {
@@ -1268,6 +1269,8 @@ const HELPER_NAMES = [
   'contextSlotCensus',
   'countShapes',
   'countStrings',
+  'moduleState',
+  'fiberText',
   'countUniqueTargets',
   'ctxVars',
   'defineFn',
@@ -1770,7 +1773,7 @@ export function registerEval(server: McpServer): void {
             'iterByClass(name, {type?, instancesOnly?})->nodes[] & iterByType(type)->nodes[] (INDEXED iteration — no full scan; instancesOnly defaults TRUE and drops the constructor closure, the `Foo (prototype)` object, `system/SharedFunctionInfo/Foo` and the string `"Foo"`, which otherwise come back as class members whose only "properties" are length/map and make a per-instance loop produce garbage; a class with no live instances gives []), ' +
             'classCounts({pattern?, type?, minCount?, baseline?, minDelta?})->[{name,type,count,selfSize, baselineCount?, delta?}] (one-pass histogram, cached; with `baseline` (a resident handle) only classes that grew by ≥minDelta, largest delta first), ' +
             "entries(nodeOrId, {limit?, keyPattern?})->[{key,value}] (generic Map/Set/WeakMap/Array/object walk, holes filtered; keyPattern is a case-insensitive regex on the key or the key node's name), " +
-            'edgeTarget(nodeOrId, edgeName)->node|null, walkChain(startOrNode, edgeName, {maxHops?, collectIds?})->{length, terminated:"cycle"|"end"|"cap", truncated} (USE THIS instead of a hand-written `while` over `.next` — a hand-rolled loop cannot tell a circular list from its own hop cap, and reports the cap as if it were the length), isRealDetached(node)->boolean (same filtering the tools apply internally), detachedElements()->ids[] (detached DOM elements only, not the Blink records attached to them), countShapes({name: [props]})->{name: count} (plain objects having every listed property, through the property index), countStrings(regex, {prefix?})->number (string nodes matching; `prefix` narrows through the prefix buckets), ' +
+            'edgeTarget(nodeOrId, edgeName)->node|null, walkChain(startOrNode, edgeName, {maxHops?, collectIds?})->{length, terminated:"cycle"|"end"|"cap", truncated} (USE THIS instead of a hand-written `while` over `.next` — a hand-rolled loop cannot tell a circular list from its own hop cap, and reports the cap as if it were the length), isRealDetached(node)->boolean (same filtering the tools apply internally), detachedElements()->ids[] (detached DOM elements only, not the Blink records attached to them), countShapes({name: [props]})->{name: count} (plain objects having every listed property, through the property index), countStrings(regex, {prefix?, maxLen?})->number (string nodes matching, from the type index and memoized per question; `prefix` narrows through the prefix buckets, `maxLen` skips longer strings), moduleState(moduleName, {limit?})->rows[]|null (the module\'s scope variables and export properties, each {kind, name, id, type, class, self_size, retained_size}, largest retained first), fiberText(componentName, {limit?, maxLen?})->[{fiber, text}] (what each mounted instance renders, below the fold included), ' +
             'dominates(id, {population?, limit?})->{count,selfSize,ids,truncated}, ' +
             'remember(name, value)/recall(name?) (persist ACROSS sessions), ' +
             'sample(items, n) (deterministic, evenly spaced), ' +
@@ -4068,26 +4071,100 @@ export async function runEval({
      * the strings starting with it, through the same buckets as
      * `stringsWithPrefix`; without it every string is tested.
      */
+    // Strings only, from the type index, and memoized per question: a
+    // regex over every node was among the slowest evals of a sweep.
     const countStrings = (
       pattern: RegExp | string,
-      opts?: {prefix?: string},
+      opts?: {prefix?: string; maxLen?: number},
     ): number => {
       const source = typeof pattern === 'string' ? pattern : pattern.source;
       const flags =
         typeof pattern === 'string' ? '' : pattern.flags.replace(/[gy]/g, '');
+      const scratch = getEvalScratch();
+      const memo = (scratch.__memlabCountStrings ??= new Map()) as Map<
+        string,
+        number
+      >;
+      const key = `${source}\u0000${flags}\u0000${opts?.prefix ?? ''}\u0000${opts?.maxLen ?? ''}`;
+      const hit = memo.get(key);
+      if (hit != null) return hit;
       const re = new RegExp(source, flags);
+      const maxLen = opts?.maxLen ?? Infinity;
+      const ok = (node: IHeapNode | null | undefined): boolean =>
+        node != null && node.name.length <= maxLen && re.test(node.name);
       let n = 0;
       if (opts?.prefix != null) {
         for (const id of stringsWithPrefix(opts.prefix)) {
-          const node = snapshot.getNodeById(id);
-          if (node != null && re.test(node.name)) n++;
+          if (ok(snapshot.getNodeById(id))) n++;
         }
-        return n;
+      } else {
+        const types = buildTypeIndex();
+        for (const type of ['string', 'concatenated string', 'sliced string']) {
+          for (const id of types.get(type) ?? []) {
+            if (ok(nodeByIdOrStray(snapshot, id))) n++;
+          }
+        }
       }
-      snapshot.nodes.forEach((node: IHeapNode) => {
-        if (node.isString && re.test(node.name)) n++;
-      });
+      memo.set(key, n);
       return n;
+    };
+
+    // A module's state in one call: its scope variables and export
+    // properties, each with its size, largest retained first.
+    const moduleState = (name: string, opts?: {limit?: number}) => {
+      const rec = moduleRecords(snapshot).get(name);
+      if (rec == null) return null;
+      const row = (kind: 'scope' | 'export', key: string, node: IHeapNode) => ({
+        kind,
+        name: key,
+        id: node.id,
+        type: node.type,
+        class: node.name.length > 80 ? `${node.name.slice(0, 79)}…` : node.name,
+        self_size: node.self_size,
+        retained_size: light ? null : retainedSize(node.id),
+      });
+      const rows = moduleScopeVars(rec).map(v =>
+        row('scope', v.variable, v.node),
+      );
+      for (const holder of [rec.exports, rec.defaultExport]) {
+        if (holder == null) continue;
+        holder.forEachReference((e: IHeapEdge) => {
+          if (e.type !== 'property') return;
+          const key = String(e.name_or_index);
+          if (key === '__proto__') return;
+          rows.push(row('export', key, e.toNode));
+        });
+      }
+      rows.sort((a, b) => (b.retained_size ?? 0) - (a.retained_size ?? 0));
+      return rows.slice(0, opts?.limit ?? 50);
+    };
+
+    // What mounted instances of a component render, a fiber and its
+    // alternate once.
+    const fiberText = (
+      componentName: string,
+      opts: {limit?: number; maxLen?: number} = {},
+    ): Array<{fiber: number; text: string}> => {
+      const limit = opts.limit ?? 20;
+      const maxLen = opts.maxLen ?? 300;
+      const out: Array<{fiber: number; text: string}> = [];
+      const seen = new Set<number>();
+      snapshot.nodes.forEach((node: IHeapNode) => {
+        if (out.length >= limit) return false;
+        if (!isFiberNode(node) || fiberComponentName(node) !== componentName) {
+          return undefined;
+        }
+        const alt = edgeTo(node, 'alternate');
+        const pair = alt != null ? Math.min(alt.id, node.id) : node.id;
+        if (seen.has(pair)) return undefined;
+        seen.add(pair);
+        out.push({
+          fiber: node.id,
+          text: fiberSubtreeText(node).slice(0, maxLen),
+        });
+        return undefined;
+      });
+      return out;
     };
 
     /**
@@ -5587,6 +5664,8 @@ export async function runEval({
       detachedElements,
       countShapes,
       countStrings,
+      moduleState,
+      fiberText,
       iterByClass,
       nodesByClass,
       iterByType,
@@ -6498,6 +6577,8 @@ export const HELPER_RETURNS: Readonly<Record<string, string>> = {
   elements: 'object | null',
   pathTree: 'object',
   countStrings: 'number',
+  moduleState: 'rows[] | null',
+  fiberText: 'rows[] ({fiber, text})',
   retainedSize: 'number',
   arrayLen: 'number',
   len: 'number',
@@ -6588,7 +6669,9 @@ function describeEnvLines(): string[] {
     '- `helpers.isRealDetached(node) -> boolean` — the oddball/root filtering the detached-DOM tools apply internally, so hand-written eval counts the same set they do.',
     '- `helpers.detachedElements() -> ids[]` — detached DOM elements (`Detached <div …>`, `Detached Text`), without the Blink records attached to them.',
     '- `helpers.countShapes({name: [props]}) -> {name: count}` — plain objects having every listed property, per name, through the property index.',
-    '- `helpers.countStrings(regex, {prefix?}) -> number` — string nodes whose value matches; `prefix` limits the scan to strings starting with it.',
+    '- `helpers.countStrings(regex, {prefix?, maxLen?}) -> number` — string nodes whose value matches, read from the type index (strings only) and memoized per regex; `prefix` limits the scan to strings starting with it, `maxLen` skips longer ones.',
+    "- `helpers.moduleState(moduleName, {limit=50}) -> [{kind: 'scope'|'export', name, id, type, class, self_size, retained_size}] | null` — a module's scope variables and export properties with their sizes, largest retained first: the `helpers.module(...).scope.find(...)` + `getProp` walk in one call.",
+    '- `helpers.fiberText(componentName, {limit=20, maxLen=300}) -> [{fiber, text}]` — what each mounted instance of a component renders (text fibers and single string children of its subtree, joined like `textContent`), a fiber and its alternate once. Reads rows below the fold that no screenshot shows.',
     '- `helpers.dominates(id, {population?, limit?}) -> {count, selfSize, ids, truncated}` — what this node actually owns (bounded 500-hop dominator walk). `population` is a predicate over nodes.',
     '- `helpers.pathTree() -> {subtreeBytes(id), parent(id), children(id, {minBytes?, limit?}), roots()}` — the shortest-path tree with app bytes per subtree (loaded code and bundle text count 0). It PARTITIONS the heap, so a shared cache keeps its size. Built once per snapshot and kept across eval calls; `memlab_path_tree` prints it.',
     "- `helpers.familyOf(nodeOrId)`, `helpers.pathLabel(nodeOrId)`, `helpers.shapeFamily(nodeOrId)` — the memoized attribution `memlab_memory_partition` uses: nearest framework family on the dominator chain; first `module:<Name>.<export>` / `global:<name>` owner on the shortest path; the node's own record family. Per-snapshot memos persist across calls, so a whole-heap attribution walk costs one pass the first time and almost nothing after.",

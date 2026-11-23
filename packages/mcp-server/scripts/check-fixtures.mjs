@@ -144,6 +144,8 @@ function FixtureChatRow() {}
   });
   const ok = new FiberNode('span', {children: 'You added Alice & Bob'});
   ok.return = owner;
+  owner.child = span;
+  span.sibling = ok;
   globalThis.__fixtureFibers = [owner, span, ok, ...parts];
 }
 // A promise that never settles, gaining `.then` reactions between snapshots.
@@ -718,6 +720,37 @@ await shapeCheck(
     assert(
       /ids\[\]: .*`newest`/.test(env.text),
       `describe_env: ${env.text.slice(0, 300)}`,
+    );
+  },
+);
+
+await shapeCheck(
+  'eval helpers: fiberText, countStrings with maxLen, moduleState off a module system',
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: [
+        'result = {',
+        "  rows: helpers.fiberText('FixtureChatRow'),",
+        '  short: helpers.countStrings(/^You added/, {maxLen: 15}),',
+        '  all: helpers.countStrings(/^You added/),',
+        '  again: helpers.countStrings(/^You added/),',
+        "  mod: helpers.moduleState('NoSuchModule'),",
+        '};',
+      ].join('\n'),
+    });
+    const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(
+      json.rows.length === 1 &&
+        json.rows[0].text === 'You added  & You added Alice & Bob',
+      `fiberText: ${JSON.stringify(json.rows)}`,
+    );
+    assert(
+      json.all >= 2 &&
+        json.short >= 1 &&
+        json.short < json.all &&
+        json.again === json.all &&
+        json.mod === null,
+      `countStrings/moduleState: ${JSON.stringify(json)}`,
     );
   },
 );

@@ -92,6 +92,33 @@ function hostText(fiber: IHeapNode): string | null {
   return parts.length > 1 ? parts.join('') : null;
 }
 
+/**
+ * What a component fiber's subtree renders, in document order: every text
+ * fiber and every host element's single string child, joined as
+ * `textContent` would (rows below the fold included). At most `maxFibers`
+ * fibers are walked.
+ */
+export function fiberSubtreeText(fiber: IHeapNode, maxFibers = 500): string {
+  const parts: string[] = [];
+  const stack: IHeapNode[] = [];
+  const first = edgeTo(fiber, 'child');
+  if (first != null) stack.push(first);
+  for (let seen = 0; stack.length > 0 && seen < maxFibers; seen++) {
+    const f = stack.pop() as IHeapNode;
+    const props = edgeTo(f, 'memoizedProps');
+    // A text fiber's props ARE its string.
+    const t =
+      stringOf(props) ??
+      (props != null ? stringOf(edgeTo(props, 'children')) : null);
+    if (t != null) parts.push(t);
+    const sibling = edgeTo(f, 'sibling');
+    if (sibling != null) stack.push(sibling);
+    const child = edgeTo(f, 'child');
+    if (child != null) stack.push(child);
+  }
+  return parts.join('');
+}
+
 /** The nearest composite component above a host fiber. */
 function ownerComponent(fiber: IHeapNode): string {
   let cur = edgeTo(fiber, 'return');
