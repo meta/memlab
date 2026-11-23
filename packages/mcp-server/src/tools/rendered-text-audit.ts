@@ -95,16 +95,17 @@ function hostText(fiber: IHeapNode): string | null {
   // A span holding only a separator (` · ` between a time and an icon) is
   // a separator, not a row that lost its values.
   if (single != null) return /^\s*[&,·]\s*$/.test(single) ? null : single;
-  const parts: string[] = [];
+  const kids: Array<[IHeapNode, string | null]> = [];
   let texts = 0;
   let child = edgeTo(fiber, 'child');
   for (let i = 0; child != null && i < 200; i++) {
     const t = stringOf(edgeTo(child, 'memoizedProps'));
     if (t != null) texts++;
-    parts.push(t ?? elementText(child));
+    kids.push([child, t]);
     child = edgeTo(child, 'sibling');
   }
-  return texts > 1 ? parts.join('') : null;
+  if (texts < 2) return null;
+  return kids.map(([c, t]) => t ?? elementText(c)).join('');
 }
 
 /**
