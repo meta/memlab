@@ -23,10 +23,18 @@ import {
 } from '../analysis-budget.js';
 import {
   clearAllSnapshots,
+  evictLeastRecentlyUsed,
+  getSnapshotMetadata,
   listSnapshots,
   setCurrentSnapshot,
   setSnapshot,
+  type SnapshotMetadata,
 } from '../heap-state.js';
+import {
+  estimateLoadHeapMB,
+  getHeapHeadroomMB,
+  peekSnapshotCounts,
+} from './load-snapshot.js';
 import {artifactLabel, type ArtifactKind} from '../artifact-classes.js';
 import {
   errorResult,
@@ -168,6 +176,43 @@ async function runTool(
   }
 }
 
+/**
+ * Unload resident snapshots, least recently used first, only until the two
+ * deep-dive rungs fit; everything else stays loaded. Returns what it unloaded.
+ *
+ * Falls back to unloading everything when the rungs' size or the heap headroom
+ * cannot be read, since a deep dive that runs out of memory takes the server
+ * with it.
+ */
+function makeRoomForRungs(rungPaths: string[]): SnapshotMetadata[] {
+  const counts = rungPaths.map(p => peekSnapshotCounts(p));
+  let free = getHeapHeadroomMB();
+  if (free == null || counts.some(c => c == null)) {
+    const all = listSnapshots();
+    clearAllSnapshots();
+    return all;
+  }
+  const needMB =
+    1.2 *
+    counts.reduce(
+      (sum, c) => sum + (c != null ? estimateLoadHeapMB(c, false) : 0),
+      0,
+    );
+  const unloaded: SnapshotMetadata[] = [];
+  while (free < needMB) {
+    const victim = evictLeastRecentlyUsed();
+    if (victim == null) {
+      // Only the active or pinned snapshots are left.
+      unloaded.push(...listSnapshots());
+      clearAllSnapshots();
+      break;
+    }
+    unloaded.push(victim);
+    free += estimateLoadHeapMB(victim, false);
+  }
+  return unloaded;
+}
+
 /** Load a snapshot file and register it under `alias`, keeping the others. */
 async function loadRung(filePath: string, alias: string): Promise<void> {
   const snapshot = await getFullHeapFromFile(filePath);
@@ -214,7 +259,7 @@ export function registerAnalyzeRun(server: McpServer): void {
     "Point at a leak hunt's `run.json` and get the whole analysis protocol executed in one call: ladder trend, owner attribution for the growth, a detached-DOM population comparison between the first and last rung, dev/automation-artifact classification, and a per-grower adjudication — plus the run's own caveats (gating, relink seams, stall) carried into the write-up. " +
       '`memlab_hunt_report` renders the run and `memlab_leak_report` analyses the ladder; nothing chained them, so how thorough a round got depended on how thorough the operator felt like being, which is the single largest source of variance between rounds. This runs the same sequence every time and states explicitly which steps did not run. ' +
       'Cost: it loads the ladder transiently for the trend, then holds the FIRST and LAST rung resident together for the attribution and population steps — size `timeout_ms` accordingly (600000+ for a multi-hundred-MB ladder), and expect several minutes. That is past a typical ~120s client tool timeout, so on such a ladder start it with `memlab_start_job` and collect the write-up with `memlab_job_status`. ' +
-      'A full run unloads every snapshot already resident in the session before loading those two rungs, and lists what it unloaded at the end of the write-up; `skip_deep_dive` leaves resident snapshots alone.',
+      'A full run keeps the snapshots already resident when the two rungs fit beside them, and otherwise unloads the least recently used ones until they do. The top of the write-up says what it unloaded and that the active snapshot is now `run_last`; `skip_deep_dive` leaves resident snapshots alone.',
     {
       run_json: z
         .string()
@@ -483,16 +528,13 @@ export function registerAnalyzeRun(server: McpServer): void {
 
         // ---- Step 2+: two rungs resident ----
         let unloaded: Array<{handle: string; filePath: string}> = [];
+        const previousActive = getSnapshotMetadata()?.handle ?? null;
         if (skip_deep_dive) {
           unanalyzed.push(
             'owner attribution, detached-DOM population diff and artifact classification (skip_deep_dive was set)',
           );
         } else {
-          // Start from a clean slate: the deep dive needs exactly two graphs
-          // resident, and anything left over from an earlier call is both
-          // memory pressure and a chance to attribute against the wrong pair.
-          unloaded = listSnapshots();
-          clearAllSnapshots();
+          unloaded = makeRoomForRungs([first.path, last.path]);
           let loaded = false;
           try {
             await loadRung(first.path, 'run_first');
@@ -601,12 +643,25 @@ export function registerAnalyzeRun(server: McpServer): void {
             '',
           );
         }
+        // Said at the top: an agent mid-investigation reads the head of the
+        // result, and its handles changing is what it needs to know first.
+        const residency: string[] = [];
         if (unloaded.length > 0) {
-          out.push(
-            `_Unloaded ${unloaded.length} snapshot(s) that were resident before this call, to make room for the deep dive: ${unloaded.map(m => `\`${m.handle}\` (${m.filePath})`).join(', ')}. Reload with \`memlab_load_snapshot\` and \`keep_previous: true\`._`,
-            '',
+          residency.push(
+            `> ⚠ **Unloaded ${unloaded.length} snapshot(s)** that were resident before this call, to make room for the deep dive: ${unloaded.map(m => `\`${m.handle}\` (${m.filePath})`).join(', ')}. Reload with \`memlab_load_snapshot\` and \`keep_previous: true\`.`,
           );
         }
+        const nowActive = getSnapshotMetadata()?.handle ?? null;
+        if (previousActive != null && nowActive !== previousActive) {
+          const kept = listSnapshots().some(m => m.handle === previousActive);
+          residency.push(
+            `> The active snapshot is now \`${nowActive ?? '(none)'}\`` +
+              (kept
+                ? `; \`${previousActive}\` is still resident (pass \`snapshot: "${previousActive}"\`, or make it active with \`memlab_snapshots\`).`
+                : '.'),
+          );
+        }
+        if (residency.length > 0) out.splice(1, 0, '', ...residency);
         const resident = listSnapshots()
           .map(m => m.handle)
           .join(', ');
