@@ -29,7 +29,11 @@ import {cachedModuleScopes} from './module-attribution.js';
 import {moduleOfScope} from '../module-registry.js';
 import {resolveRunOrPaths} from './ladder.js';
 import {segmentArg} from '../run-manifest.js';
-import {fileSizeRefusal, resolveSnapshotPath} from './load-snapshot.js';
+import {
+  fileSizeRefusal,
+  precheckFileSizes,
+  resolveSnapshotPath,
+} from './load-snapshot.js';
 import {findResidentByPath, getSnapshotByHandle} from '../heap-state.js';
 import memlabHeapAnalysis from '@memlab/heap-analysis';
 import {ObjectGrowthTracker, formatObjectGrowth} from './object-growth.js';
@@ -558,6 +562,7 @@ export function registerCollectionDiff(server: McpServer): void {
           minRetained: object_min_retained_kb * 1024,
         };
         let objectLines: string[] = [];
+        precheckFileSizes(resolved, max_file_size_mb);
         for (const p of resolved) {
           let local: string;
           let fetchedFrom: string | null = null;

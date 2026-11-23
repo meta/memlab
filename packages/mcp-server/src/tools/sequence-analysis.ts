@@ -25,6 +25,7 @@ const {getFullHeapFromFile} = memlabHeapAnalysis;
 import {
   fileSizeRefusal,
   LOCAL_FILE_SIZE_LIMIT_MB,
+  precheckFileSizes,
   MANIFOLD_FETCH_SIZE_LIMIT_MB,
   resolveSnapshotPath,
 } from './load-snapshot.js';
@@ -232,6 +233,8 @@ export async function computeSequenceTrends(
           : 'Pass an ordered list of paths, or a single ["ladder:<name>"] reference.'),
     );
   }
+
+  precheckFileSizes(resolvedPaths, opts.maxFileSizeMB, toolName);
 
   // Rungs without a sidecar are parsed in parallel workers first, so the
   // loop below reads each from its sidecar instead of parsing serially.

@@ -25,7 +25,11 @@ import {
 } from '../utils.js';
 import {countEntries, parseLocator, resolvePath} from './collection-trend.js';
 import {resolveLadderPaths} from './ladder.js';
-import {fileSizeRefusal, resolveSnapshotPath} from './load-snapshot.js';
+import {
+  fileSizeRefusal,
+  precheckFileSizes,
+  resolveSnapshotPath,
+} from './load-snapshot.js';
 import {findResidentByPath, getSnapshotByHandle} from '../heap-state.js';
 import {fitSlope, poolFits, rateVerdict} from '../slope-stats.js';
 import {compareArmSetups, pairOrder, readArmSetup} from '../arm-setup.js';
@@ -324,6 +328,21 @@ export function registerVerifyFix(server: McpServer): void {
         const repeatPaths = before_repeat_paths
           ? resolveLadderPaths(before_repeat_paths).paths
           : null;
+        precheckFileSizes(
+          [
+            ...before,
+            ...after,
+            ...(repeatPaths ?? []),
+            ...(second_pair != null
+              ? [
+                  ...resolveLadderPaths(second_pair.before_paths).paths,
+                  ...resolveLadderPaths(second_pair.after_paths).paths,
+                ]
+              : []),
+          ],
+          max_file_size_mb,
+          'memlab_verify_fix',
+        );
         // Name BOTH arms: a fix-validation result labelled with an unrelated
         // active capture leaves the reader guessing which build was measured.
         const armsHeader = pathsHeader([

@@ -380,6 +380,39 @@ export function fileSizeRefusal(
 }
 
 /**
+ * Throw the first size refusal among `paths`, before any of them is loaded.
+ *
+ * A loader that checks each rung as it reaches it pays for every earlier load
+ * first: a six-rung ladder with an oversized last rung failed after minutes of
+ * parsing. Paths that do not resolve are left for the loader to report.
+ */
+export function precheckFileSizes(
+  paths: readonly string[],
+  explicit: number | undefined,
+  toolName?: string,
+): void {
+  for (const p of paths) {
+    let r: ReturnType<typeof resolveSnapshotPath>;
+    try {
+      r = resolveSnapshotPath(p);
+    } catch {
+      continue;
+    }
+    if (!fs.existsSync(r.localPath)) continue;
+    const sizeMB = fs.statSync(r.localPath).size / (1024 * 1024);
+    const refusal = fileSizeRefusal(
+      p,
+      r.localPath,
+      sizeMB,
+      explicit,
+      r.fetchedFrom != null,
+      toolName,
+    );
+    if (refusal != null) throw new Error(refusal);
+  }
+}
+
+/**
  * Resolve a `file_path` that may be a local path, a `manifold://bucket/key`
  * URL, or a bare snapshot filename to a local path, fetching from Manifold
  * into a temp dir when needed. Returns {localPath, fetchedFrom}.

@@ -24,7 +24,11 @@ import {
 } from '../utils.js';
 import {resolveRunOrPaths} from './ladder.js';
 import {segmentArg} from '../run-manifest.js';
-import {fileSizeRefusal, resolveSnapshotPath} from './load-snapshot.js';
+import {
+  fileSizeRefusal,
+  precheckFileSizes,
+  resolveSnapshotPath,
+} from './load-snapshot.js';
 import {findResidentByPath, getSnapshotByHandle} from '../heap-state.js';
 
 const {utils: memlabUtils} = memlabCore;
@@ -206,6 +210,7 @@ export async function measureLadder(
 ): Promise<{labels: string[]; perRung: Map<string, LocatorMeasurement>[]}> {
   const labels: string[] = [];
   const perRung: Map<string, LocatorMeasurement>[] = [];
+  precheckFileSizes(paths, maxFileSizeMB);
   for (const p of paths) {
     let local: string;
     let fetchedFrom: string | null = null;
