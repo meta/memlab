@@ -749,7 +749,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_sweep_digest',
-        'One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new. A `positive_control.json` from the sweep runner heads it with PASS, or SWEEP VOID when the control did not reproduce.',
+        'One row per round across a whole sweep, plus the leak-candidate classes no earlier round reported — where the sweep found something new. A `positive_control.json` from the sweep runner heads it with PASS, or SWEEP VOID when the control did not reproduce. Rounds that record `stimuli` (area and input per combo) add the (area × stimulus) pairs the combos could drive and no round did.',
       ],
       [
         'memlab_activity_report',

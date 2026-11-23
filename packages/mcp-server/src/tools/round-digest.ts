@@ -782,10 +782,66 @@ function sweepPositiveControl(dirs: readonly string[]): string | null {
   return null;
 }
 
+type StimulusEntry = {area?: unknown; stimuli?: unknown};
+type StimulusMap = Record<string, StimulusEntry>;
+
+const stimulusPairs = (m: StimulusMap | undefined): Map<string, string[]> => {
+  const out = new Map<string, string[]>();
+  for (const [combo, e] of Object.entries(m ?? {})) {
+    if (typeof e?.area !== 'string' || !Array.isArray(e.stimuli)) continue;
+    for (const s of e.stimuli) {
+      if (typeof s !== 'string') continue;
+      const key = `${e.area} × ${s}`;
+      out.set(key, [...(out.get(key) ?? []), combo]);
+    }
+  }
+  return out;
+};
+
+/**
+ * Which (area, stimulus) pairs a sweep's rounds drove, from each run.json's
+ * `stimuli`, and which ones the combo catalogue (`stimulus_catalog`) could
+ * have driven but no round did, with the combos that would. The same leak
+ * can differ 40× in rate between stimuli on one surface, so a sweep that
+ * never typed on a surface it hovered has not covered it.
+ */
+export function stimulusCoverageLines(
+  manifests: ReadonlyArray<{
+    stimuli?: StimulusMap;
+    stimulus_catalog?: StimulusMap;
+  }>,
+): string[] {
+  const driven = new Set<string>();
+  const available = new Map<string, Set<string>>();
+  for (const m of manifests) {
+    for (const key of stimulusPairs(m.stimuli).keys()) driven.add(key);
+    for (const [key, combos] of stimulusPairs(m.stimulus_catalog)) {
+      const set = available.get(key) ?? new Set<string>();
+      for (const c of combos) set.add(c);
+      available.set(key, set);
+    }
+  }
+  if (driven.size === 0 && available.size === 0) return [];
+  const missing = [...available.entries()]
+    .filter(([key]) => !driven.has(key))
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  const lines = [
+    `**Stimulus coverage:** ${formatNumber(driven.size)} (area × stimulus) pair(s) driven` +
+      (missing.length > 0
+        ? `; ${formatNumber(missing.length)} the combos could drive and no round did:`
+        : '.'),
+  ];
+  for (const [key, combos] of missing.slice(0, 15)) {
+    lines.push(`- ${key} — ${[...combos].sort().slice(0, 3).join(', ')}`);
+  }
+  if (missing.length > 15) lines.push(`- … ${missing.length - 15} more`);
+  return lines;
+}
+
 export function registerSweepDigest(server: McpServer): void {
   server.tool(
     'memlab_sweep_digest',
-    'One row per round for a whole sweep, from the files each round left on disk (run.json plus the battery output): combo, cycles, rungs, audit verdict, heap, settle, positive controls, leak-candidate count — and, per round, the leak-candidate classes that NO EARLIER round in the list reported. That last column is what tells a sweep where it found something new. Pass the run directories oldest first, or one parent directory to scan for rounds. A `positive_control.json` beside the rounds (written by a sweep runner) heads the digest with PASS, or SWEEP VOID when the control did not reproduce.',
+    'One row per round for a whole sweep, from the files each round left on disk (run.json plus the battery output): combo, cycles, rungs, audit verdict, heap, settle, positive controls, leak-candidate count — and, per round, the leak-candidate classes that NO EARLIER round in the list reported. That last column is what tells a sweep where it found something new. Pass the run directories oldest first, or one parent directory to scan for rounds. A `positive_control.json` beside the rounds (written by a sweep runner) heads the digest with PASS, or SWEEP VOID when the control did not reproduce. Rounds that record `stimuli` (area and input per combo) add the (area × stimulus) pairs the combos could drive and no round did. When rounds record `stimuli` (area and input per combo), it ends with the (area × stimulus) pairs the combo catalogue could drive and no round did.',
     {
       run_dirs: z
         .array(z.string())
@@ -816,6 +872,10 @@ export function registerSweepDigest(server: McpServer): void {
         }
         const seen = new Set<string>();
         const rows: string[][] = [];
+        const manifests: Array<{
+          stimuli?: StimulusMap;
+          stimulus_catalog?: StimulusMap;
+        }> = [];
         for (const dir of dirs) {
           const mp = resolveManifestPath(dir);
           if (mp == null) {
@@ -856,6 +916,7 @@ export function registerSweepDigest(server: McpServer): void {
             settle_void?: {reason?: string} | null;
             environment?: {dev_build?: boolean | null};
           };
+          manifests.push(m as (typeof manifests)[number]);
           const rungs = m.rungs ?? [];
           const first = rungs[0]?.post_gc_heap_mb;
           const last = rungs[rungs.length - 1]?.post_gc_heap_mb;
@@ -905,6 +966,7 @@ export function registerSweepDigest(server: McpServer): void {
           ]);
         }
         const control = sweepPositiveControl(dirs);
+        const coverage = stimulusCoverageLines(manifests);
         return toolResult(
           [
             `# Sweep digest — ${dirs.length} round(s)`,
@@ -927,6 +989,7 @@ export function registerSweepDigest(server: McpServer): void {
             ),
             '',
             '_Candidates are `memlab_leak_report` rows whose verdict is a LEAK candidate, matched by class and type. A round that reports nothing new on a surface no earlier round drove is the signal to move to a different surface._',
+            ...(coverage.length > 0 ? ['', ...coverage] : []),
           ].join('\n'),
         );
       } catch (err) {
