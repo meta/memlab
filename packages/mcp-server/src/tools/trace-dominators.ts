@@ -9,9 +9,10 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
+import type {IHeapNode} from '@memlab/core';
 import {z} from 'zod';
 import {sizeInput, withSizeHint} from '../byte-size.js';
+import {heaviestChildIndex, topDominatedChildren} from '../dominator-index.js';
 import {getSnapshot} from '../heap-state.js';
 import {
   formatBytes,
@@ -68,48 +69,6 @@ function findEdgeName(parent: IHeapNode, childId: number): string | null {
   return null;
 }
 
-function buildDominatorIndex(snapshot: IHeapSnapshot): {
-  largestChild: Map<number, IHeapNode>;
-  childCounts: Map<number, number>;
-  topChildren: Map<number, IHeapNode[]>;
-} {
-  const largestChild = new Map<number, IHeapNode>();
-  const childCounts = new Map<number, number>();
-  const topChildren = new Map<number, IHeapNode[]>();
-
-  snapshot.nodes.forEach(node => {
-    const dom = node.dominatorNode;
-    if (!dom || dom.id === node.id) return;
-
-    childCounts.set(dom.id, (childCounts.get(dom.id) ?? 0) + 1);
-
-    const existing = largestChild.get(dom.id);
-    if (!existing || node.retainedSize > existing.retainedSize) {
-      largestChild.set(dom.id, node);
-    }
-
-    // Track top 5 children for terminal node display
-    let children = topChildren.get(dom.id);
-    if (!children) {
-      children = [];
-      topChildren.set(dom.id, children);
-    }
-    const size = node.retainedSize;
-    let inserted = false;
-    for (let i = 0; i < children.length; i++) {
-      if (size > children[i].retainedSize) {
-        children.splice(i, 0, node);
-        inserted = true;
-        break;
-      }
-    }
-    if (!inserted) children.push(node);
-    if (children.length > 5) children.length = 5;
-  });
-
-  return {largestChild, childCounts, topChildren};
-}
-
 export function registerTraceDominators(server: McpServer): void {
   server.tool(
     'memlab_trace_dominators',
@@ -157,8 +116,11 @@ export function registerTraceDominators(server: McpServer): void {
           return errorResult(`Node with id ${node_id} not found`);
         }
 
-        const {largestChild, childCounts, topChildren} =
-          buildDominatorIndex(snapshot);
+        const {heaviest, children} = heaviestChildIndex(snapshot);
+        const largestChild = (node: IHeapNode): IHeapNode | null =>
+          heaviest[node.nodeIndex] >= 0
+            ? snapshot.nodes.get(heaviest[node.nodeIndex])
+            : null;
 
         // Walk the dominator chain
         const rawSteps: DominatorStep[] = [];
@@ -186,12 +148,12 @@ export function registerTraceDominators(server: McpServer): void {
             selfSize: current.self_size,
             retainedSize: current.retainedSize,
             edgeName,
-            childCount: childCounts.get(current.id) ?? 0,
+            childCount: children[current.nodeIndex],
             promiseState: detectPromiseState(current),
             elementCount: getArrayElementCount(current),
           });
 
-          const next = largestChild.get(current.id);
+          const next = largestChild(current);
           if (!next) break;
           if (
             min_retained_size != null &&
@@ -201,6 +163,12 @@ export function registerTraceDominators(server: McpServer): void {
           }
           current = next;
         }
+
+        const topChildren = topDominatedChildren(
+          snapshot,
+          rawSteps.map(st => st.nodeId),
+          5,
+        );
 
         // Collapse Promise chains
         interface OutputStep extends DominatorStep {
@@ -336,7 +304,11 @@ export function registerTraceDominators(server: McpServer): void {
         }
 
         // Stop reason
-        const nextChild = largestChild.get(terminalStep.nodeId);
+        const terminalNodeForStop = snapshot.getNodeById(terminalStep.nodeId);
+        const nextChild =
+          terminalNodeForStop != null
+            ? largestChild(terminalNodeForStop)
+            : null;
         if (!nextChild) {
           lines.push('', '_(leaf node — no dominated children)_');
         } else if (

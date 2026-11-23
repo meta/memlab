@@ -9,9 +9,9 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
-import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
+import type {IHeapNode} from '@memlab/core';
 import {z} from 'zod';
-import {tickAnalysis} from '../analysis-budget.js';
+import {heaviestChildIndex} from '../dominator-index.js';
 import {getSnapshot} from '../heap-state.js';
 import {
   errorResult,
@@ -32,57 +32,6 @@ interface Hop {
    * forced hop (1) from a real pick.
    */
   children: number;
-}
-
-interface HeaviestChild {
-  /** Id, not the node: see `indexHeaviestChildren`. */
-  bestId: number;
-  bestRetained: number;
-  children: number;
-}
-
-/**
- * For EVERY node: its heaviest dominator-tree child and how many children it
- * had to choose from — built in a single pass.
- *
- * The walk asks the same question once per hop, and answering it with its own
- * O(N) scan made the tool O(N x depth): up to 24 full passes over a
- * multi-million-node graph for one call. One pass costs the same as the first
- * hop used to and makes every subsequent hop O(1), so the tool is O(N) whatever
- * the depth.
- *
- * The index stores ids and sizes rather than `IHeapNode`s deliberately. There is
- * one entry per node that dominates anything, which on the multi-million-node
- * graphs this is built for is millions of entries, and this runs inside a
- * process already holding the parsed snapshot. Numbers keep the index to plain
- * scalars; the walk consults at most `max_depth` of those entries, so it pays
- * for the handful of `getNodeById` lookups it actually needs instead of
- * retaining a node wrapper for every parent in the graph.
- */
-function indexHeaviestChildren(
-  snapshot: IHeapSnapshot,
-): Map<number, HeaviestChild> {
-  const byParent = new Map<number, HeaviestChild>();
-  snapshot.nodes.forEach(node => {
-    tickAnalysis();
-    const parent = node.dominatorNode;
-    if (parent == null || parent.id === node.id) return;
-    const entry = byParent.get(parent.id);
-    if (entry == null) {
-      byParent.set(parent.id, {
-        bestId: node.id,
-        bestRetained: node.retainedSize,
-        children: 1,
-      });
-      return;
-    }
-    entry.children++;
-    if (node.retainedSize > entry.bestRetained) {
-      entry.bestId = node.id;
-      entry.bestRetained = node.retainedSize;
-    }
-  });
-  return byParent;
 }
 
 /** Entry count and a size sample for whatever the chain bottomed out on. */
@@ -167,7 +116,7 @@ export function registerDrillToHeavyLeaf(server: McpServer): void {
         const start = snapshot.getNodeById(node_id);
         if (!start) return errorResult(`Node with id ${node_id} not found`);
 
-        const heaviestByParent = indexHeaviestChildren(snapshot);
+        const {heaviest, children: childCount} = heaviestChildIndex(snapshot);
         const chain: Hop[] = [{node: start, share: 1, children: 0}];
         let current = start;
         let stopReason = `hit the ${max_depth}-hop limit`;
@@ -178,14 +127,13 @@ export function registerDrillToHeavyLeaf(server: McpServer): void {
             stopReason = 'the current node retains nothing further';
             break;
           }
-          const entry = heaviestByParent.get(current.id);
-          const best =
-            entry != null ? snapshot.getNodeById(entry.bestId) : null;
-          if (entry == null || best == null) {
+          const bestIndex = heaviest[current.nodeIndex];
+          const best = bestIndex >= 0 ? snapshot.nodes.get(bestIndex) : null;
+          if (best == null) {
             stopReason = 'this node dominates nothing — it is a leaf';
             break;
           }
-          const children = entry.children;
+          const children = childCount[current.nodeIndex];
           const share = best.retainedSize / parentRetained;
           if (share < threshold) {
             // Not a failure: this is the branch point, and it is frequently the
