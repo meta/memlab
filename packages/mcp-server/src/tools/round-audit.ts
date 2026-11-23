@@ -92,6 +92,7 @@ interface RunManifest {
   ab?: {
     off?: AbArmRecord;
     on?: AbArmRecord;
+    off2?: AbArmRecord;
   } | null;
 }
 
@@ -177,7 +178,7 @@ export function auditManifest(
           status: 'ok',
           detail:
             boundary != null
-              ? `${splits.length > 0 ? '2 segments' : 'One isolate'} (A/B arms: OFF rungs ${boundary.off}, ON rungs ${boundary.on})` +
+              ? `${splits.length > 0 ? `${splits.length + 1} segments` : 'One isolate'} (A/B arms: ${boundary.arms})` +
                 `${splits.length > 0 ? ', each continuous. The reload between them is the one the A/B makes' : ''}. ` +
                 'Compare the arms by rate (`memlab_ab_compare`), not by a delta across the boundary.'
               : 'One isolate throughout — all rungs are comparable.',
@@ -575,40 +576,59 @@ export function verdictOf(checks: readonly AuditCheck[]): Verdict {
       : 'TRUSTWORTHY';
 }
 
-function abArms(
-  m: RunManifest,
-): {off: AbArmRecord | null; on: AbArmRecord | null} | null {
-  const ab = m.ab;
+const ARM_NAMES = ['off', 'on', 'off2'] as const;
+type ArmName = (typeof ARM_NAMES)[number];
+
+function abArms(m: RunManifest): Map<ArmName, AbArmRecord | null> | null {
+  const ab = m.ab as Partial<Record<ArmName, AbArmRecord>> | null | undefined;
   if (ab == null || typeof ab !== 'object') return null;
   if (ab.off == null && ab.on == null) return null;
-  return {off: ab.off ?? null, on: ab.on ?? null};
+  const out = new Map<ArmName, AbArmRecord | null>([
+    ['off', ab.off ?? null],
+    ['on', ab.on ?? null],
+  ]);
+  // The third arm of an OFF → ON → OFF round.
+  if (ab.off2 != null) out.set('off2', ab.off2);
+  return out;
 }
 
 const span = (xs: number[]): string =>
   xs.length === 0 ? 'none' : `${Math.min(...xs)}–${Math.max(...xs)}`;
 
-/** Where an A/B round's arms meet, when both arms recorded rungs. */
+/** Where an A/B round's consecutive arms meet, when every arm recorded rungs. */
 function abBoundary(m: RunManifest): {
-  off: string;
-  on: string;
+  arms: string;
   explainsSplit(after: number): boolean;
   explainsRestart(index: number | undefined): boolean;
   explainsCaveat(caveat: string): boolean;
 } | null {
   const arms = abArms(m);
-  const off = arms?.off?.rungs ?? [];
-  const on = arms?.on?.rungs ?? [];
-  if (off.length === 0 || on.length === 0) return null;
-  const last = Math.max(...off);
-  const first = Math.min(...on);
-  if (last >= first) return null;
+  if (arms == null) return null;
+  const spans: Array<{name: ArmName; rungs: number[]}> = [];
+  for (const [name, arm] of arms) {
+    const rungs = arm?.rungs ?? [];
+    if (rungs.length === 0) return null;
+    spans.push({name, rungs});
+  }
+  const seams: Array<{last: number; first: number}> = [];
+  for (let i = 0; i + 1 < spans.length; i++) {
+    const last = Math.max(...spans[i].rungs);
+    const first = Math.min(...spans[i + 1].rungs);
+    if (last >= first) return null;
+    seams.push({last, first});
+  }
   const explainsSplit = (after: number): boolean =>
-    after >= last && after < first;
+    seams.some(s => after >= s.last && after < s.first);
   return {
-    off: span(off),
-    on: span(on),
+    arms: spans
+      .map(
+        sp =>
+          `${sp.name === 'off2' ? 'OFF again' : sp.name.toUpperCase()} rungs ${span(sp.rungs)}`,
+      )
+      .join(', '),
     explainsSplit,
-    explainsRestart: index => index != null && index > last && index <= first,
+    explainsRestart: index =>
+      index != null && seams.some(s => index > s.last && index <= s.first),
     // The runner's own note about the same reload.
     explainsCaveat: c => {
       const hit = /^LADDER SPLIT: .*between rung (\d+) and rung (\d+)/.exec(c);
@@ -619,26 +639,25 @@ function abBoundary(m: RunManifest): {
 
 const MIN_ARM_RUNGS = 2;
 
-/** An A/B round is only as good as its weaker arm. */
+/** An A/B round is only as good as its weakest arm. */
 function abArmCheck(m: RunManifest): AuditCheck | null {
   const arms = abArms(m);
   if (arms == null) return null;
   const broken: string[] = [];
   const parts: string[] = [];
-  for (const name of ['off', 'on'] as const) {
-    const arm = arms[name];
+  for (const [name, arm] of arms) {
+    const label = name === 'off2' ? 'OFF again' : name.toUpperCase();
     const n = arm?.rungs?.length ?? 0;
     const cycles = arm?.cycles;
     if (arm == null) {
-      broken.push(`${name.toUpperCase()} never ran`);
+      broken.push(`${label} never ran`);
       continue;
     }
     parts.push(
-      `${name.toUpperCase()} ${n} rung(s)${cycles != null ? `, ${formatNumber(cycles)} cycles` : ''}`,
+      `${label} ${n} rung(s)${cycles != null ? `, ${formatNumber(cycles)} cycles` : ''}`,
     );
-    if (cycles === 0) broken.push(`${name.toUpperCase()} drove 0 cycles`);
-    else if (n < MIN_ARM_RUNGS)
-      broken.push(`${name.toUpperCase()} has ${n} rung(s)`);
+    if (cycles === 0) broken.push(`${label} drove 0 cycles`);
+    else if (n < MIN_ARM_RUNGS) broken.push(`${label} has ${n} rung(s)`);
   }
   return broken.length > 0
     ? {
@@ -651,7 +670,7 @@ function abArmCheck(m: RunManifest): AuditCheck | null {
     : {
         name: 'A/B arms',
         status: 'ok',
-        detail: `Both arms driven: ${parts.join('; ')}.`,
+        detail: `${arms.size === 3 ? 'All three' : 'Both'} arms driven: ${parts.join('; ')}.`,
       };
 }
 

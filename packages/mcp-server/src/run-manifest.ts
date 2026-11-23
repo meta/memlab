@@ -422,7 +422,7 @@ function collectSettleRungs(
   };
   take(raw.settle_rung, null);
   const ab = raw.ab as Record<string, unknown> | undefined;
-  for (const arm of ['off', 'on']) {
+  for (const arm of ['off', 'on', 'off2']) {
     take((ab?.[arm] as Record<string, unknown> | undefined)?.settle_rung, arm);
   }
   if (ab != null && !out.some(r => r.arm === 'off')) {
@@ -462,7 +462,9 @@ export function settleRungForSegment(
       ? r.afterRung >= segment.firstRung && r.afterRung <= segment.lastRung
       : r.arm === 'off'
         ? segment.index === 0
-        : isLast,
+        : r.arm === 'on' && segmentCount > 2
+          ? segment.index === 1
+          : isLast,
   );
   if (inside != null) return {path: inside.path, note: null};
   return {

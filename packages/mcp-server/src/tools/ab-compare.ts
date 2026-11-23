@@ -45,7 +45,8 @@ import {
  */
 
 export interface Arm {
-  name: 'off' | 'on';
+  /** `off2` is the third arm of an OFF → ON → OFF round (`--ab-order ABA`). */
+  name: 'off' | 'on' | 'off2';
   prop: string | null;
   value: unknown;
   paths: string[];
@@ -69,7 +70,9 @@ export function readArms(runDir: string): Arm[] {
     );
   }
   const byIndex = new Map((raw.rungs ?? []).map(r => [r.index, r]));
-  return (['off', 'on'] as const).map(name => {
+  const names: Array<'off' | 'on' | 'off2'> =
+    ab.off2 != null ? ['off', 'on', 'off2'] : ['off', 'on'];
+  return names.map(name => {
     const arm = ab[name] ?? {};
     const rungs = (arm.rungs ?? [])
       .map(i => byIndex.get(i))
@@ -223,6 +226,26 @@ export function warmupNote(steady: string, all: string): string {
   const head = (v: string) => v.replace(/\*\*/g, '').split(' (')[0];
   if (head(steady) === head(all)) return '';
   return ` — all-rung fit: ${head(all)}, from the warm-up interval only`;
+}
+
+/**
+ * The third arm of an OFF → ON → OFF round, read against the verdict. A
+ * fix's effect comes back when the fix is turned off again; drift (isolate
+ * age, account state) does not.
+ */
+export function abaNote(
+  verdict: string,
+  off: number | null,
+  on: number | null,
+  off2: number | null,
+): string {
+  if (off2 == null || off == null || on == null) return '';
+  if (!/FIX EFFECTIVE|PARTIAL/.test(verdict)) return '';
+  const gap = off - on;
+  if (gap <= 0) return '';
+  return off2 - on >= 0.5 * gap
+    ? '; **reverses** in the OFF-again arm'
+    : '; does **NOT** reverse in the OFF-again arm: drift, not the fix, is the likelier cause';
 }
 
 export function registerAbCompare(server: McpServer): void {
@@ -484,6 +507,7 @@ export function registerAbCompare(server: McpServer): void {
         }
 
         const [off, on] = arms;
+        const off2 = arms.find(a => a.name === 'off2') ?? null;
         // Some rungs missing: the verdict is fitted on the rest, and says so.
         const partialNote = (
           offYs: Array<number | null>,
@@ -567,24 +591,47 @@ export function registerAbCompare(server: McpServer): void {
                   offGrowth(off.cycles, offYs),
                 )
               : verdict;
+          const off2Ys =
+            off2 != null ? (values.get('off2')?.get(name) ?? []) : [];
+          const off2Fit =
+            off2 != null ? rateOf(steady(off2.cycles), steady(off2Ys)) : null;
           return [
             name,
             offYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
             fmt(offFit, offAll),
             onYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
             fmt(onFit, onAll),
+            ...(off2 != null
+              ? [
+                  off2Fit == null
+                    ? '—'
+                    : `${signed(off2Fit.slope)} (r² ${off2Fit.r2.toFixed(2)})`,
+                ]
+              : []),
             ratio,
             failedArm(name, offYs, onYs) ??
               partialNote(offYs, onYs) +
                 verdict +
-                warmupNote(verdict, allVerdict),
+                warmupNote(verdict, allVerdict) +
+                (off2 != null
+                  ? abaNote(
+                      verdict,
+                      offFit?.slope ?? null,
+                      onFit?.slope ?? null,
+                      off2Fit?.slope ?? null,
+                    )
+                  : ''),
           ];
         });
 
         const lines = [
           `## A/B: \`${off.prop ?? '?'}\` = ${JSON.stringify(off.value)} (OFF) vs ${JSON.stringify(on.value)} (ON)`,
           '',
-          `OFF arm: ${off.paths.length} rungs, cycles ${off.cycles.join(', ')}. ON arm: ${on.paths.length} rungs, cycles ${on.cycles.join(', ')}. Each arm is fitted against its own cycles` +
+          `OFF arm: ${off.paths.length} rungs, cycles ${off.cycles.join(', ')}. ON arm: ${on.paths.length} rungs, cycles ${on.cycles.join(', ')}.` +
+            (off2 != null
+              ? ` OFF again: ${off2.paths.length} rungs, cycles ${off2.cycles.join(', ')} (an OFF → ON → OFF round: an effect that is the fix reverses in the third arm; one that is drift does not).`
+              : '') +
+            ' Each arm is fitted against its own cycles' +
             (skip > 0
               ? `, leaving out its first ${skip === 1 ? 'rung' : `${skip} rungs`} (warm-up after the page load; \`skip_intervals: 0\` fits every rung).`
               : '.'),
@@ -602,6 +649,7 @@ export function registerAbCompare(server: McpServer): void {
               'OFF Δ/cycle',
               'ON series',
               'ON Δ/cycle',
+              ...(off2 != null ? ['OFF again Δ/cycle'] : []),
               'ON/OFF',
               'Verdict',
             ],

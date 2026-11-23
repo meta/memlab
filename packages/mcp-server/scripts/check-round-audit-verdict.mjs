@@ -92,6 +92,31 @@ test('a broken arm blocks', () => {
   assert.equal(status(auditManifest(missing), 'A/B arms'), 'blocking');
 });
 
+test('an OFF → ON → OFF round checks both reloads and all three arms', () => {
+  const m = ab();
+  m.rungs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(i =>
+    rung(i, i === 4 || i === 8 ? {isolate_restarted: true} : {}),
+  );
+  m.ladder_splits_after_rung = [3, 7];
+  m.ab.off2 = {prop: 'p', rungs: [8, 9, 10, 11], cycles: 30};
+  m.caveats.push(
+    'LADDER SPLIT: the page reloaded between rung 7 and rung 8 (longtasks 9 -> 1).',
+  );
+  const audit = auditManifest(m);
+  assert.equal(status(audit, 'ladder continuity'), 'ok');
+  assert.match(
+    audit.checks.find(c => c.name === 'ladder continuity').detail,
+    /3 segments \(A\/B arms: OFF rungs 0–3, ON rungs 4–7, OFF again rungs 8–11\)/,
+  );
+  assert.match(
+    audit.checks.find(c => c.name === 'A/B arms').detail,
+    /All three/,
+  );
+  assert.equal(audit.verdict, 'TRUSTWORTHY');
+  m.ab.off2 = {prop: 'p', rungs: [8], cycles: 5};
+  assert.equal(status(auditManifest(m), 'A/B arms'), 'blocking');
+});
+
 test('a non-A/B round with `ab: {}` is judged as one ladder', () => {
   const m = {...base(), ab: {}, ladder_splits_after_rung: [2]};
   const audit = auditManifest(m);
