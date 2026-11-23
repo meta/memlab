@@ -47,6 +47,10 @@ test('counts do not change the id; a different name does', () => {
     ),
   );
   assert.match(a, /^[0-9a-f]{6}$/);
+  assert.notEqual(
+    caveatId('DEAD PROP: flag_14 is read by no served code'),
+    caveatId('DEAD PROP: flag_15 is read by no served code'),
+  );
 });
 
 test('a reference is the id and the text cut short', () => {

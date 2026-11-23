@@ -16,7 +16,7 @@ import crypto from 'crypto';
  * new caveat.
  */
 export function caveatKey(caveat: string): string {
-  return caveat.replace(/(?<![A-Za-z_])\d+(\.\d+)?/g, '#');
+  return caveat.replace(/(?<![A-Za-z0-9_])\d+(\.\d+)?/g, '#');
 }
 
 /**
