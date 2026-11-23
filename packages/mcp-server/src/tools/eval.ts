@@ -6715,12 +6715,14 @@ export function arrayMethodMisuse(code: string): string[] {
  */
 export function protoKeyTrap(code: string): string[] {
   const out: string[] = [];
-  const decl = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\{\s*\}/g;
+  const decl =
+    /(?:\b(?:const|let|var)\s+|,\s*)([A-Za-z_$][\w$]*)\s*=\s*\{\s*\}/g;
   for (let m = decl.exec(code); m != null; m = decl.exec(code)) {
     const name = m[1];
-    // A computed key that is not a literal: a name read off the heap.
+    // A computed key that is not a literal: a name read off the heap. A
+    // `.name[k]` is some other object's property.
     const dynamic = new RegExp(
-      `(?<![\\w$])${name.replace(/\$/g, '\\$')}\\[\\s*(?!['"\`\\d])[^\\]]+\\]`,
+      `(?<![\\w$.])${name.replace(/\$/g, '\\$')}\\[\\s*(?!(?:'[^']*'|"[^"]*"|\`[^\`$]*\`|\\d+)\\s*\\])[^\\]]+\\]`,
     );
     if (dynamic.test(code.slice(m.index + m[0].length))) {
       out.push(
