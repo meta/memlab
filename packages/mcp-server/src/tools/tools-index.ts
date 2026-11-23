@@ -350,6 +350,10 @@ const GROUPS: Group[] = [
         'Entry counts of NAMED collections across a ladder, with growth per interaction cycle.',
       ],
       [
+        'memlab_growth_check',
+        'Before writing "grows" about one holder: the same object on every rung, and whether it grows, is frozen, turns over or shrinks.',
+      ],
+      [
         'memlab_population_diff',
         'Whether two snapshots hold the same POPULATION or just the same count — equal totals are not identity.',
       ],

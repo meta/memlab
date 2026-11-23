@@ -64,6 +64,7 @@ export const CORE_TOOLS = new Set([
   'memlab_collection_diff',
   'memlab_explain_delta',
   'memlab_validate_finding',
+  'memlab_growth_check',
   'memlab_coverage_check',
 ]);
 
