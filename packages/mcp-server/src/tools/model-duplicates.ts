@@ -110,11 +110,23 @@ export interface DuplicateReport {
   extras: number;
   extrasRetained: number;
   top: Array<{
+    cls: string;
     identity: string;
     copies: number;
     oldest: number;
     newest: number;
   }>;
+  /** Copies per `class\u0000identity`, for comparing rungs. */
+  copiesByKey: Map<string, number>;
+  /**
+   * Identities carried by records of more than one class (a Contact, a Chat
+   * and a Presence for the same user). One per type is normal for a
+   * normalized store, so these are not copies.
+   */
+  crossType: {
+    identities: number;
+    combos: Array<{classes: string[]; identities: number; sample: string}>;
+  };
   holders: Array<{
     tail: string;
     extras: number;
@@ -132,27 +144,58 @@ export function modelDuplicates(
     sel.className != null || (sel.shape != null && sel.shape.length > 0)
       ? selectPopulation(snapshot, {className: sel.className, shape: sel.shape})
       : selectPopulation(snapshot, {shape: [sel.path[0]]});
+  // Keyed on (class, identity): a Contact and a Chat with the same id are two
+  // models of one entity, not a copy.
   const byIdentity = new Map<string, number[]>();
+  const classesOf = new Map<string, Set<string>>();
   let readable = 0;
   for (const node of candidates) {
     if (node.type !== 'object') continue;
     const id = identityOf(node, sel.path);
     if (id == null) continue;
     readable++;
-    const list = byIdentity.get(id);
-    if (list == null) byIdentity.set(id, [node.id]);
+    const key = `${node.name}\u0000${id}`;
+    const list = byIdentity.get(key);
+    if (list == null) byIdentity.set(key, [node.id]);
     else list.push(node.id);
+    const classes = classesOf.get(id);
+    if (classes == null) classesOf.set(id, new Set([node.name]));
+    else classes.add(node.name);
   }
+  const combos = new Map<string, {classes: string[]; ids: string[]}>();
+  for (const [id, classes] of classesOf) {
+    if (classes.size < 2) continue;
+    const sorted = [...classes].sort();
+    const k = sorted.join('\u0000');
+    const c = combos.get(k);
+    if (c == null) combos.set(k, {classes: sorted, ids: [id]});
+    else c.ids.push(id);
+  }
+  const crossType = {
+    identities: [...combos.values()].reduce((n, c) => n + c.ids.length, 0),
+    combos: [...combos.values()]
+      .sort((a, b) => b.ids.length - a.ids.length)
+      .slice(0, limit)
+      .map(c => ({
+        classes: c.classes,
+        identities: c.ids.length,
+        sample: c.ids[0],
+      })),
+  };
+  const copiesByKey = new Map<string, number>();
   // V8 ids grow with allocation inside one isolate, so the lowest id is the
   // first record made for the identity: the canonical one, by assumption.
   const extras: number[] = [];
   const top: DuplicateReport['top'] = [];
-  for (const [identity, ids] of byIdentity) {
+  for (const [key, ids] of byIdentity) {
     if (ids.length < 2) continue;
+    copiesByKey.set(key, ids.length);
+    const cut = key.indexOf('\u0000');
     ids.sort((a, b) => a - b);
     extras.push(...ids.slice(1));
     top.push({
-      identity,
+      cls: key.slice(0, cut),
+      identity: key.slice(cut + 1),
       copies: ids.length,
       oldest: ids[0],
       newest: ids[ids.length - 1],
@@ -183,7 +226,7 @@ export function modelDuplicates(
   return {
     candidates: candidates.length,
     readable,
-    identities: byIdentity.size,
+    identities: classesOf.size,
     duplicated: top.length,
     extras: extras.length,
     extrasRetained:
@@ -192,6 +235,8 @@ export function modelDuplicates(
             .retained
         : 0,
     top: top.slice(0, limit),
+    copiesByKey,
+    crossType,
     holders,
   };
 }
@@ -199,12 +244,33 @@ export function modelDuplicates(
 function headline(r: DuplicateReport): string {
   return (
     `${formatNumber(r.candidates)} candidate(s), ${formatNumber(r.readable)} with a readable identity, ` +
-    `${formatNumber(r.identities)} distinct. **${formatNumber(r.duplicated)} identit(ies) have copies: ` +
+    `${formatNumber(r.identities)} distinct. **${formatNumber(r.duplicated)} (class, identity) pair(s) have copies: ` +
     `${formatNumber(r.extras)} extra cop(ies) retaining ${formatBytes(r.extrasRetained)}.**`
   );
 }
 
-function details(r: DuplicateReport): string[] {
+function crossTypeLines(r: DuplicateReport): string[] {
+  if (r.crossType.identities === 0) return [];
+  return [
+    '',
+    `**Same id, different model types** (normal for a normalized store, so NOT counted as copies): ${formatNumber(r.crossType.identities)} identit(ies).`,
+    '',
+    markdownTable(
+      ['Classes', 'Identities', 'Sample'],
+      r.crossType.combos.map(c => [
+        c.classes.map(x => `\`${clampLabelTo(x, 30)}\``).join(' + '),
+        formatNumber(c.identities),
+        `\`${clampLabelTo(c.sample, 40).replace(/`/g, "'")}\``,
+      ]),
+      new Set([1]),
+    ),
+  ];
+}
+
+function details(
+  r: DuplicateReport,
+  first: DuplicateReport | null = null,
+): string[] {
   if (r.extras === 0) return [];
   return [
     '',
@@ -224,25 +290,46 @@ function details(r: DuplicateReport): string[] {
     '**Most-copied identities:**',
     '',
     markdownTable(
-      ['Identity', 'Copies', 'Oldest', 'Newest'],
+      [
+        'Class',
+        'Identity',
+        ...(first != null ? ['Copies at first rung'] : []),
+        'Copies',
+        'Oldest',
+        'Newest',
+      ],
       r.top.map(t => [
+        `\`${clampLabelTo(t.cls, 30)}\``,
         `\`${clampLabelTo(t.identity, 60).replace(/`/g, "'")}\``,
+        ...(first != null
+          ? [
+              formatNumber(
+                first.copiesByKey.get(`${t.cls}\u0000${t.identity}`) ?? 1,
+              ),
+            ]
+          : []),
         formatNumber(t.copies),
         `@${t.oldest}`,
         `@${t.newest}`,
       ]),
-      new Set([1]),
+      new Set(first != null ? [2, 3] : [2]),
     ),
+    ...(first != null
+      ? [
+          '',
+          '_A count the same at the first rung is a standing structure (one object per membership, say), not a copy made per cycle._',
+        ]
+      : []),
   ];
 }
 
 const NOTE =
-  '_The oldest copy (lowest node id; ids grow with allocation in one isolate) is taken as canonical and the rest count as extras. `memlab_retainer_trace` on a sample gives the full path._';
+  '_Copies are counted per (class, identity). The oldest copy (lowest node id; ids grow with allocation in one isolate) is taken as canonical and the rest count as extras. `memlab_retainer_trace` on a sample gives the full path._';
 
 export function registerModelDuplicates(server: McpServer): void {
   server.tool(
     'memlab_model_duplicates',
-    'Model instances that share an identity value (e.g. a message id at `__x_id._serialized`): copies of what should be one canonical record per id, which no class count can see. Reports how many identities have copies, the extra copies and their retained size, where the extras are held (the last hops of their shortest retainer path, grouped), and the most-copied identities. With `run_dir` or `paths`, the same counts at every rung, so a copy count that grows per cycle stands out.',
+    'Model instances of the same class that share an identity value (e.g. a message id at `__x_id._serialized`): copies of what should be one canonical record per id, which no class count can see. Records of different classes with the same id (a Contact and a Chat for one user) are listed separately as cross-type sharing, not as copies. Reports how many (class, identity) pairs have copies, the extra copies and their retained size, where the extras are held (the last hops of their shortest retainer path, grouped), and the most-copied identities. With `run_dir` or `paths`, the same counts at every rung with the change since the first, and the first-rung copy count of each top identity, so a copy count that grows per cycle stands out from a standing one.',
     {
       identity_path: z
         .string()
@@ -326,6 +413,7 @@ export function registerModelDuplicates(server: McpServer): void {
               '',
               headline(r),
               ...details(r),
+              ...crossTypeLines(r),
               '',
               NOTE,
             ].join('\n'),
@@ -334,18 +422,21 @@ export function registerModelDuplicates(server: McpServer): void {
 
         const {rungs: resolved, largestMB} = resolveRungs(files);
         const rows: string[][] = [];
+        let first: DuplicateReport | null = null;
         let last: DuplicateReport | null = null;
         for (const rung of resolved) {
           armScanBudgetFor(scaledTimeoutMs(largestMB));
           const r = await withSnapshotAt(rung.localPath, snap =>
             modelDuplicates(snap, sel, limit),
           );
+          first ??= r;
           rows.push([
             rung.label,
             formatNumber(r.readable),
             formatNumber(r.identities),
             formatNumber(r.duplicated),
             formatNumber(r.extras),
+            `${r.extras - first.extras >= 0 ? '+' : ''}${formatNumber(r.extras - first.extras)}`,
             formatBytes(r.extrasRetained),
           ]);
           last = r;
@@ -361,14 +452,20 @@ export function registerModelDuplicates(server: McpServer): void {
                 'Identities',
                 'With copies',
                 'Extra copies',
+                'Δ extras vs first',
                 'Extras retain',
               ],
               rows,
-              new Set([1, 2, 3, 4, 5]),
+              new Set([1, 2, 3, 4, 5, 6]),
             ),
             ...(last != null && last.extras > 0
-              ? ['', `### Last rung`, ...details(last)]
+              ? [
+                  '',
+                  `### Last rung`,
+                  ...details(last, resolved.length > 1 ? first : null),
+                ]
               : []),
+            ...(last != null ? crossTypeLines(last) : []),
             '',
             NOTE,
           ].join('\n'),

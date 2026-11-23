@@ -93,6 +93,31 @@ globalThis.__fixtureMany = Array.from(
 class FixtureWidthProbeWithAVeryLongClassNameForNameWidthChecks {}
 globalThis.__fixtureWidthProbe =
   new FixtureWidthProbeWithAVeryLongClassNameForNameWidthChecks();
+// Models keyed by `fid`: a contact and a chat per user share an id (two
+// types, not a copy); one message exists twice (a copy).
+class FixtureContact {
+  constructor(fid) {
+    this.fid = fid;
+  }
+}
+class FixtureChat {
+  constructor(fid) {
+    this.fid = fid;
+  }
+}
+class FixtureMsg {
+  constructor(fid) {
+    this.fid = fid;
+  }
+}
+globalThis.__fixtureModels = [
+  new FixtureContact('fixture-u1'),
+  new FixtureChat('fixture-u1'),
+  new FixtureContact('fixture-u2'),
+  new FixtureChat('fixture-u2'),
+  new FixtureMsg('fixture-m1'),
+  new FixtureMsg('fixture-m1'),
+];
 const nodeSnapshot = v8.writeHeapSnapshot(path.join(tmp, 'node.heapsnapshot'));
 // Distinct long strings that exist only in the second snapshot. A flat
 // string's class name is its content, so each is a "class" that grew.
@@ -443,6 +468,37 @@ await shapeCheck(
     assert(
       text.includes("1 id(s) the snapshot's id index does not map"),
       `footer: ${text.slice(-600)}`,
+    );
+  },
+);
+
+await shapeCheck(
+  'model_duplicates: same id on two model types is not a copy',
+  async () => {
+    const {text} = await call('memlab_model_duplicates', {
+      identity_path: 'fid',
+    });
+    assert(
+      /\*\*1 \(class, identity\) pair\(s\) have copies: 1 extra/.test(text),
+      `headline: ${text.slice(0, 400)}`,
+    );
+    assert(
+      /`FixtureMsg` +\| `fixture-m1` +\| +2 \|/.test(text),
+      `top copy: ${text.slice(0, 900)}`,
+    );
+    assert(
+      /Same id, different model types.*: 2 identit/.test(text) &&
+        /`FixtureChat` \+ `FixtureContact` +\| +2 /.test(text),
+      `cross-type: ${text.slice(-700)}`,
+    );
+    const ladder = await call('memlab_model_duplicates', {
+      identity_path: 'fid',
+      paths: [nodeSnapshot, nodeSnapshotLater],
+    });
+    assert(
+      /Δ extras vs first/.test(ladder.text) &&
+        /`FixtureMsg` +\| `fixture-m1` +\| +2 \| +2 \|/.test(ladder.text),
+      `ladder: ${ladder.text.slice(0, 1200)}`,
     );
   },
 );

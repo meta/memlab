@@ -485,7 +485,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_model_duplicates',
-        'Records that share an identity value (`identity_path`, e.g. `__x_id._serialized`): copies of a one-per-id model, where the extras are held and what they retain; per-rung counts with `run_dir`.',
+        'Records of one class that share an identity value (`identity_path`, e.g. `__x_id._serialized`): copies of a one-per-id model, where the extras are held and what they retain; one id across model types is listed apart, not as a copy; per-rung counts and change with `run_dir`.',
       ],
       [
         'memlab_scope_chains',
