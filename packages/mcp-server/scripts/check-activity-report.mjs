@@ -18,6 +18,7 @@
  */
 import assert from 'assert/strict';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {test} from 'node:test';
 import {fileURLToPath, pathToFileURL} from 'url';
@@ -30,8 +31,13 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {parseSamples, activityByLabel, topRequests, activityFromRungWindows} =
-  await import(pathToFileURL(built).href);
+const {
+  parseSamples,
+  activityByLabel,
+  topRequests,
+  activityFromRungWindows,
+  registerActivityReport,
+} = await import(pathToFileURL(built).href);
 
 const jsonl = rows => rows.map(r => JSON.stringify(r)).join('\n');
 
@@ -126,4 +132,34 @@ test('an idle control with no samples is read from its request windows', () => {
   assert.equal(act.totals.resources, 40);
   assert.equal(act.totals.requests, 0);
   assert.equal(activityFromRungWindows([{}]), null);
+});
+
+test('with a windows-only control, a rejection loop still outranks a quiet row', async () => {
+  let handler;
+  registerActivityReport({tool: (...args) => (handler = args.at(-1))});
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'activity-'));
+  const round = path.join(root, 'r1');
+  const idle = path.join(root, 'r1-idle');
+  fs.mkdirSync(round);
+  fs.mkdirSync(idle);
+  fs.writeFileSync(
+    path.join(round, 'samples.jsonl'),
+    jsonl([
+      {t_s: 0, tag: 'quiet', res: 0, rejections: 0, time_origin: 1},
+      {t_s: 60, tag: 'quiet', res: 30, rejections: 0, time_origin: 1},
+      {t_s: 120, tag: 'rejecty', res: 60, rejections: 200, time_origin: 1},
+    ]),
+  );
+  fs.writeFileSync(
+    path.join(idle, 'run.json'),
+    JSON.stringify({rungs: [{requests: {total: 30, window_s: 60}}]}),
+  );
+  const res = await handler({run_dir: round, limit: 10});
+  const text = res.content[0].text;
+  assert.match(text, /resources per minute only/);
+  assert.ok(
+    text.indexOf('| rejecty') < text.indexOf('| quiet'),
+    text.slice(0, 1200),
+  );
+  fs.rmSync(root, {recursive: true, force: true});
 });

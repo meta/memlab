@@ -340,13 +340,21 @@ export function registerActivityReport(server: McpServer): void {
             : 0;
         const load = (a: Activity): number =>
           Math.max(ratio(a, 'requests'), ratio(a, 'resources'));
+        // A counter the control did not measure still ranks the rows, against
+        // the round as a whole.
+        const roundBase = overall(acts);
+        const rankRatio = (a: Activity, c: Counter): number =>
+          measured(c)
+            ? ratio(a, c)
+            : perMin(a, c) / Math.max(perMin(roundBase, c), RATIO_FLOOR);
         const score = (a: Activity): number =>
           Math.max(
-            load(a),
-            ratio(a, 'http_errors'),
-            ratio(a, 'resource_errors'),
-            ratio(a, 'rejections'),
-            ratio(a, 'long_task_ms') / 10,
+            rankRatio(a, 'requests'),
+            rankRatio(a, 'resources'),
+            rankRatio(a, 'http_errors'),
+            rankRatio(a, 'resource_errors'),
+            rankRatio(a, 'rejections'),
+            rankRatio(a, 'long_task_ms') / 10,
           ) + (a.errorUiSeconds > 0 ? 1 : 0);
         const ranked = [...acts].sort((a, b) => score(b) - score(a));
         const fmt = (v: number) => (v >= 100 ? v.toFixed(0) : v.toFixed(1));
