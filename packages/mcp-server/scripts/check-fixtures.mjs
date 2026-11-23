@@ -1158,9 +1158,12 @@ await shapeCheck(
         long_strings:
           "result = helpers.stringsWithPrefix('fixture-long-string-').length",
       },
+      code: "result = helpers.byClass('Object').length",
+      label: 'objects',
     });
     assert(
       /An A\/B round with `segment: "all"`/.test(text) &&
+        /\| objects\s*\|/.test(text) &&
         /\| long_strings\s*\| 0 → \d+\s*\| \+0\.\d+ [^|]*\| 0 → 0 /.test(
           text,
         ) &&

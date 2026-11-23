@@ -915,9 +915,11 @@ export function registerLadderProbe(server: McpServer): void {
           const {abCompare} = await import('./ab-compare.js');
           const res = await abCompare({
             run_dir,
+            // `code` and `metrics` together, as on a single ladder below.
             metrics:
-              metrics ??
-              (code != null ? {[label ?? 'probe']: code} : undefined),
+              code != null && code.trim() !== ''
+                ? {[label ?? 'probe']: code, ...metrics}
+                : metrics,
             probes,
             prelude,
             timeout_ms,
