@@ -100,3 +100,46 @@ test("a detached realm's memory is not another realm's", () => {
   assert.equal(isNonPageRealm(classes, 3), true);
   assert.equal(isNonPageRealm({page: -1, kindByOrdinal: kinds}, 3), false);
 });
+
+test('a file:// page beats a smaller https frame', () => {
+  const {kinds, page} = classifyRealmList([
+    ctx(1, 'file:///app/index.html', 100),
+    ctx(2, 'https://embed.example.com', 5),
+  ]);
+  assert.equal(page, 1);
+  assert.equal(kinds.get(2), 'cross-origin');
+});
+
+test('a detached extension or DevTools realm is still not the page', () => {
+  const {kinds, page} = classifyRealmList([
+    ctx(1, 'https://app.example.com', 100),
+    ctx(4, 'chrome-extension://abcdef', 50, true),
+    ctx(5, 'devtools://devtools/bundled', 5, true),
+  ]);
+  const classes = {page, kindByOrdinal: kinds};
+  assert.equal(kinds.get(4), 'extension');
+  assert.equal(kinds.get(5), 'devtools');
+  assert.equal(isNonPageRealm(classes, 4), true);
+  assert.equal(isNonPageRealm(classes, 5), true);
+});
+
+test('a larger about:srcdoc, data: or blob: frame is not the page', () => {
+  for (const label of [
+    'about:srcdoc',
+    'about:blank',
+    'data:text/html,x',
+    'blob:https://app.example.com/1',
+  ]) {
+    const {kinds, page} = classifyRealmList([
+      ctx(1, 'https://app.example.com', 100),
+      ctx(2, label, 200),
+    ]);
+    assert.equal(page, 1, label);
+    assert.equal(kinds.get(1), 'page');
+  }
+  const {page} = classifyRealmList([
+    ctx(1, '', 500),
+    ctx(2, 'about:srcdoc', 5),
+  ]);
+  assert.equal(page, 2);
+});

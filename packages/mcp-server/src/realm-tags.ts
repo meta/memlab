@@ -63,26 +63,34 @@ export function classifyRealmList(contexts: readonly NativeContextInfo[]): {
   kinds: Map<number, RealmKind>;
 } {
   const kinds = new Map<number, RealmKind>();
-  const live = contexts.filter(c => !c.detached);
-  const web = live.filter(c => /^https?:\/\//.test(c.label));
-  const pool =
-    web.length > 0
-      ? web
-      : live.filter(
-          c =>
-            !EXTENSION_RE.test(c.label) && !c.label.startsWith('devtools://'),
-        );
+  const candidates = contexts.filter(
+    c =>
+      !c.detached &&
+      !EXTENSION_RE.test(c.label) &&
+      !c.label.startsWith('devtools://'),
+  );
+  // A document with its own URL (http(s), file://, an app scheme) beats a frame
+  // that takes its origin from its creator (about:srcdoc, about:blank, data:,
+  // blob:), which beats an untagged realm.
+  const rank = (c: NativeContextInfo) =>
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(c.label) ? 2 : c.label !== '' ? 1 : 0;
   let page: NativeContextInfo | null = null;
-  for (const c of pool) {
-    if (page == null || c.attributedSize > page.attributedSize) page = c;
+  for (const c of candidates) {
+    if (
+      page == null ||
+      rank(c) > rank(page) ||
+      (rank(c) === rank(page) && c.attributedSize > page.attributedSize)
+    ) {
+      page = c;
+    }
   }
   const pageOrigin = page == null ? '' : origin(page.label);
   for (const c of contexts) {
     let kind: RealmKind;
     if (page != null && c.ordinal === page.ordinal) kind = 'page';
-    else if (c.detached) kind = 'detached';
     else if (EXTENSION_RE.test(c.label)) kind = 'extension';
     else if (c.label.startsWith('devtools://')) kind = 'devtools';
+    else if (c.detached) kind = 'detached';
     else if (c.label === '') kind = 'untagged';
     else if (origin(c.label) === pageOrigin) kind = 'secondary';
     else kind = 'cross-origin';
@@ -92,8 +100,8 @@ export function classifyRealmList(contexts: readonly NativeContextInfo[]): {
 }
 
 /**
- * Whether memory owned by realm `o` is not the page's. A detached realm is not
- * another realm: page code that still holds a removed frame is a page leak.
+ * Whether memory owned by realm `o` is not the page's. A detached page realm is
+ * not another realm: page code that still holds a removed frame is a page leak.
  */
 export function isNonPageRealm(
   classes: Pick<RealmClasses, 'page' | 'kindByOrdinal'>,
