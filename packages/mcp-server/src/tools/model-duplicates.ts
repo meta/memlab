@@ -116,7 +116,7 @@ export interface DuplicateReport {
     oldest: number;
     newest: number;
   }>;
-  /** Copies per `class\u0000identity`, for comparing rungs. */
+  /** Records per `class\u0000identity`, copied or not, for comparing rungs. */
   copiesByKey: Map<string, number>;
   /**
    * Identities carried by records of more than one class (a Contact, a Chat
@@ -188,8 +188,8 @@ export function modelDuplicates(
   const extras: number[] = [];
   const top: DuplicateReport['top'] = [];
   for (const [key, ids] of byIdentity) {
-    if (ids.length < 2) continue;
     copiesByKey.set(key, ids.length);
+    if (ids.length < 2) continue;
     const cut = key.indexOf('\u0000');
     ids.sort((a, b) => a - b);
     extras.push(...ids.slice(1));
@@ -304,7 +304,7 @@ function details(
         ...(first != null
           ? [
               formatNumber(
-                first.copiesByKey.get(`${t.cls}\u0000${t.identity}`) ?? 1,
+                first.copiesByKey.get(`${t.cls}\u0000${t.identity}`) ?? 0,
               ),
             ]
           : []),

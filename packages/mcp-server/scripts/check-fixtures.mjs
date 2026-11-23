@@ -19,6 +19,7 @@
  * shares never exceed 100%, partitions add up, paging is complete and
  * deterministic, structured results carry their snapshot).
  */
+/* global globalThis */
 import {spawn} from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -170,6 +171,11 @@ globalThis.__fixtureLongStrings = Array.from({length: 5}, (_, i) =>
 for (let i = 0; i < 3; i++) {
   globalThis.__fixturePending.then(fixturePendingHandler);
 }
+// A message first seen, already copied, after the first rung.
+globalThis.__fixtureModels.push(
+  new FixtureMsg('fixture-m2'),
+  new FixtureMsg('fixture-m2'),
+);
 globalThis.__fixtureErrors.push(
   new Error('fixture-error id=3'),
   new RangeError('fixture-late 5'),
@@ -590,6 +596,10 @@ await shapeCheck(
       /Δ extras vs first/.test(ladder.text) &&
         /`FixtureMsg` +\| `fixture-m1` +\| +2 \| +2 \|/.test(ladder.text),
       `ladder: ${ladder.text.slice(0, 1200)}`,
+    );
+    assert(
+      /`FixtureMsg` +\| `fixture-m2` +\| +0 \| +2 \|/.test(ladder.text),
+      `absent at the first rung: ${ladder.text.slice(0, 1200)}`,
     );
   },
 );
