@@ -33,6 +33,7 @@
  */
 
 import type {IHeapEdge, IHeapNode} from '@memlab/core';
+import {appPriorsEnabled} from './app-priors.js';
 
 /**
  * Module names that exist only in a dev or instrumented build.
@@ -42,10 +43,15 @@ import type {IHeapEdge, IHeapNode} from '@memlab/core';
  * pattern below names a component that is either devtools plumbing or a build
  * shim, never product code.
  */
-const DEV_MODULE_PATTERNS: ReadonlyArray<{re: RegExp; why: string}> = [
+const DEV_MODULE_PATTERNS: ReadonlyArray<{
+  re: RegExp;
+  why: string;
+  /** Named for one app family; off with MEMLAB_NO_APP_PRIORS. */
+  app?: true;
+}> = [
   {re: /^BrowserTools/, why: 'browser-tools devtools interop'},
   {re: /BrowserToolsInterop/, why: 'browser-tools devtools interop'},
-  {re: /^CometDevTools/, why: 'Comet DevTools'},
+  {re: /^CometDevTools/, why: 'Comet DevTools', app: true},
   {re: /DevToolsInterop/i, why: 'devtools interop'},
   {re: /^ReactDevTools|react-devtools/i, why: 'React DevTools'},
   {
@@ -53,7 +59,7 @@ const DEV_MODULE_PATTERNS: ReadonlyArray<{re: RegExp; why: string}> = [
     why: 'React Fast Refresh',
   },
   {re: /^__REACT_DEVTOOLS/, why: 'React DevTools hook'},
-  {re: /HeroTracingDebugTracing/, why: 'debug-only tracing'},
+  {re: /HeroTracingDebugTracing/, why: 'debug-only tracing', app: true},
   {re: /^MemLab|memlab-/i, why: 'the measurement harness itself'},
   {re: /webdriver|puppeteer|playwright/i, why: 'automation harness'},
 ];
@@ -86,13 +92,19 @@ const DEV_MODULE_PATTERNS: ReadonlyArray<{re: RegExp; why: string}> = [
  * Conservative on purpose, same as above: each entry is an auditor, overlay or
  * debug console that a product does not need in order to function.
  */
-const GATED_MODULE_PATTERNS: ReadonlyArray<{re: RegExp; why: string}> = [
+const GATED_MODULE_PATTERNS: ReadonlyArray<{
+  re: RegExp;
+  why: string;
+  app?: true;
+}> = [
   {
     re: /^Redblock|RedblockInst|^CometRedblock/,
     why: 'Redblock a11y auditor, gated on `comet_redblock` (~0% of production)',
+    app: true,
   },
   {re: /AccessibilityAudit|A11yAudit/i, why: 'accessibility auditing overlay'},
-  {re: /^CometConsole|DebugConsole/, why: 'in-page debug console'},
+  {re: /^CometConsole/, why: 'in-page debug console', app: true},
+  {re: /DebugConsole/, why: 'in-page debug console'},
   {re: /DebugOverlay|^DebugRenderer/, why: 'debug overlay'},
 ];
 
@@ -115,10 +127,13 @@ export function classifyModuleName(name: string): {
   gated?: boolean;
   why?: string;
 } {
-  for (const {re, why} of DEV_MODULE_PATTERNS) {
+  const priors = appPriorsEnabled();
+  for (const {re, why, app} of DEV_MODULE_PATTERNS) {
+    if (app === true && !priors) continue;
     if (re.test(name)) return {dev: true, why};
   }
-  for (const {re, why} of GATED_MODULE_PATTERNS) {
+  for (const {re, why, app} of GATED_MODULE_PATTERNS) {
+    if (app === true && !priors) continue;
     if (re.test(name)) return {dev: false, gated: true, why};
   }
   return {dev: false};

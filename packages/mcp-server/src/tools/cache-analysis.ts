@@ -36,6 +36,8 @@ import {
   toolResult,
   suggestionsSuppressed,
 } from '../utils.js';
+import {appPriorsEnabled} from '../app-priors.js';
+import {MEMO_CACHE_EDGE, MEMO_CACHE_LABEL} from '../heap-families.js';
 
 const {NumericSet} = memlabCore;
 
@@ -152,8 +154,11 @@ function classifyCollection(
 
 function identifyCacheFramework(node: IHeapNode, ownerEdge: string): string {
   // Check owner edge name for framework-specific patterns
-  if (ownerEdge === '$$cache' || ownerEdge.includes('.$$cache')) {
-    return 'Memoization/Selector ($$cache)';
+  if (
+    appPriorsEnabled() &&
+    (ownerEdge === MEMO_CACHE_EDGE || ownerEdge.includes(`.${MEMO_CACHE_EDGE}`))
+  ) {
+    return MEMO_CACHE_LABEL;
   }
   if (ownerEdge === '__relay_store' || ownerEdge === '_recordSource') {
     return 'Relay Store';
@@ -181,7 +186,9 @@ function identifyCacheFramework(node: IHeapNode, ownerEdge: string): string {
     // Closures with $$cache are memoization/selector patterns
     for (const edge of owner.references) {
       const eName = String(edge.name_or_index);
-      if (eName === '$$cache') return 'Memoization/Selector ($$cache)';
+      if (eName === MEMO_CACHE_EDGE && appPriorsEnabled()) {
+        return MEMO_CACHE_LABEL;
+      }
       if (eName === 'recoilValue') return 'Recoil selector';
     }
   }

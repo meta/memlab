@@ -13,6 +13,7 @@ import {tickAnalysis} from './analysis-budget.js';
 import {loadedCodeKind, scriptSourceStringData} from './heap-budget.js';
 import {moduleRecords} from './module-registry.js';
 import {escapeRegExp} from './utils.js';
+import {appPriorsEnabled} from './app-priors.js';
 
 /**
  * Record families that are recognizable by their own property names, so they
@@ -158,6 +159,9 @@ export const SHAPE_FAMILIES: ReadonlyArray<ShapeFamily> = [
 
 /** Families seeded from explicit nodes rather than shapes. */
 export const MEMO_CACHE_FAMILY = 'function-property memo caches (fn.$$cache)';
+/** The property a memoizer stores its cache under, and its cache-tool label. */
+export const MEMO_CACHE_EDGE = '$$cache';
+export const MEMO_CACHE_LABEL = 'Memoization/Selector ($$cache)';
 export const WASM_FAMILY = 'WebAssembly modules and their memory';
 export const REGISTRY_FAMILY =
   'module registry (module state reached only via it)';
@@ -281,6 +285,7 @@ export function collectFamilySeeds(
   snapshot: IHeapSnapshot,
 ): Map<number, string> {
   const seeds = new Map<number, string>();
+  const priors = appPriorsEnabled();
   const registries = new Set<number>();
   for (const rec of moduleRecords(snapshot).values()) {
     for (const e of rec.record.referrers) {
@@ -301,6 +306,7 @@ export function collectFamilySeeds(
       return;
     }
     if (node.type === 'closure') {
+      if (!priors) return;
       for (const e of node.references) {
         if (e.type === 'property' && e.name_or_index === '$$cache') {
           seeds.set(e.toNode.nodeIndex, MEMO_CACHE_FAMILY);
