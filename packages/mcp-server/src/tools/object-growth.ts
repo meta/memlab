@@ -347,7 +347,7 @@ export function formatObjectGrowth(
     mismatchShare > MAX_RENAMED_SHARE
       ? [
           '',
-          `**⚠ Same-id objects not listed: ${(mismatchShare * 100).toFixed(1)}% of ids shared between rungs name a different class.** Node ids identify one object only within one page session; these captures look like separate sessions (a reload, another tab or build), so same-id matches would be coincidental.`,
+          `**⚠ Same-id objects not listed: ${(mismatchShare * 100).toFixed(1)}% of ids shared between rungs name a different class.** Node ids identify one object only while one heap-profiler session lasts; a reload, another tab or build, or a capture that started a fresh profiler session (which renumbers every object, even in one page) breaks that, so same-id matches would be coincidental.`,
         ]
       : [];
   if (warn.length > 0 || rows.length === 0) return warn;

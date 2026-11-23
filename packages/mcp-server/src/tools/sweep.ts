@@ -603,7 +603,7 @@ async function ladder(
     return [
       `## 11. Growth across ${n} snapshots`,
       '',
-      `- **Not compared by id:** ${(mismatchShare * 100).toFixed(0)}% of the node ids these snapshots share name a different class, so they are separate sessions (a reload, another tab or build). Compare by class instead → \`memlab_diff_snapshots\` / \`memlab_explain_delta\``,
+      `- **Not compared by id:** ${(mismatchShare * 100).toFixed(0)}% of the node ids these snapshots share name a different class, so ids do not identify an object across them: a reload, another tab or build, or a capture that started a fresh heap-profiler session (which renumbers every object, even in one page) all do this. Compare by class instead → \`memlab_diff_snapshots\` / \`memlab_explain_delta\``,
       '',
     ];
   }
