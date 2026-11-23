@@ -11,12 +11,10 @@
 import fs from 'fs';
 import {z} from 'zod';
 import {
-  getMetadataByHandle,
   listSnapshots,
   resolveHandle,
   runWithBorrowedHandle,
 } from './heap-state.js';
-import {scaleBudgetToHeap} from './analysis-budget.js';
 import {noteRungCached, withSnapshotAt} from './snapshot-borrow.js';
 import {resolveSnapshotPath} from './tools/load-snapshot.js';
 
@@ -108,10 +106,11 @@ export async function withSnapshotRef<T>(
   ref: string,
   fn: () => Promise<T> | T,
 ): Promise<T> {
-  const handle = resolveHandle(ref);
+  // A readable file goes by path, so the rewritten-file check applies and a
+  // resident snapshot that only shares its basename is not borrowed.
+  const handle = fs.existsSync(ref) ? null : resolveHandle(ref);
   if (handle != null) {
     if (/\.heapsnapshot(\.gz)?$/.test(ref)) noteRungCached();
-    scaleBudgetToHeap(getMetadataByHandle(handle)?.nodeCount ?? 0);
     return await runWithBorrowedHandle(handle, fn);
   }
   const {localPath} = resolveSnapshotPath(ref);

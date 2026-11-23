@@ -550,7 +550,7 @@ export function setSnapshot(
     filePath,
     ...metadata,
     light: metadata.light === true,
-    fileStat: statOrNull(filePath),
+    fileStat: metadata.fileStat ?? statOrNull(filePath),
   };
   loaded.set(handle, {snapshot, metadata: full});
   currentHandle = handle;
@@ -567,10 +567,12 @@ export function listSnapshots(opts?: {
     .filter(m => opts?.includeCached === true || !isCachedHandle(m.handle));
 }
 
-/** A fallback active handle: a snapshot the user loaded, not a cached rung. */
+/**
+ * A fallback active handle: a snapshot the user loaded, never a cached rung.
+ * With only cached rungs left, no snapshot is active.
+ */
 function fallbackHandle(): string | null {
-  const keys = [...loaded.keys()];
-  return keys.find(h => !cachedHandles.has(h)) ?? keys[0] ?? null;
+  return [...loaded.keys()].find(h => !cachedHandles.has(h)) ?? null;
 }
 
 /**
@@ -631,7 +633,9 @@ function* residentsByPath(filePath: string): Generator<SnapshotMetadata> {
   }
 }
 
-function statOrNull(filePath: string): {size: number; mtimeMs: number} | null {
+export function statOrNull(
+  filePath: string,
+): {size: number; mtimeMs: number} | null {
   try {
     const st = fs.statSync(filePath);
     return {size: st.size, mtimeMs: st.mtimeMs};

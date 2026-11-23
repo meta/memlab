@@ -24,6 +24,7 @@ import os from 'os';
 import path from 'path';
 import {test} from 'node:test';
 import {fileURLToPath, pathToFileURL} from 'url';
+import v8 from 'v8';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, '..', 'dist');
@@ -36,6 +37,9 @@ if (!fs.existsSync(path.join(dist, 'heap-state.js'))) {
 const hs = await import(pathToFileURL(path.join(dist, 'heap-state.js')).href);
 const {withRungLine} = await import(
   pathToFileURL(path.join(dist, 'guardrail.js')).href
+);
+const {withSnapshotAt} = await import(
+  pathToFileURL(path.join(dist, 'snapshot-borrow.js')).href
 );
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rung-cache-'));
@@ -119,6 +123,58 @@ test('removing the active snapshot never falls back to a cached rung', () => {
   hs.setCachedHandle(b.handle, true);
   hs.removeSnapshot(a.handle);
   assert.equal(hs.getCurrentHandle(), c.handle);
+});
+
+test('with only cached rungs left, no snapshot is active', () => {
+  hs.clearAllSnapshots();
+  const a = hs.setSnapshot({}, file('only.heapsnapshot'), meta('only'));
+  const b = hs.setSnapshot({}, file('kept.heapsnapshot'), meta('kept'), {
+    replace: false,
+  });
+  hs.restoreCurrentHandle(a.handle);
+  hs.setCachedHandle(b.handle, true);
+  hs.removeSnapshot(a.handle);
+  assert.equal(hs.getCurrentHandle(), null);
+});
+
+test('a stat taken before the parse is the one recorded', () => {
+  hs.clearAllSnapshots();
+  const p = file('early.heapsnapshot');
+  const early = {size: 1, mtimeMs: 1};
+  const m = hs.setSnapshot({}, p, {...meta('early'), fileStat: early});
+  assert.deepEqual(m.fileStat, early);
+});
+
+test('a rung pinned by another call is kept, and evicted once released', async () => {
+  hs.clearAllSnapshots();
+  const prev = process.env.MEMLAB_SESSION_RUNGS;
+  process.env.MEMLAB_SESSION_RUNGS = '1';
+  try {
+    const snap = name => v8.writeHeapSnapshot(path.join(dir, name));
+    const [a, b, c] = ['a', 'b', 'c'].map(n => snap(`${n}.heapsnapshot`));
+    await withSnapshotAt(a, () => null);
+    const ha = hs.findResidentByPath(a).handle;
+    hs.pinHandle(ha);
+    // Another call borrows `b` while this one ends.
+    let hb = null;
+    await withSnapshotAt(b, () => {
+      hb = hs.findResidentByPath(b).handle;
+      hs.pinHandle(hb);
+    });
+    assert.notEqual(hs.getMetadataByHandle(ha), null);
+    assert.notEqual(hs.getMetadataByHandle(hb), null);
+    hs.unpinHandle(ha);
+    hs.unpinHandle(hb);
+    await withSnapshotAt(c, () => null);
+    assert.equal(hs.getMetadataByHandle(ha), null);
+    assert.equal(hs.getMetadataByHandle(hb), null);
+  } finally {
+    if (prev == null) {
+      delete process.env.MEMLAB_SESSION_RUNGS;
+    } else {
+      process.env.MEMLAB_SESSION_RUNGS = prev;
+    }
+  }
 });
 
 test('a result that read rungs says how many were cached', () => {

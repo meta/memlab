@@ -33,8 +33,9 @@ import {
   setSnapshot,
   isCachedHandle,
   setCachedHandle,
+  statOrNull,
 } from './heap-state.js';
-import {beginAnalysisBudget, scaleBudgetToHeap} from './analysis-budget.js';
+import {beginAnalysisBudget} from './analysis-budget.js';
 import {
   estimateLoadHeapMB,
   fileSizeRefusal,
@@ -173,7 +174,8 @@ export async function runWithRungRetention<T>(
 /**
  * Keep a just-borrowed rung, evicting the oldest kept ones to make room.
  * `callerHandle` (the snapshot active before the borrow) is never evicted:
- * if it is a kept rung, the caller now owns it and it leaves the scope.
+ * if it is a kept rung, the caller now owns it and it leaves the scope. A rung
+ * another call has pinned, `handle` included, stays kept and is evicted later.
  */
 function retain(
   r: RungRetention,
@@ -194,23 +196,26 @@ function retain(
   );
   r.handles.push(handle);
   if (session) setCachedHandle(handle, true);
+  const pinnedVictims: string[] = [];
   while (
     r.handles.length > 0 &&
     (r.handles.length > cap || !roomForAnother(snapshot))
   ) {
     const victim = r.handles.shift() as string;
-    if (
-      victim === callerHandle ||
-      victim === getSessionHandle() ||
-      (victim !== handle && isPinned(victim))
-    ) {
+    if (victim === callerHandle || victim === getSessionHandle()) {
+      if (session) setCachedHandle(victim, false);
+      continue;
+    }
+    if (isPinned(victim)) {
+      pinnedVictims.push(victim);
       continue;
     }
     removeSnapshot(victim);
     r.evicted++;
     releaseMemory(1);
-    if (victim === handle) return true;
+    if (victim === handle) break;
   }
+  r.handles.unshift(...pinnedVictims);
   return true;
 }
 
@@ -280,6 +285,8 @@ export async function withSnapshotAt<T>(
   const previousHandle = getSessionHandle();
   let temporaryHandle: string | null = null;
   pinHandle(previousHandle);
+  // Before the parse: a rewrite during it must not look like the parsed file.
+  const fileStat = resident == null ? statOrNull(localPath) : null;
 
   const retention = retentionStore.getStore() ?? sessionRetention;
   if (
@@ -319,6 +326,7 @@ export async function withSnapshotAt<T>(
           // retained size is the heap total.
           totalSize: snapshot.nodes?.get(0)?.retainedSize ?? 0,
           env: detectEnv(snapshot).env,
+          fileStat,
         },
         {replace: false},
       );
@@ -336,7 +344,6 @@ export async function withSnapshotAt<T>(
       throw new Error(`${localPath} is loaded but has no snapshot handle`);
     }
     const rung = snapshot;
-    scaleBudgetToHeap(rung.nodes?.length ?? 0);
     return await runWithBorrowedHandle(borrowed, () => fn(rung));
   } finally {
     // Retained: removed later by its scope (or evicted for room) instead.
