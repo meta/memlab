@@ -742,7 +742,7 @@ function docMarkdown(f: RoundFacts, prev: RoundFacts | null): string {
  * The sweep's positive-control verdict, from the `positive_control.json` a
  * sweep runner writes beside its rounds: one line, or null when there is none.
  */
-function sweepPositiveControl(dirs: readonly string[]): string | null {
+export function sweepPositiveControl(dirs: readonly string[]): string | null {
   for (const parent of new Set(dirs.map(d => path.dirname(path.resolve(d))))) {
     const file = path.join(parent, 'positive_control.json');
     if (!fs.existsSync(file)) continue;
@@ -753,6 +753,7 @@ function sweepPositiveControl(dirs: readonly string[]): string | null {
       match?: string;
       min_per_cycle?: number;
       observed_per_cycle?: number | null;
+      fired_in?: {round?: string; observed_per_cycle?: number};
     };
     try {
       pc = JSON.parse(fs.readFileSync(file, 'utf8')) as typeof pc;
@@ -762,7 +763,9 @@ function sweepPositiveControl(dirs: readonly string[]): string | null {
     // A verdict needs its status and what it was judged on; anything less is
     // not a control that failed.
     if (
-      (pc.status !== 'PASS' && pc.status !== 'VOID') ||
+      (pc.status !== 'PASS' &&
+        pc.status !== 'VOID' &&
+        pc.status !== 'MISCONFIGURED') ||
       typeof pc.match !== 'string' ||
       typeof pc.tool !== 'string' ||
       typeof pc.round !== 'string' ||
@@ -775,6 +778,10 @@ function sweepPositiveControl(dirs: readonly string[]): string | null {
         ? 'not found'
         : `${pc.observed_per_cycle}/cycle`;
     const what = `\`${pc.match}\` in ${pc.tool} on ${pc.round}: ${seen}, needs ≥ ${pc.min_per_cycle}`;
+    if (pc.status === 'MISCONFIGURED') {
+      const fired = pc.fired_in;
+      return `> ⚠️ **Positive control misconfigured:** it did not reproduce on its own round (${what}) but fired in ${fired?.round ?? 'another round'} at ${fired?.observed_per_cycle ?? '?'}/cycle. The pipeline sees the leak, so the sweep is not void; point the control at a combo that delivers its stimulus.`;
+    }
     return pc.status === 'PASS'
       ? `**Positive control: PASS** (${what}).`
       : `> ⚠️ **SWEEP VOID: the positive control did not reproduce** (${what}). A flat round in this sweep shows nothing, because the leak it is judged against did not show either. Fix the control before reading any negative.`;
@@ -841,7 +848,7 @@ export function stimulusCoverageLines(
 export function registerSweepDigest(server: McpServer): void {
   server.tool(
     'memlab_sweep_digest',
-    'One row per round for a whole sweep, from the files each round left on disk (run.json plus the battery output): combo, cycles, rungs, audit verdict, heap, settle, positive controls, leak-candidate count — and, per round, the leak-candidate classes that NO EARLIER round in the list reported. That last column is what tells a sweep where it found something new. Pass the run directories oldest first, or one parent directory to scan for rounds. A `positive_control.json` beside the rounds (written by a sweep runner) heads the digest with PASS, or SWEEP VOID when the control did not reproduce. Rounds that record `stimuli` (area and input per combo) add the (area × stimulus) pairs the combos could drive and no round did. When rounds record `stimuli` (area and input per combo), it ends with the (area × stimulus) pairs the combo catalogue could drive and no round did.',
+    'One row per round for a whole sweep, from the files each round left on disk (run.json plus the battery output): combo, cycles, rungs, audit verdict, heap, settle, positive controls, leak-candidate count — and, per round, the leak-candidate classes that NO EARLIER round in the list reported. That last column is what tells a sweep where it found something new. Pass the run directories oldest first, or one parent directory to scan for rounds. A `positive_control.json` beside the rounds (written by a sweep runner) heads the digest with PASS, SWEEP VOID when the control did not reproduce, or MISCONFIGURED when it did not reproduce on its own round but fired in another. Rounds that record `stimuli` (area and input per combo) add the (area × stimulus) pairs the combos could drive and no round did. When rounds record `stimuli` (area and input per combo), it ends with the (area × stimulus) pairs the combo catalogue could drive and no round did.',
     {
       run_dirs: z
         .array(z.string())
