@@ -25,7 +25,7 @@ import {sizeInput, withSizeHint} from '../byte-size.js';
 import {minifiedSignal} from '../minified.js';
 import {promiseReactions, reactionHandlers} from '../promise-chains.js';
 import {whereOf} from './error-callsites.js';
-import {readProbeSets} from '../probe-sets.js';
+import {readProbeSets, saveMetric} from '../probe-sets.js';
 import {isDetachedElementName} from '../dom-names.js';
 import {
   buildPathTree,
@@ -1807,6 +1807,13 @@ export function registerEval(server: McpServer): void {
             `Byte budget for the serialized \`result\` (default ${MAX_OUTPUT_SIZE}). Over budget, whole ENTRIES are dropped from the end of an array/object rather than the JSON being cut mid-string, and \`truncated: true\` is reported — so a large census stays valid and readable instead of needing a re-run with a hand-written limit.`,
           ),
         ),
+      save_metric: z
+        .string()
+        .regex(/^[A-Za-z_][\w-]*$/)
+        .optional()
+        .describe(
+          'Save this call\'s `code` (with its `prelude` and `use` preludes inlined) as a named metric, once it runs without error. Reference it as `"@<name>"` wherever probe code is accepted (`memlab_ladder_probe` `code`/`metrics`, `memlab_ab_compare` `metrics`, `memlab_eval_across` `code`), in this and later sessions: an A/B verify metric is written once. Stored in the probe-set file as set `metrics`; `@set.probe` names a probe of any saved set.',
+        ),
       save_as: z
         .string()
         .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
@@ -1882,7 +1889,14 @@ export function registerEval(server: McpServer): void {
           'Abort a `snapshot.nodes.forEach` walk after this many node visits. Defaults to a budget SCALED from the loaded graph (6 full passes, floored at 20,000,000) — a probe that makes several passes is the normal shape, so a flat cap silently truncated ordinary multi-pass analysis on large heaps. On abort the partial `result` is returned with a note; an abort that produced NO result is refused outright, because an empty value is indistinguishable from a genuine empty census. Reported back as `nodes_visited` on every call.',
         ),
     },
-    async ({async: background, use, code_file, queries, ...rest}) => {
+    async ({
+      async: background,
+      use,
+      code_file,
+      queries,
+      save_metric,
+      ...rest
+    }) => {
       let args: typeof rest;
       try {
         if (queries != null && queries.length > 0) {
@@ -1902,14 +1916,40 @@ export function registerEval(server: McpServer): void {
         const longTimeout =
           args.timeout_ms != null && args.timeout_ms > MAX_STATUS_WAIT_MS;
         if (predicted >= INLINE_JOB_BUDGET_MS || longTimeout) {
+          if (save_metric != null) {
+            saveMetric(save_metric, args.code ?? '', args.prelude);
+          }
           return startEvalJob(args);
         }
-        return prependNote(
-          await runEval({...args, ownsScanBudget: true}),
-          ranInlineNote(predicted),
+        return saved(
+          prependNote(
+            await runEval({...args, ownsScanBudget: true}),
+            ranInlineNote(predicted),
+          ),
         );
       }
-      return runEval({...args, ownsScanBudget: true});
+      return saved(await runEval({...args, ownsScanBudget: true}));
+
+      function saved<
+        R extends {
+          content: Array<{type: string; text?: string}>;
+          isError?: boolean;
+        },
+      >(res: R): R {
+        if (save_metric == null || res.isError === true) return res;
+        try {
+          saveMetric(save_metric, args.code ?? '', args.prelude);
+        } catch (err) {
+          return prependNote(
+            res,
+            `Not saved as a metric: ${err instanceof Error ? err.message : String(err)}`,
+          ) as R;
+        }
+        return prependNote(
+          res,
+          `Saved as metric \`@${save_metric}\`: pass \`"@${save_metric}"\` as a metric's code in \`memlab_ladder_probe\`, \`memlab_ab_compare\` or \`memlab_eval_across\`.`,
+        ) as R;
+      }
     },
   );
 }

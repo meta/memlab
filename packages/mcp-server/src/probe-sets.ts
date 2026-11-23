@@ -177,3 +177,83 @@ export function judgeExpectation(
     ? 'OK (bounded: growth slowed)'
     : `VIOLATED (expected bounded, still growing: +${early} then +${late})`;
 }
+
+/** The set `memlab_eval({save_metric})` saves into. */
+export const SAVED_METRICS_SET = 'metrics';
+
+/**
+ * Save `code` (with its `prelude` inlined, so it runs alone) as a named
+ * metric, referenced as `@name` wherever a probe's code is accepted.
+ */
+export function saveMetric(name: string, code: string, prelude?: string): void {
+  if (!/^[A-Za-z_][\w-]*$/.test(name)) {
+    throw new Error(
+      `save_metric: "${name}" is not a metric name (letters, digits, _ and -).`,
+    );
+  }
+  const sets = readProbeSets();
+  const set = sets[SAVED_METRICS_SET] ?? {probes: {}};
+  set.probes[name] = {
+    code:
+      prelude != null && prelude.trim() !== ''
+        ? `${prelude}\n;\n${code}`
+        : code,
+  };
+  sets[SAVED_METRICS_SET] = set;
+  writeProbeSets(sets);
+}
+
+/**
+ * The probe `@name` (a saved metric) or `@set.probe` names, as code that runs
+ * alone (the set's prelude inlined) and its `cap`. Not a reference: null.
+ */
+export function resolveMetricRef(
+  value: string,
+): {code: string; cap?: number} | null {
+  const m = /^@([\w-]+)(?:\.([\w-]+))?$/.exec(value.trim());
+  if (m == null) return null;
+  const sets = readProbeSets();
+  const [setName, probeName] =
+    m[2] != null ? [m[1], m[2]] : [SAVED_METRICS_SET, m[1]];
+  const set = sets[setName];
+  const probe = set?.probes[probeName];
+  if (set == null || probe == null) {
+    const known = Object.entries(sets).flatMap(([s, v]) =>
+      Object.keys(v.probes).map(p =>
+        s === SAVED_METRICS_SET ? `@${p}` : `@${s}.${p}`,
+      ),
+    );
+    throw new Error(
+      `No saved metric ${value.trim()}. ` +
+        (known.length > 0
+          ? `Saved: ${known.slice(0, 20).join(', ')}.`
+          : 'Save one with memlab_eval({code, save_metric: "name"}).'),
+    );
+  }
+  const code =
+    set.prelude != null && set.prelude.trim() !== ''
+      ? `${set.prelude}\n;\n${probe.code}`
+      : probe.code;
+  return {code, ...(probe.cap != null ? {cap: probe.cap} : {})};
+}
+
+/** `metrics` with every `@ref` value replaced by the saved code. */
+export function expandMetricRefs<
+  T extends string | {code: string; cap?: number},
+>(metrics: Record<string, T> | undefined): Record<string, T> | undefined {
+  if (metrics == null) return metrics;
+  const out: Record<string, T> = {};
+  for (const [name, spec] of Object.entries(metrics)) {
+    const code = typeof spec === 'string' ? spec : spec.code;
+    const ref = resolveMetricRef(code);
+    if (ref == null) {
+      out[name] = spec;
+    } else if (typeof spec === 'string') {
+      out[name] = ref.code as T;
+    } else {
+      const obj = spec as {code: string; cap?: number};
+      out[name] = {...obj, code: ref.code, cap: obj.cap ?? ref.cap} as T;
+    }
+  }
+  return out;
+}

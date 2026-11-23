@@ -25,7 +25,7 @@ import {
   computeReachableWithoutDevRoots,
 } from './dev-artifacts.js';
 import type {IHeapSnapshot} from '@memlab/core';
-import {resolveProbeSet} from '../probe-sets.js';
+import {expandMetricRefs, resolveProbeSet} from '../probe-sets.js';
 import {nativePins} from '../native-pins.js';
 import {loadRunManifest} from '../run-manifest.js';
 import {
@@ -322,7 +322,9 @@ export async function abCompare({
   skip_intervals,
 }: AbCompareArgs) {
   try {
-    const specs = Object.entries((metrics ?? {}) as Record<string, MetricSpec>);
+    const specs = Object.entries(
+      (expandMetricRefs(metrics) ?? {}) as Record<string, MetricSpec>,
+    );
     const picked =
       probeSet != null
         ? resolveProbeSet(probeSet, run_dir)

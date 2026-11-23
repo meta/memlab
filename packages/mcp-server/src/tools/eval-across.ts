@@ -11,6 +11,7 @@
 import {withProbeSetCode} from '../probe-set-code.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
+import {resolveMetricRef} from '../probe-sets.js';
 import {
   getMetadataByHandle,
   listSnapshots,
@@ -240,6 +241,13 @@ export function registerEvalAcross(server: McpServer): void {
       let args: Omit<typeof raw, 'use' | 'code_file'>;
       try {
         args = resolveEvalSource(withProbeSetCode(raw));
+        // `@name` / `@set.probe` is a saved metric's code.
+        if (args.code != null) {
+          args = {
+            ...args,
+            code: resolveMetricRef(args.code)?.code ?? args.code,
+          };
+        }
       } catch (err) {
         return errorResult(err);
       }

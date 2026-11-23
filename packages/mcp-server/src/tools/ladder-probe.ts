@@ -30,7 +30,12 @@ import {snapshotExists} from '../snapshot-index.js';
 import {resolveLadderPaths} from './ladder.js';
 import fs from 'fs';
 import path from 'path';
-import {judgeExpectation, resolveProbeSet} from '../probe-sets.js';
+import {
+  expandMetricRefs,
+  judgeExpectation,
+  resolveMetricRef,
+  resolveProbeSet,
+} from '../probe-sets.js';
 import type {ProbeExpectation} from '../probe-sets.js';
 import {
   describeCycleAxis,
@@ -900,6 +905,9 @@ export function registerLadderProbe(server: McpServer): void {
       max_file_size_mb,
     }) => {
       try {
+        // `@name` / `@set.probe` is a saved metric's code.
+        metrics = expandMetricRefs(metrics);
+        if (code != null) code = resolveMetricRef(code)?.code ?? code;
         // On an A/B round, "all" means every arm, each fitted on its own:
         // one pass that answers what a call per segment plus an
         // `ab_compare` call answered in three.
