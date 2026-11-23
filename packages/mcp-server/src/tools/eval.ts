@@ -55,6 +55,7 @@ import {readElements as readElementsInfo} from '../heap-shapes.js';
 import {
   SNAPSHOT_STRING_LIMIT,
   estimatedFullLength,
+  isSnapshotCut,
 } from '../string-identity.js';
 import {
   getCurrentHandle,
@@ -1697,7 +1698,7 @@ export function registerEval(server: McpServer): void {
             'groupReferrersByEdge(nodeId), groupArrayElementsByProperty(arrayNodeId, propName), ' +
             'isOrphaned(nodeId, ownershipEdgeNames[]), countUniqueTargets(arrayNodeId, propName), ' +
             'retainedSize(id)->number, retainedSizes(ids[])->Record<id,bytes> (an OBJECT keyed by id, NOT an array — index it as sizes[id] or Object.values(sizes)), ' +
-            'mapEntries(mapId, limit=1000)->[{key: brief, value: brief|null}] & setElements(setId, limit=1000)->[brief] (correct Map/Set/WeakMap enumeration — handles browser internal-typed slots AND SMI-value gaps, so you never re-derive it wrong; a brief is a plain {id,name,type,self_size,retained_size,string} summary, NOT a node, and a capped call warns), ' +
+            'mapEntries(mapId, limit=1000)->[{key: brief|null, value: brief|null}] & setElements(setId, limit=1000)->[brief] (correct Map/Set/WeakMap enumeration — handles browser internal-typed slots, SMI keys and values (null), and skips deleted slots, so you never re-derive it wrong; a brief is a plain {id,name,type,self_size,retained_size,string} summary, NOT a node, and a capped call warns), ' +
             'mapEntryNodes(mapId, limit?)->[{keyNode, valueNode|null}] & setElementNodes(setId, limit?)->[node] (the same enumeration returning NODES you can walk with .references, no default cap — use these to count or traverse), ' +
             'stableKey(nodeOrId)->string|null & byStableKey(key)->id|null (`<Module>.<edge>…` from the module scope down to the node — the same key at every rung, so `eval_across`/`ladder_probe` can track one named collection: `result = helpers.entries(helpers.byStableKey("InteractionTracingMetricsCore.tracedInteractions")).length`), ' +
             'sourceOf(nodeOrId)->{module, via, hops, script, location} (the Haste module whose code the node belongs to, read through its closure scope chain), ' +
@@ -2420,6 +2421,19 @@ export async function runEval({
     // Full names unless the session asked for a width: an eval may key on
     // them.
     const briefWidth = getSessionConfig().maxNameLength;
+    let cutNoted = false;
+    const cutOf = (n: IHeapNode) => {
+      if (!cutNoted) {
+        cutNoted = true;
+        consoleOutput.push(
+          `[warn] A string in this result is cut: the snapshot records only its first ${formatNumber(SNAPSHOT_STRING_LIMIT)} characters (\`string_cut\` gives the full length). Its identity is unverifiable beyond that prefix: do not call two such strings the same text, or add up copies, from the prefix.`,
+        );
+      }
+      return {
+        recorded: n.name.length,
+        full_length: estimatedFullLength(n.name, n.self_size),
+      };
+    };
     const nodeBrief = (n: IHeapNode | null | undefined) =>
       n == null
         ? null
@@ -2433,6 +2447,7 @@ export async function runEval({
             self_size: n.self_size,
             retained_size: light ? null : retainedSize(n.id),
             string: n.isString ? (n.toStringNode()?.stringValue ?? null) : null,
+            ...(isSnapshotCut(n) ? {string_cut: cutOf(n)} : {}),
           };
 
     const resolveNode = (

@@ -30,6 +30,7 @@ import {
 } from './framework-buffers.js';
 import {
   enumerateMapEntries,
+  collectionSlotCounts,
   enumerateSetElements,
   errorResult,
   formatBytes,
@@ -262,14 +263,20 @@ function elementsOf(node: IHeapNode): {
   let all: Array<IHeapNode | null>;
   if (node.name === 'Array') all = arrayElements(node);
   else if (node.name === 'Map' || node.name === 'WeakMap') {
-    const slots = enumerateMapEntries(node);
-    const entries = slots.filter(e => !isHole(e.key));
+    const entries = enumerateMapEntries(node);
     // A WeakMap holds its keys weakly, so only a Map's keys can be dead.
-    const keys = node.name === 'Map' ? entries.map(e => e.key) : null;
-    const holes = slots.length - entries.length;
+    const keys =
+      node.name === 'Map'
+        ? entries.flatMap(e => (e.key == null ? [] : [e.key]))
+        : null;
+    const holes = collectionSlotCounts(node).deleted;
     return {elems: entries.map(e => e.value), holes, keys};
   } else if (node.name === 'Set' || node.name === 'WeakSet') {
-    all = enumerateSetElements(node);
+    return {
+      elems: enumerateSetElements(node),
+      holes: collectionSlotCounts(node).deleted,
+      keys: null,
+    };
   } else {
     all = [];
     for (const e of node.references) {

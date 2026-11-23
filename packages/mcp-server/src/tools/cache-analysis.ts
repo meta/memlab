@@ -357,7 +357,7 @@ export function entriesRetainedOf(
   const targets: IHeapNode[] = [];
   if (node.name === 'Map' || node.name === 'WeakMap') {
     for (const e of enumerateMapEntries(node)) {
-      if (node.name === 'Map') targets.push(e.key);
+      if (node.name === 'Map' && e.key != null) targets.push(e.key);
       if (e.value) targets.push(e.value);
     }
   } else if (node.name === 'Set' || node.name === 'WeakSet') {

@@ -466,7 +466,7 @@ The main list and lookup tools (`memlab_query_objects`, `memlab_class_histogram`
 | `memlab_id_space_audit` | Separate integer-keyed structures indexed by the SAME sparse id space — several small sparse findings that are really one re-keying fix. |
 | `memlab_stale_collections` | Collections holding entries nothing else references. |
 | `memlab_collection_trend` | The same collections tracked ACROSS a ladder. |
-| `memlab_map_entries` | Enumerate a Map/Set correctly (SMI gaps and browser slot typing handled). |
+| `memlab_map_entries` | Enumerate a Map/Set correctly: live entries vs deleted slots, small-integer keys and values, WeakRef slots, browser slot typing. |
 | `memlab_weakmap_entries` | Enumerate a WeakMap. |
 | `memlab_array_group_by` | Group an array’s elements by a property to see what is piling up. |
 | `memlab_property_distribution` | Cardinality and top values of one property across instances. |

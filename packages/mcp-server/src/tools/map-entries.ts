@@ -20,12 +20,22 @@ import {
   errorResult,
   toolResult,
   enumerateMapEntries,
+  collectionSlotCounts,
+  mapSlotsAligned,
   enumerateSetElements,
 } from '../utils.js';
 
 // Render a node as a short label, inlining the string value for string nodes so
 // cache keys are visible verbatim (the whole point of enumerating a cache Map).
 function describeNode(node: IHeapNode, maxLen: number): string {
+  if (node.name === 'WeakRef') {
+    const target = node.references.find(
+      e => e.type === 'weak' || String(e.name_or_index) === 'target',
+    )?.toNode;
+    return target != null && target.id > 3
+      ? `WeakRef → @${target.id} ${truncateNodeName(target.name, target.type, target.self_size, maxLen - 14)}`
+      : 'WeakRef (target collected)';
+  }
   if (node.isString) {
     const strNode = node.toStringNode();
     if (strNode) {
@@ -78,7 +88,7 @@ export function registerMapEntries(server: McpServer): void {
         }
 
         interface MapEntry {
-          key: IHeapNode;
+          key: IHeapNode | null;
           value: IHeapNode | null;
           keyRetained: number;
           valueRetained: number;
@@ -96,7 +106,7 @@ export function registerMapEntries(server: McpServer): void {
         ).map(e => ({
           key: e.key,
           value: e.value,
-          keyRetained: e.key.retainedSize,
+          keyRetained: e.key?.retainedSize ?? 0,
           valueRetained: e.value ? e.value.retainedSize : 0,
         }));
 
@@ -118,7 +128,9 @@ export function registerMapEntries(server: McpServer): void {
               (a.keyRetained + a.valueRetained),
           );
         } else if (sort_by === 'key_name') {
-          entries.sort((a, b) => a.key.name.localeCompare(b.key.name));
+          entries.sort((a, b) =>
+            (a.key?.name ?? '').localeCompare(b.key?.name ?? ''),
+          );
         } // 'insertion' keeps backing-store order
 
         const shown = entries.slice(0, limit);
@@ -133,11 +145,14 @@ export function registerMapEntries(server: McpServer): void {
         if (isSet) {
           const headers = ['Value ID', 'Value', 'Retained'];
           const rightCols = new Set([2]);
-          const rows = shown.map(e => [
-            `@${e.key.id}`,
-            describeNode(e.key, 60),
-            formatBytes(e.keyRetained),
-          ]);
+          const rows = shown.map(e => {
+            const k = e.key as IHeapNode;
+            return [
+              `@${k.id}`,
+              describeNode(k, 60),
+              formatBytes(e.keyRetained),
+            ];
+          });
           entryTable = markdownTable(headers, rows, rightCols);
         } else {
           const headers = [
@@ -149,8 +164,8 @@ export function registerMapEntries(server: McpServer): void {
           ];
           const rightCols = new Set([4]);
           const rows = shown.map(e => [
-            `@${e.key.id}`,
-            describeNode(e.key, 60),
+            e.key ? `@${e.key.id}` : '—',
+            e.key ? describeNode(e.key, 60) : '(small integer)',
             e.value ? `@${e.value.id}` : '—',
             e.value ? describeNode(e.value, 40) : '—',
             formatBytes(e.valueRetained),
@@ -158,8 +173,12 @@ export function registerMapEntries(server: McpServer): void {
           entryTable = markdownTable(headers, rows, rightCols);
         }
 
+        const {deleted} = collectionSlotCounts(node);
         const lines = [
-          `${node.name} @${node_id}: ${formatNumber(totalEntries)} entries` +
+          `${node.name} @${node_id}: ${formatNumber(totalEntries)} live entries` +
+            (deleted > 0
+              ? `, plus ${formatNumber(deleted)} deleted slot(s) awaiting a rehash (not entries: quote ${formatNumber(totalEntries)})`
+              : '') +
             (totalEntries > limit ? ` (showing top ${limit})` : ''),
           isSet
             ? `Total retained: ${formatBytes(totalKeyRetained)}`
@@ -169,12 +188,34 @@ export function registerMapEntries(server: McpServer): void {
           entryTable,
         ];
         if (isMap) {
+          const smiKeys = entries.filter(e => e.key == null).length;
+          const weakKeys = entries.filter(
+            e => e.key?.name === 'WeakRef',
+          ).length;
+          const weakValues = entries.filter(
+            e => e.value?.name === 'WeakRef',
+          ).length;
+          if (!mapSlotsAligned(node) && entries.every(e => e.value == null)) {
+            lines.push(
+              '',
+              '**Key/value alignment unknown:** every slot stands alone and the table is too small to place them, so each is shown as a key. They may equally be VALUES under small-integer keys, so treat the key type as unknown.',
+            );
+          }
+          if (smiKeys > 0) {
+            lines.push(
+              '',
+              `**${formatNumber(smiKeys)} entr${smiKeys === 1 ? 'y has' : 'ies have'} a small-integer key** (a numeric id): an SMI key emits no heap edge, so it shows as "(small integer)". Do not describe these keys as objects or WeakRefs.`,
+            );
+          }
+          if (weakKeys > 0 || weakValues > 0) {
+            lines.push(
+              '',
+              `**WeakRef slots:** ${formatNumber(weakKeys)} key(s) and ${formatNumber(weakValues)} value(s) are WeakRef objects. The Map holds the WeakRef strongly and its target weakly, so a WeakRef value does not keep its target alive, and a WeakRef key is looked up by the WeakRef's identity, not the target's.`,
+            );
+          }
           lines.push(
             '',
-            '_Keys are paired with the value in the immediately-following backing-' +
-              'store slot INDEX. Entries whose value is an inline SMI (small int) ' +
-              'emit no heap edge, so their value shows as "—" (primitive, not ' +
-              'captured) rather than being mispaired with the next entry._',
+            '_Keys and values are told apart by their backing-store slot index. A key or value that is an inline SMI (small int) emits no heap edge and shows as "—" (primitive, not captured), never as the neighbouring slot._',
           );
         }
         return toolResult(lines.join('\n'));

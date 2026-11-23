@@ -244,6 +244,7 @@ export function registerModelCensus(server: McpServer): void {
             return;
           const hits = new Map<Group, number>();
           for (const e of enumerateMapEntries(n)) {
+            if (e.key == null) continue;
             const g =
               groupOfRecord.get(e.key.id) ??
               (e.key.isString ? stringOwner.get(e.key.id) : undefined);

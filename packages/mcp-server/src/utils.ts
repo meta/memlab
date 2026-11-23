@@ -885,12 +885,17 @@ export interface BackingSlot {
 }
 
 /**
- * One enumerated Map/WeakMap entry. `value` is null when the value slot held an
- * inline SMI (no heap edge) — see `enumerateMapEntries`.
+ * One enumerated Map/WeakMap entry. `key` or `value` is null when that slot
+ * held an inline SMI (no heap edge) — see `enumerateMapEntries`.
  */
 export interface CollectionEntry {
-  key: IHeapNode;
+  key: IHeapNode | null;
   value: IHeapNode | null;
+}
+
+/** A deleted Map/Set entry's slots point at the hole until the next rehash. */
+export function isHoleNode(node: IHeapNode): boolean {
+  return node.name === 'the_hole' || node.name === 'system / Hole';
 }
 
 /**
@@ -908,7 +913,19 @@ export interface CollectionEntry {
  * values are SMIs (see `enumerateMapEntries`).
  */
 export function collectBackingSlots(node: IHeapNode): BackingSlot[] {
+  return readBackingStore(node).slots;
+}
+
+/**
+ * The backing store's live slots and the indexes of its hole slots (deleted
+ * entries awaiting a rehash).
+ */
+function readBackingStore(node: IHeapNode): {
+  slots: BackingSlot[];
+  holes: number[];
+} {
   const out: BackingSlot[] = [];
+  const holes: number[] = [];
   for (const edge of node.references) {
     const eName = String(edge.name_or_index);
     if (eName !== 'table' && eName !== 'backing_store') continue;
@@ -924,15 +941,75 @@ export function collectBackingSlots(node: IHeapNode): BackingSlot[] {
       // (id<=3) are not real entries. Do NOT skip `undefined`: an explicit
       // `undefined` value/element is a real entry, and dropping it would make it
       // indistinguishable from an inline-primitive gap (mis-reported as absent).
-      if (target.id <= 3 || target.name === 'the_hole') {
+      if (isHoleNode(target)) {
+        holes.push(idx);
         continue;
       }
+      if (target.id <= 3) continue;
       out.push({idx, node: target});
     }
     break;
   }
   out.sort((a, b) => a.idx - b.idx);
-  return out;
+  return {slots: out, holes};
+}
+
+/**
+ * Index mod 3 of an OrderedHashMap's key slots, or null when it cannot be told.
+ *
+ * The table is `[elements, deleted, buckets, bucket heads…, entries…]` with
+ * `[key, value, chain]` entries, and only heap-valued slots emit an edge. Two
+ * adjacent indexes are always a key and its value, since a chain link is an
+ * SMI. Without such a pair, the entries start at `3 + buckets` and end by
+ * `3 + 7 × buckets` (a power of two), which often leaves one answer.
+ */
+export function mapKeyResidue(indexes: readonly number[]): number | null {
+  const sorted = [...indexes].sort((a, b) => a - b);
+  const votes = [0, 0, 0];
+  for (let i = 0; i + 1 < sorted.length; i++) {
+    if (sorted[i + 1] === sorted[i] + 1) votes[sorted[i] % 3]++;
+  }
+  const best = votes.indexOf(Math.max(...votes));
+  if (votes[best] > 0) return best;
+  if (sorted.length === 0) return null;
+  const lo = sorted[0];
+  const hi = sorted[sorted.length - 1];
+  const residues = new Set<number>();
+  for (let buckets = 1; 3 + buckets <= lo; buckets *= 2) {
+    if (2 + 7 * buckets >= hi) residues.add((3 + buckets) % 3);
+  }
+  return residues.size === 1 ? [...residues][0] : null;
+}
+
+/** Whether a Map's key and value slots can be told apart by index. */
+export function mapSlotsAligned(node: IHeapNode): boolean {
+  const {slots, holes} = readBackingStore(node);
+  return mapKeyResidue([...slots.map(x => x.idx), ...holes]) != null;
+}
+
+/** Live and deleted entries of a Map/WeakMap/Set/WeakSet backing store. */
+export function collectionSlotCounts(node: IHeapNode): {
+  live: number;
+  deleted: number;
+} {
+  const isMap = node.name === 'Map' || node.name === 'WeakMap';
+  const {holes} = readBackingStore(node);
+  const live = isMap
+    ? enumerateMapEntries(node).length
+    : collectBackingSlots(node).length;
+  if (!isMap) return {live, deleted: holes.length};
+  if (node.name === 'WeakMap') {
+    return {live, deleted: Math.round(holes.length / 2)};
+  }
+  const r = mapKeyResidue([
+    ...collectBackingSlots(node).map(x => x.idx),
+    ...holes,
+  ]);
+  const deleted =
+    r == null
+      ? Math.round(holes.length / 2)
+      : holes.filter(i => i % 3 === r).length;
+  return {live, deleted};
 }
 
 /**
@@ -1061,7 +1138,12 @@ export function flattenString(
 /**
  * Enumerate a Map/WeakMap's (key, value) entries.
  *
- * V8 lays each entry out as consecutive slots `[key, value, chain]` (the chain
+ * Keys and values are told apart by slot index (`mapKeyResidue`), so a Map
+ * with small-integer KEYS lists its values as values with a null key, not as
+ * keys. WeakMap's two-slot entries and Maps whose alignment cannot be told
+ * are paired by adjacency.
+ *
+ * V8 lays each Map entry out as consecutive slots `[key, value, chain]` (the chain
  * link is an inline SMI, so it emits no edge). We therefore pair a key with the
  * value in the immediately-following slot INDEX (`key.idx + 1`). When no slot
  * exists at `key.idx + 1`, the value was an inline SMI/primitive and we emit
@@ -1070,8 +1152,23 @@ export function flattenString(
  * Map has SMI values (a real correctness bug on browser heaps).
  */
 export function enumerateMapEntries(node: IHeapNode): CollectionEntry[] {
-  const slots = collectBackingSlots(node);
+  const {slots, holes} = readBackingStore(node);
   const entries: CollectionEntry[] = [];
+  const r =
+    node.name === 'WeakMap'
+      ? null
+      : mapKeyResidue([...slots.map(x => x.idx), ...holes]);
+  if (r != null) {
+    const at = new Map(slots.map(x => [x.idx, x.node]));
+    for (const {idx, node: n} of slots) {
+      if (idx % 3 === r) {
+        entries.push({key: n, value: at.get(idx + 1) ?? null});
+      } else if ((idx + 2) % 3 === r && !at.has(idx - 1)) {
+        entries.push({key: null, value: n});
+      }
+    }
+    return entries;
+  }
   let i = 0;
   while (i < slots.length) {
     const key = slots[i];

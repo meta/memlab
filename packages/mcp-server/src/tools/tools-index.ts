@@ -603,7 +603,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_map_entries',
-        'Enumerate a Map/Set correctly (SMI gaps and browser slot typing handled).',
+        'Enumerate a Map/Set correctly: live entries vs deleted slots, small-integer keys and values, WeakRef slots, browser slot typing.',
       ],
       ['memlab_weakmap_entries', 'Enumerate a WeakMap.'],
       [

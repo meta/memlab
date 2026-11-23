@@ -63,7 +63,7 @@ function heldEntries(
     for (const e of enumerateMapEntries(node)) {
       entries++;
       if (e.value != null && isRecord(e.value)) out.push(e.value.nodeIndex);
-      if (e.key.id > 3) {
+      if (e.key != null && e.key.id > 3) {
         if (isRecord(e.key)) out.push(e.key.nodeIndex);
         else keys.push(keyToken(e.key));
       }
