@@ -31,6 +31,9 @@ if (!fs.existsSync(built)) {
 }
 const sweep = await import(pathToFileURL(built).href);
 const {directHolderMark, residualCall} = sweep;
+const {ScanTimeoutError} = await import(
+  pathToFileURL(path.join(here, '..', 'dist', 'analysis-budget.js')).href
+);
 
 const node = (id, name, type = 'object') => ({id, name, type});
 const noModule = () => undefined;
@@ -208,4 +211,25 @@ test('cells: padded and compact (terse) table rows split the same way', () => {
   assert.deepEqual(cells('|Map @12|closure var x|a.b|3|1 KB|'), want);
   // An escaped pipe stays inside its cell.
   assert.deepEqual(cells('|a \\| b|c|'), ['a \\| b', 'c']);
+});
+
+test('a section out of budget takes back the leads it pushed', async () => {
+  const {runSection} = sweep;
+  const leads = [{label: 'kept', bytes: 1, ids: [1], section: 1}];
+  const out = await runSection(leads, () => {
+    leads.push({label: 'partial', bytes: 2, ids: [2], section: 2});
+    throw new ScanTimeoutError(10, 5);
+  });
+  assert.equal(out, null);
+  assert.deepEqual(
+    leads.map(l => l.label),
+    ['kept'],
+  );
+  assert.deepEqual(await runSection(leads, () => ['- a']), ['- a']);
+  await assert.rejects(
+    runSection(leads, () => {
+      throw new Error('boom');
+    }),
+    /boom/,
+  );
 });

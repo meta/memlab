@@ -642,6 +642,24 @@ async function ladder(
   ];
 }
 
+/**
+ * Runs one section. A section that runs out of scan budget returns null and
+ * takes back the leads it had pushed, so a skipped section is not cut.
+ */
+export async function runSection(
+  leads: Lead[],
+  f: () => Promise<string[]> | string[],
+): Promise<string[] | null> {
+  const mark = leads.length;
+  try {
+    return await f();
+  } catch (e) {
+    if (!(e instanceof ScanTimeoutError)) throw e;
+    leads.length = mark;
+    return null;
+  }
+}
+
 /** Section 12: the residual call that cuts the top leads, ready to paste. */
 export function residualCall(leads: Lead[], cap: number): string | null {
   // One lead per section in turn, largest first, ladder growth first and the
@@ -790,16 +808,14 @@ export function registerSweep(server: McpServer): void {
         ) => {
           armScanBudgetFor(sectionBudgetMs);
           const start = Date.now();
-          try {
-            const lines = await f();
-            times.push(`${name} ${((Date.now() - start) / 1000).toFixed(1)}s`);
-            return lines;
-          } catch (e) {
-            if (!(e instanceof ScanTimeoutError)) throw e;
+          const lines = await runSection(leads, f);
+          if (lines == null) {
             times.push(`${name} skipped`);
             skipped.push(name);
             return [];
           }
+          times.push(`${name} ${((Date.now() - start) / 1000).toFixed(1)}s`);
+          return lines;
         };
         const env = meta?.env ?? 'unknown';
         const total = s.nodes.get(0)?.retainedSize ?? 0;
