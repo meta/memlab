@@ -78,6 +78,17 @@ test('the same closure added twice is a duplicate even without a subscriber', ()
   assert.equal(duplicates[0].closures, 1);
 });
 
+test('one closure registered N times is sized once', () => {
+  const {duplicates} = duplicateGroups([
+    ...Array.from({length: 5}, () =>
+      reg({subscriber: 42, closureId: 7, bytes: 20_000}),
+    ),
+    reg({subscriber: 42, bytes: 1_000}),
+  ]);
+  assert.equal(duplicates[0].registrations, 6);
+  assert.equal(duplicates[0].bytes, 21_000);
+});
+
 test('fresh closures with no subscriber are one per instance, not duplicates', () => {
   const {duplicates, perCode} = duplicateGroups(
     Array.from({length: 30}, () => reg()),

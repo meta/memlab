@@ -323,8 +323,10 @@ export function duplicateGroups(regs: readonly Registration[]): {
       byKey.set(k, g);
     }
     g.registrations++;
-    g.bytes += r.bytes;
-    g.ids.add(r.closureId);
+    if (!g.ids.has(r.closureId)) {
+      g.ids.add(r.closureId);
+      g.bytes += r.bytes;
+    }
   }
   const duplicates = [...byKey.values()]
     .map(({ids, ...g}) => ({...g, closures: ids.size}))

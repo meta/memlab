@@ -346,6 +346,20 @@ test('markdown: items under an Ignored heading account for a lead', () => {
   assert.equal(itemFor(shape, items)?.kind, 'not_problem');
 });
 
+test('markdown: a finding heading that mentions "ignored" stays a finding', () => {
+  const items = parseDraft(
+    '# Findings\n## F2 Abort signal ignored on unmount\nAbortSignal listeners leak\n\n## **Ignored** (2)\n- ignored: dev-only\n',
+  );
+  assert.equal(
+    items.find(i => /F2 Abort signal/.test(i.text))?.kind,
+    'finding',
+  );
+  assert.equal(
+    items.find(i => /ignored: dev-only/.test(i.text))?.kind,
+    'not_problem',
+  );
+});
+
 test('bottom-up leads: a shape that grew by count is listed with its check', () => {
   const grew = lead({
     label: 't{context, eventType, key, listener, remove, subscriber}',
