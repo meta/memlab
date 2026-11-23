@@ -35,7 +35,7 @@ import {
   setCachedHandle,
   statOrNull,
 } from './heap-state.js';
-import {beginAnalysisBudget} from './analysis-budget.js';
+import {beginAnalysisBudget, scaleBudgetToHeap} from './analysis-budget.js';
 import {
   estimateLoadHeapMB,
   fileSizeRefusal,
@@ -199,7 +199,7 @@ function retain(
   const pinnedVictims: string[] = [];
   while (
     r.handles.length > 0 &&
-    (r.handles.length > cap || !roomForAnother(snapshot))
+    (r.handles.length + pinnedVictims.length > cap || !roomForAnother(snapshot))
   ) {
     const victim = r.handles.shift() as string;
     if (victim === callerHandle || victim === getSessionHandle()) {
@@ -344,6 +344,7 @@ export async function withSnapshotAt<T>(
       throw new Error(`${localPath} is loaded but has no snapshot handle`);
     }
     const rung = snapshot;
+    scaleBudgetToHeap(rung.nodes?.length ?? 0);
     return await runWithBorrowedHandle(borrowed, () => fn(rung));
   } finally {
     // Retained: removed later by its scope (or evicted for room) instead.

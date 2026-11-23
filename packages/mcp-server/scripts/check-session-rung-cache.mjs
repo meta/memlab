@@ -183,3 +183,35 @@ test('a result that read rungs says how many were cached', () => {
   const none = {content: [{type: 'text', text: 'done'}]};
   assert.equal(withRungLine(none, 0, 0), none);
 });
+
+test('pinned rungs count against the cap, so an unpinned one is evicted', async () => {
+  hs.clearAllSnapshots();
+  const prev = process.env.MEMLAB_SESSION_RUNGS;
+  process.env.MEMLAB_SESSION_RUNGS = '1';
+  const pinned = [];
+  try {
+    const snap = name => v8.writeHeapSnapshot(path.join(dir, name));
+    const [a, b, c] = ['pa', 'pb', 'pc'].map(n => snap(`${n}.heapsnapshot`));
+    await withSnapshotAt(a, () => null);
+    pinned.push(hs.findResidentByPath(a).handle);
+    hs.pinHandle(pinned[0]);
+    await withSnapshotAt(b, () => {
+      pinned.push(hs.findResidentByPath(b).handle);
+      hs.pinHandle(pinned[1]);
+    });
+    await withSnapshotAt(c, () => null);
+    assert.equal(hs.findResidentByPath(c), null);
+    for (const h of pinned) {
+      assert.notEqual(hs.getMetadataByHandle(h), null);
+    }
+  } finally {
+    for (const h of pinned) {
+      hs.unpinHandle(h);
+    }
+    if (prev == null) {
+      delete process.env.MEMLAB_SESSION_RUNGS;
+    } else {
+      process.env.MEMLAB_SESSION_RUNGS = prev;
+    }
+  }
+});

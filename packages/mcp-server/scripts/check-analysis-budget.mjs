@@ -17,6 +17,7 @@
  */
 import assert from 'assert/strict';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import {test} from 'node:test';
 import {fileURLToPath, pathToFileURL} from 'url';
@@ -36,6 +37,14 @@ const {
   getAnalysisTimeoutMs,
   scaleBudgetToHeap,
 } = await import(pathToFileURL(built).href);
+const dist = path.dirname(built);
+const hs = await import(pathToFileURL(path.join(dist, 'heap-state.js')).href);
+const {withSnapshotAt} = await import(
+  pathToFileURL(path.join(dist, 'snapshot-borrow.js')).href
+);
+const {withSnapshotRef} = await import(
+  pathToFileURL(path.join(dist, 'snapshot-ref.js')).href
+);
 
 test('default is 90 s, scaled by the active node count past 10M nodes', () => {
   delete process.env.MEMLAB_ANALYSIS_TIMEOUT_MS;
@@ -79,4 +88,45 @@ test('an explicit or re-armed budget is never widened', () => {
   scaleBudgetToHeap(26_000_000);
   assert.equal(activeTimeoutMs_(), 0);
   endAnalysisBudget();
+});
+
+test('borrowing a larger snapshot widens a default budget to it', async () => {
+  delete process.env.MEMLAB_ANALYSIS_TIMEOUT_MS;
+  hs.clearAllSnapshots();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-borrow-'));
+  const bigPath = path.join(dir, 'big.heapsnapshot');
+  fs.writeFileSync(bigPath, 'x');
+  const meta = (name, nodeCount) => ({
+    fileName: name,
+    nodeCount,
+    edgeCount: 0,
+    totalSize: 0,
+    env: 'browser',
+  });
+  const big = hs.setSnapshot(
+    {nodes: {length: 26_000_000}},
+    bigPath,
+    meta('big.heapsnapshot', 26_000_000),
+  );
+  hs.setSnapshot(
+    {nodes: {length: 1}},
+    path.join(dir, 'small.heapsnapshot'),
+    meta('small.heapsnapshot', 1),
+    {replace: false},
+  );
+  try {
+    beginAnalysisBudget(90_000, true);
+    assert.equal(
+      await withSnapshotRef(big.handle, () => activeTimeoutMs_()),
+      234_000,
+    );
+    beginAnalysisBudget(90_000, true);
+    assert.equal(
+      await withSnapshotAt(bigPath, () => activeTimeoutMs_()),
+      234_000,
+    );
+  } finally {
+    endAnalysisBudget();
+    hs.clearAllSnapshots();
+  }
 });
