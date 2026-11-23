@@ -147,6 +147,11 @@ each arm's first rung by default (`skip_intervals`) and prints the rate over
 all rungs beside it. When leaving out that warm-up changes the verdict, the
 verdict says so.
 
+To measure your own probes on both arms, call `memlab_ladder_probe` once with
+`segment: "all"`. On an A/B round it measures every arm in one pass, fits each
+on its own, and returns the `memlab_ab_compare` table. One call replaces a
+call per segment plus an `ab_compare` call, three passes over the same rungs.
+
 ## Growth Outside the JavaScript Heap
 
 Some leaks are invisible in every heap figure. These tools find them:

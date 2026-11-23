@@ -28,6 +28,8 @@ import {
 import {runEval, storedFnSources} from './eval.js';
 import {snapshotExists} from '../snapshot-index.js';
 import {resolveLadderPaths} from './ladder.js';
+import fs from 'fs';
+import path from 'path';
 import {judgeExpectation, resolveProbeSet} from '../probe-sets.js';
 import type {ProbeExpectation} from '../probe-sets.js';
 import {
@@ -36,6 +38,7 @@ import {
   resolveLadderInputs,
   describeSegmentSelection,
   segmentArg,
+  SEGMENT_ARG_DESCRIPTION,
   retentionWindowCaveat,
   isSettleRungFilename,
 } from '../run-manifest.js';
@@ -749,6 +752,18 @@ export function parseAutoVisibility(
   return out;
 }
 
+/** True when `runDir`'s run.json records an A/B round (both arms). */
+function isAbRound(runDir: string): boolean {
+  try {
+    const m = JSON.parse(
+      fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'),
+    ) as {ab?: {off?: unknown; on?: unknown} | null};
+    return m.ab?.off != null && m.ab?.on != null;
+  } catch {
+    return false;
+  }
+}
+
 export function registerLadderProbe(server: McpServer): void {
   server.tool(
     'memlab_ladder_probe',
@@ -773,7 +788,9 @@ export function registerLadderProbe(server: McpServer): void {
         .describe(
           "A leak-hunt round's output directory (the one holding run.json and snapshots/). PREFERRED over `paths`: the rung paths, the exact per-rung cycle counts and the total cycles driven are all read from run.json, so the x-axis is measured rather than assumed. Rungs are placed on a schedule, so a real ladder is unevenly spaced (e.g. 0/200/375/450) and an assumed-even axis silently reports wrong rates.",
         ),
-      segment: segmentArg(),
+      segment: segmentArg(
+        `${SEGMENT_ARG_DESCRIPTION} On an A/B round (run.json \`ab\`), \`"all"\` instead measures every arm in one pass and fits each on its own, returning the \`memlab_ab_compare\` table: per-arm series and rates and the verdict per metric.`,
+      ),
       paths: z
         .array(z.string())
         .optional()
@@ -883,6 +900,30 @@ export function registerLadderProbe(server: McpServer): void {
       max_file_size_mb,
     }) => {
       try {
+        // On an A/B round, "all" means every arm, each fitted on its own:
+        // one pass that answers what a call per segment plus an
+        // `ab_compare` call answered in three.
+        if (segment === 'all' && run_dir != null && isAbRound(run_dir)) {
+          const {abCompare} = await import('./ab-compare.js');
+          const res = await abCompare({
+            run_dir,
+            metrics:
+              metrics ??
+              (code != null ? {[label ?? 'probe']: code} : undefined),
+            probes,
+            prelude,
+            timeout_ms,
+            max_nodes,
+            totals: true,
+          });
+          const first = res.content?.[0];
+          if (!('isError' in res && res.isError) && first?.type === 'text') {
+            first.text =
+              '_An A/B round with `segment: "all"`: each arm is measured and fitted on its own, in one pass (the `memlab_ab_compare` table)._\n\n' +
+              first.text;
+          }
+          return res;
+        }
         // An array in `cycles` IS a per-rung axis; normalise before anything
         // reads it, so the rest of the tool keeps seeing a scalar.
         let cyclesScalar: number | undefined;

@@ -248,431 +248,424 @@ export function abaNote(
     : '; does **NOT** reverse in the OFF-again arm: drift, not the fix, is the likelier cause';
 }
 
+const AB_COMPARE_SCHEMA = {
+  run_dir: z.string().describe('The A/B round directory (holds run.json).'),
+  metrics: z
+    .record(
+      z.union([
+        z.string(),
+        z.object({code: z.string(), cap: z.number().optional()}),
+      ]),
+    )
+    .optional()
+    .describe(
+      'name -> probe code, or name -> {code, cap}. Each probe assigns a number to `result`.',
+    ),
+  probes: z
+    .string()
+    .optional()
+    .describe(
+      'A probe set saved with `memlab_probes`, compared alongside `metrics` (with each probe\'s `cap`). Without `probes`, the set whose `match` appears in the round\'s URL filter is used, but only when no `metrics` are passed: `metrics` turn that automatic pick off. `"none"` (or `""`) uses no set.',
+    ),
+  census: z
+    .array(z.string())
+    .optional()
+    .describe(
+      `Built-in census populations to compare too: ${BUILTIN.map(m => m.name).join(', ')}.`,
+    ),
+  prelude: z
+    .string()
+    .optional()
+    .describe('Source run before every probe (shared helpers).'),
+  timeout_ms: z
+    .number()
+    .optional()
+    .describe(
+      'Per-rung probe timeout; scaled from the largest rung by default.',
+    ),
+  max_nodes: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .default(20000000)
+    .describe('Per-rung node-visit budget for full-heap walks.'),
+  skip_intervals: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      'Leading rungs of EACH arm to leave out of the fit. Each arm starts on a freshly loaded page, so its first interval mixes warm-up (first mounts, lazy modules, caches filling) with the per-cycle rate; on a fix-ON arm that warm-up alone has read as a REGRESSION. Default: 1 when every arm keeps at least 3 rungs after skipping, else 0. The table shows the all-rung rate beside the steady one, and the verdict uses the steady rate.',
+    ),
+  totals: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe(
+      `Add rows for each arm's heap total: "${PROD_TOTAL}" (memory only a dev build holds removed; shown when the build has dev roots) and "${RAW_TOTAL}". Judge an arm by the production row: a dev-only hash table that resizes in one arm moves only the raw one.`,
+    ),
+};
+
+export type AbCompareArgs = z.infer<z.ZodObject<typeof AB_COMPARE_SCHEMA>>;
+
+/** The `memlab_ab_compare` answer; `memlab_ladder_probe` with `segment: "all"` on an A/B round returns it too. */
+export async function abCompare({
+  run_dir,
+  metrics,
+  probes: probeSet,
+  census,
+  prelude,
+  timeout_ms,
+  max_nodes,
+  totals,
+  skip_intervals,
+}: AbCompareArgs) {
+  try {
+    const specs = Object.entries((metrics ?? {}) as Record<string, MetricSpec>);
+    const picked =
+      probeSet != null
+        ? resolveProbeSet(probeSet, run_dir)
+        : specs.length === 0
+          ? resolveProbeSet(undefined, run_dir)
+          : null;
+    if (picked != null) {
+      for (const [name, p] of Object.entries(picked.set.probes)) {
+        // A metric the caller named wins over a set probe of that name.
+        if (specs.some(([n]) => n === name)) continue;
+        specs.push([name, {code: p.code, cap: p.cap}]);
+      }
+      // The set's probes need its prelude; the caller's runs after it.
+      if (picked.set.prelude != null) {
+        prelude =
+          prelude == null
+            ? picked.set.prelude
+            : `${picked.set.prelude}\n${prelude}`;
+      }
+    }
+    const builtins = BUILTIN.filter(b => (census ?? []).includes(b.name));
+    const unknown = (census ?? []).filter(
+      c => !BUILTIN.some(b => b.name === c),
+    );
+    if (unknown.length > 0) {
+      return errorResult(
+        new Error(
+          `Unknown census population(s): ${unknown.join(', ')}. Known: ${BUILTIN.map(b => b.name).join(', ')}.`,
+        ),
+      );
+    }
+    if (specs.length === 0 && builtins.length === 0 && !totals) {
+      return errorResult(
+        new Error(
+          'Pass `metrics` (probe code) and/or `census` populations, or leave `totals` on.',
+        ),
+      );
+    }
+    const arms = readArms(run_dir);
+    // The runner's per-rung measureUserAgentSpecificMemory, which covers
+    // workers and wasm that no page snapshot holds.
+    const uasmOf = new Map<string, number>();
+    try {
+      const manifest = loadRunManifest(run_dir);
+      manifest.paths.forEach((p, i) => {
+        const u = manifest.uaMemoryPerRung[i];
+        if (u != null) uasmOf.set(p, u.totalMb);
+      });
+    } catch {
+      // The arms were read; a manifest this module cannot parse further
+      // only costs the UASM row.
+    }
+    const withUasm = totals && arms.some(a => a.paths.some(p => uasmOf.has(p)));
+    const probes = specs.map(([name, spec]) => ({
+      name,
+      code: typeof spec === 'string' ? spec : spec.code,
+    }));
+    const caps = new Map(
+      specs.map(([name, spec]) => [
+        name,
+        typeof spec === 'string' ? undefined : spec.cap,
+      ]),
+    );
+    const names = [
+      ...probes.map(p => p.name),
+      ...builtins.map(b => b.name),
+      ...(totals ? [PROD_TOTAL, RAW_TOTAL, NATIVE_TOTAL] : []),
+      ...(withUasm ? [UASM_TOTAL] : []),
+    ];
+    // Series are keyed by name; two metrics sharing one would interleave.
+    const dup = names.find((n, i) => names.indexOf(n) !== i);
+    if (dup != null) {
+      return errorResult(
+        new Error(
+          `metric name "${dup}" is used twice (a \`metrics\` key and a \`census\` population share it); rename one.`,
+        ),
+      );
+    }
+
+    // arm -> metric -> per-rung value
+    const values = new Map<string, Map<string, Array<number | null>>>();
+    const errors: string[] = [];
+    // metric -> arm -> first probe error, so a probe that fails on every
+    // rung of an arm says WHY in its verdict instead of "did not measure".
+    const firstError = new Map<string, Map<string, string>>();
+    for (const arm of arms) {
+      const perMetric = new Map<string, Array<number | null>>(
+        names.map(n => [n, []]),
+      );
+      const {rungs, largestMB} = resolveRungs(arm.paths);
+      // The fits pair arm.cycles with these values by position, so the
+      // two must describe the same rungs.
+      if (rungs.length !== arm.cycles.length) {
+        throw new Error(
+          `${arm.name} arm: ${rungs.length} snapshot(s) but ${arm.cycles.length} cycle count(s) in run.json; refusing to pair them by position.`,
+        );
+      }
+      const timeout = scaledTimeoutMs(largestMB, timeout_ms);
+      const recordError = (name: string, rungLabel: string, msg: string) => {
+        const byArm = firstError.get(name) ?? new Map();
+        if (!byArm.has(arm.name)) byArm.set(arm.name, msg);
+        firstError.set(name, byArm);
+        if (errors.length < 5) {
+          errors.push(`${arm.name} ${rungLabel} ${name}: ${msg}`);
+        }
+      };
+      for (const rung of rungs) {
+        armScanBudgetFor(timeout);
+        // One parse per rung: the probes' own load borrows this one, and
+        // the census reads the same graph. An unreadable rung costs that
+        // rung's values, not the whole comparison.
+        let measured: {
+          out: Awaited<ReturnType<typeof probeRung>>;
+          counts: Map<string, number> | null;
+          heap: {raw: number; prod: number | null; native: number} | null;
+        } | null = null;
+        try {
+          measured = await withSnapshotAt(rung.localPath, async snap => {
+            const out =
+              probes.length > 0
+                ? await probeRung(
+                    rung.localPath,
+                    probes,
+                    timeout,
+                    max_nodes,
+                    prelude,
+                  )
+                : new Map();
+            let counts: Map<string, number> | null = null;
+            if (builtins.length > 0) {
+              try {
+                counts = countOne(snap, builtins, []);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                for (const b of builtins) {
+                  recordError(b.name, rung.label, `census: ${msg}`);
+                }
+              }
+            }
+            return {out, counts, heap: totals ? heapTotals(snap) : null};
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          for (const n of names) recordError(n, rung.label, msg);
+        }
+        for (const p of probes) {
+          const o = measured?.out.get(p.name);
+          const value = o?.value ?? null;
+          // NaN or Infinity is not a reading; it fails the rung like an
+          // error would.
+          const nonFinite = value != null && !Number.isFinite(value);
+          perMetric.get(p.name)?.push(nonFinite ? null : value);
+          const error = o?.error ?? (nonFinite ? `returned ${value}` : null);
+          if (error != null) recordError(p.name, rung.label, error);
+        }
+        for (const b of builtins) {
+          perMetric.get(b.name)?.push(measured?.counts?.get(b.name) ?? null);
+        }
+        if (totals) {
+          perMetric.get(PROD_TOTAL)?.push(measured?.heap?.prod ?? null);
+          perMetric.get(RAW_TOTAL)?.push(measured?.heap?.raw ?? null);
+          perMetric.get(NATIVE_TOTAL)?.push(measured?.heap?.native ?? null);
+        }
+        if (withUasm) {
+          const armPath = arm.paths[rungs.indexOf(rung)];
+          perMetric.get(UASM_TOTAL)?.push(uasmOf.get(armPath) ?? null);
+        }
+      }
+      values.set(arm.name, perMetric);
+    }
+
+    const [off, on] = arms;
+    const off2 = arms.find(a => a.name === 'off2') ?? null;
+    // Some rungs missing: the verdict is fitted on the rest, and says so.
+    const partialNote = (
+      offYs: Array<number | null>,
+      onYs: Array<number | null>,
+    ): string => {
+      const missing = [...offYs, ...onYs].filter(v => v == null).length;
+      return missing > 0
+        ? `(${missing} rung(s) failed; fitted on the rest) `
+        : '';
+    };
+    const failedArm = (
+      name: string,
+      offYs: Array<number | null>,
+      onYs: Array<number | null>,
+    ): string | null => {
+      for (const [arm, ys] of [
+        ['off', offYs],
+        ['on', onYs],
+      ] as const) {
+        const err = firstError.get(name)?.get(arm);
+        if (ys.length > 0 && ys.every(v => v == null) && err != null) {
+          return `CANNOT JUDGE (probe failed on every ${arm.toUpperCase()} rung: ${err.slice(0, 80)})`;
+        }
+      }
+      return null;
+    };
+    // No dev roots on either arm: the production row would repeat the raw
+    // one as "did not measure".
+    const shown = names.filter(
+      name =>
+        name !== PROD_TOTAL ||
+        arms.some(arm =>
+          (values.get(arm.name)?.get(name) ?? []).some(v => v != null),
+        ),
+    );
+    const skip = resolveSkip(skip_intervals, arms);
+    const steady = <T>(xs: T[]): T[] => xs.slice(skip);
+    const rows = shown.map(name => {
+      const offYs = values.get('off')?.get(name) ?? [];
+      const onYs = values.get('on')?.get(name) ?? [];
+      const offFit = rateOf(steady(off.cycles), steady(offYs));
+      const onFit = rateOf(steady(on.cycles), steady(onYs));
+      const offAll = rateOf(off.cycles, offYs);
+      const onAll = rateOf(on.cycles, onYs);
+      const peak = (ys: Array<number | null>): number | null => {
+        const nums = ys.filter((v): v is number => v != null);
+        return nums.length > 0 ? Math.max(...nums) : null;
+      };
+      // The cap gate follows the fit: a warm-up rung over the cap must
+      // not let a steady state that never reaches it be judged.
+      const offMax = peak(offYs);
+      const offSteadyMax = peak(steady(offYs));
+      const fmt = (
+        f: ReturnType<typeof rateOf>,
+        all: ReturnType<typeof rateOf>,
+      ) =>
+        f == null
+          ? '—'
+          : `${signed(f.slope)} (r² ${f.r2.toFixed(2)})` +
+            (skip > 0 && all != null ? `; all rungs ${signed(all.slope)}` : '');
+      const ratio =
+        offFit != null && onFit != null && Math.abs(offFit.slope) > 1e-9
+          ? (onFit.slope / offFit.slope).toFixed(2)
+          : '—';
+      const verdict = abVerdict(
+        offFit?.slope ?? null,
+        onFit?.slope ?? null,
+        offSteadyMax,
+        caps.get(name),
+        offGrowth(steady(off.cycles), steady(offYs)),
+      );
+      const allVerdict =
+        skip > 0
+          ? abVerdict(
+              offAll?.slope ?? null,
+              onAll?.slope ?? null,
+              offMax,
+              caps.get(name),
+              offGrowth(off.cycles, offYs),
+            )
+          : verdict;
+      const off2Ys = off2 != null ? (values.get('off2')?.get(name) ?? []) : [];
+      const off2Fit =
+        off2 != null ? rateOf(steady(off2.cycles), steady(off2Ys)) : null;
+      return [
+        name,
+        offYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
+        fmt(offFit, offAll),
+        onYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
+        fmt(onFit, onAll),
+        ...(off2 != null
+          ? [
+              off2Fit == null
+                ? '—'
+                : `${signed(off2Fit.slope)} (r² ${off2Fit.r2.toFixed(2)})`,
+            ]
+          : []),
+        ratio,
+        failedArm(name, offYs, onYs) ??
+          partialNote(offYs, onYs) +
+            verdict +
+            warmupNote(verdict, allVerdict) +
+            (off2 != null
+              ? abaNote(
+                  verdict,
+                  offFit?.slope ?? null,
+                  onFit?.slope ?? null,
+                  off2Fit?.slope ?? null,
+                )
+              : ''),
+      ];
+    });
+
+    const lines = [
+      `## A/B: \`${off.prop ?? '?'}\` = ${JSON.stringify(off.value)} (OFF) vs ${JSON.stringify(on.value)} (ON)`,
+      '',
+      `OFF arm: ${off.paths.length} rungs, cycles ${off.cycles.join(', ')}. ON arm: ${on.paths.length} rungs, cycles ${on.cycles.join(', ')}.` +
+        (off2 != null
+          ? ` OFF again: ${off2.paths.length} rungs, cycles ${off2.cycles.join(', ')} (an OFF → ON → OFF round: an effect that is the fix reverses in the third arm; one that is drift does not).`
+          : '') +
+        ' Each arm is fitted against its own cycles' +
+        (skip > 0
+          ? `, leaving out its first ${skip === 1 ? 'rung' : `${skip} rungs`} (warm-up after the page load; \`skip_intervals: 0\` fits every rung).`
+          : '.'),
+      '',
+      ...(picked != null
+        ? [
+            `_Probe set \`${picked.name}\`${picked.auto ? ` (its \`match\` \`${picked.set.match}\` is in the round's URL filter)` : ''}._`,
+            '',
+          ]
+        : []),
+      markdownTable(
+        [
+          'Metric',
+          'OFF series',
+          'OFF Δ/cycle',
+          'ON series',
+          'ON Δ/cycle',
+          ...(off2 != null ? ['OFF again Δ/cycle'] : []),
+          'ON/OFF',
+          'Verdict',
+        ],
+        rows,
+      ),
+      '',
+    ];
+    if (errors.length > 0) {
+      lines.push('Probe errors:', ...errors.map(e => `- ${e}`), '');
+    }
+    if (shown.includes(PROD_TOTAL)) {
+      lines.push(
+        '_Judge the arm totals by the production-only row. Where the raw row disagrees, the difference is memory only a dev build holds (a Fast Refresh or `_debug*` table resizing in one arm, for example)._',
+        '',
+      );
+    }
+    lines.push(
+      '_FIX EFFECTIVE = the ON rate is at most 20% of the OFF rate; NO EFFECT = at least 80%. A verdict is about the RATE: a first-mount step shows up in the series but not in the rate. Confirm an effective fix on a second round before filing it — one A/B is one sample._',
+    );
+    return toolResult(lines.join('\n'));
+  } catch (err) {
+    return errorResult(err);
+  }
+}
+
 export function registerAbCompare(server: McpServer): void {
   server.tool(
     'memlab_ab_compare',
     "Judge an A/B round (`hunt_runner --ab`) in one call: run the same probes on the OFF arm and the ON arm, fit each arm against its own cycles, and print one table with per-cycle rates, the ON/OFF ratio and a verdict per metric — FIX EFFECTIVE / PARTIAL / NO EFFECT / CANNOT JUDGE. Each arm's heap total is a row too, production-only beside raw, so a dev-only resize in one arm is not read as that arm growing more; so is the native memory JS pins (`memlab_native_pin_cost`), which no heap total includes, and the runner's `measureUserAgentSpecificMemory` when it recorded one. Each arm's first rung is left out of its fit by default (`skip_intervals`), because an arm starts on a freshly loaded page and that warm-up is not a per-cycle rate. " +
       'Reads the arms from run.json `ab`. Probes are `memlab_eval` code assigning a number to `result` (as in `memlab_ladder_probe`); `census` adds built-in `memlab_census` populations. Give a metric a `cap` when the fix bounds a population at a size: a round whose OFF arm never reached the cap cannot show the fix working, and is reported CANNOT JUDGE rather than NO EFFECT.',
-    {
-      run_dir: z.string().describe('The A/B round directory (holds run.json).'),
-      metrics: z
-        .record(
-          z.union([
-            z.string(),
-            z.object({code: z.string(), cap: z.number().optional()}),
-          ]),
-        )
-        .optional()
-        .describe(
-          'name -> probe code, or name -> {code, cap}. Each probe assigns a number to `result`.',
-        ),
-      probes: z
-        .string()
-        .optional()
-        .describe(
-          'A probe set saved with `memlab_probes`, compared alongside `metrics` (with each probe\'s `cap`). Without `probes`, the set whose `match` appears in the round\'s URL filter is used, but only when no `metrics` are passed: `metrics` turn that automatic pick off. `"none"` (or `""`) uses no set.',
-        ),
-      census: z
-        .array(z.string())
-        .optional()
-        .describe(
-          `Built-in census populations to compare too: ${BUILTIN.map(m => m.name).join(', ')}.`,
-        ),
-      prelude: z
-        .string()
-        .optional()
-        .describe('Source run before every probe (shared helpers).'),
-      timeout_ms: z
-        .number()
-        .optional()
-        .describe(
-          'Per-rung probe timeout; scaled from the largest rung by default.',
-        ),
-      max_nodes: z
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .default(20000000)
-        .describe('Per-rung node-visit budget for full-heap walks.'),
-      skip_intervals: z
-        .number()
-        .int()
-        .min(0)
-        .optional()
-        .describe(
-          'Leading rungs of EACH arm to leave out of the fit. Each arm starts on a freshly loaded page, so its first interval mixes warm-up (first mounts, lazy modules, caches filling) with the per-cycle rate; on a fix-ON arm that warm-up alone has read as a REGRESSION. Default: 1 when every arm keeps at least 3 rungs after skipping, else 0. The table shows the all-rung rate beside the steady one, and the verdict uses the steady rate.',
-        ),
-      totals: z
-        .boolean()
-        .optional()
-        .default(true)
-        .describe(
-          `Add rows for each arm's heap total: "${PROD_TOTAL}" (memory only a dev build holds removed; shown when the build has dev roots) and "${RAW_TOTAL}". Judge an arm by the production row: a dev-only hash table that resizes in one arm moves only the raw one.`,
-        ),
-    },
-    async ({
-      run_dir,
-      metrics,
-      probes: probeSet,
-      census,
-      prelude,
-      timeout_ms,
-      max_nodes,
-      totals,
-      skip_intervals,
-    }) => {
-      try {
-        const specs = Object.entries(
-          (metrics ?? {}) as Record<string, MetricSpec>,
-        );
-        const picked =
-          probeSet != null
-            ? resolveProbeSet(probeSet, run_dir)
-            : specs.length === 0
-              ? resolveProbeSet(undefined, run_dir)
-              : null;
-        if (picked != null) {
-          for (const [name, p] of Object.entries(picked.set.probes)) {
-            // A metric the caller named wins over a set probe of that name.
-            if (specs.some(([n]) => n === name)) continue;
-            specs.push([name, {code: p.code, cap: p.cap}]);
-          }
-          // The set's probes need its prelude; the caller's runs after it.
-          if (picked.set.prelude != null) {
-            prelude =
-              prelude == null
-                ? picked.set.prelude
-                : `${picked.set.prelude}\n${prelude}`;
-          }
-        }
-        const builtins = BUILTIN.filter(b => (census ?? []).includes(b.name));
-        const unknown = (census ?? []).filter(
-          c => !BUILTIN.some(b => b.name === c),
-        );
-        if (unknown.length > 0) {
-          return errorResult(
-            new Error(
-              `Unknown census population(s): ${unknown.join(', ')}. Known: ${BUILTIN.map(b => b.name).join(', ')}.`,
-            ),
-          );
-        }
-        if (specs.length === 0 && builtins.length === 0 && !totals) {
-          return errorResult(
-            new Error(
-              'Pass `metrics` (probe code) and/or `census` populations, or leave `totals` on.',
-            ),
-          );
-        }
-        const arms = readArms(run_dir);
-        // The runner's per-rung measureUserAgentSpecificMemory, which covers
-        // workers and wasm that no page snapshot holds.
-        const uasmOf = new Map<string, number>();
-        try {
-          const manifest = loadRunManifest(run_dir);
-          manifest.paths.forEach((p, i) => {
-            const u = manifest.uaMemoryPerRung[i];
-            if (u != null) uasmOf.set(p, u.totalMb);
-          });
-        } catch {
-          // The arms were read; a manifest this module cannot parse further
-          // only costs the UASM row.
-        }
-        const withUasm =
-          totals && arms.some(a => a.paths.some(p => uasmOf.has(p)));
-        const probes = specs.map(([name, spec]) => ({
-          name,
-          code: typeof spec === 'string' ? spec : spec.code,
-        }));
-        const caps = new Map(
-          specs.map(([name, spec]) => [
-            name,
-            typeof spec === 'string' ? undefined : spec.cap,
-          ]),
-        );
-        const names = [
-          ...probes.map(p => p.name),
-          ...builtins.map(b => b.name),
-          ...(totals ? [PROD_TOTAL, RAW_TOTAL, NATIVE_TOTAL] : []),
-          ...(withUasm ? [UASM_TOTAL] : []),
-        ];
-        // Series are keyed by name; two metrics sharing one would interleave.
-        const dup = names.find((n, i) => names.indexOf(n) !== i);
-        if (dup != null) {
-          return errorResult(
-            new Error(
-              `metric name "${dup}" is used twice (a \`metrics\` key and a \`census\` population share it); rename one.`,
-            ),
-          );
-        }
-
-        // arm -> metric -> per-rung value
-        const values = new Map<string, Map<string, Array<number | null>>>();
-        const errors: string[] = [];
-        // metric -> arm -> first probe error, so a probe that fails on every
-        // rung of an arm says WHY in its verdict instead of "did not measure".
-        const firstError = new Map<string, Map<string, string>>();
-        for (const arm of arms) {
-          const perMetric = new Map<string, Array<number | null>>(
-            names.map(n => [n, []]),
-          );
-          const {rungs, largestMB} = resolveRungs(arm.paths);
-          // The fits pair arm.cycles with these values by position, so the
-          // two must describe the same rungs.
-          if (rungs.length !== arm.cycles.length) {
-            throw new Error(
-              `${arm.name} arm: ${rungs.length} snapshot(s) but ${arm.cycles.length} cycle count(s) in run.json; refusing to pair them by position.`,
-            );
-          }
-          const timeout = scaledTimeoutMs(largestMB, timeout_ms);
-          const recordError = (
-            name: string,
-            rungLabel: string,
-            msg: string,
-          ) => {
-            const byArm = firstError.get(name) ?? new Map();
-            if (!byArm.has(arm.name)) byArm.set(arm.name, msg);
-            firstError.set(name, byArm);
-            if (errors.length < 5) {
-              errors.push(`${arm.name} ${rungLabel} ${name}: ${msg}`);
-            }
-          };
-          for (const rung of rungs) {
-            armScanBudgetFor(timeout);
-            // One parse per rung: the probes' own load borrows this one, and
-            // the census reads the same graph. An unreadable rung costs that
-            // rung's values, not the whole comparison.
-            let measured: {
-              out: Awaited<ReturnType<typeof probeRung>>;
-              counts: Map<string, number> | null;
-              heap: {raw: number; prod: number | null; native: number} | null;
-            } | null = null;
-            try {
-              measured = await withSnapshotAt(rung.localPath, async snap => {
-                const out =
-                  probes.length > 0
-                    ? await probeRung(
-                        rung.localPath,
-                        probes,
-                        timeout,
-                        max_nodes,
-                        prelude,
-                      )
-                    : new Map();
-                let counts: Map<string, number> | null = null;
-                if (builtins.length > 0) {
-                  try {
-                    counts = countOne(snap, builtins, []);
-                  } catch (err) {
-                    const msg =
-                      err instanceof Error ? err.message : String(err);
-                    for (const b of builtins) {
-                      recordError(b.name, rung.label, `census: ${msg}`);
-                    }
-                  }
-                }
-                return {out, counts, heap: totals ? heapTotals(snap) : null};
-              });
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              for (const n of names) recordError(n, rung.label, msg);
-            }
-            for (const p of probes) {
-              const o = measured?.out.get(p.name);
-              const value = o?.value ?? null;
-              // NaN or Infinity is not a reading; it fails the rung like an
-              // error would.
-              const nonFinite = value != null && !Number.isFinite(value);
-              perMetric.get(p.name)?.push(nonFinite ? null : value);
-              const error =
-                o?.error ?? (nonFinite ? `returned ${value}` : null);
-              if (error != null) recordError(p.name, rung.label, error);
-            }
-            for (const b of builtins) {
-              perMetric
-                .get(b.name)
-                ?.push(measured?.counts?.get(b.name) ?? null);
-            }
-            if (totals) {
-              perMetric.get(PROD_TOTAL)?.push(measured?.heap?.prod ?? null);
-              perMetric.get(RAW_TOTAL)?.push(measured?.heap?.raw ?? null);
-              perMetric.get(NATIVE_TOTAL)?.push(measured?.heap?.native ?? null);
-            }
-            if (withUasm) {
-              const armPath = arm.paths[rungs.indexOf(rung)];
-              perMetric.get(UASM_TOTAL)?.push(uasmOf.get(armPath) ?? null);
-            }
-          }
-          values.set(arm.name, perMetric);
-        }
-
-        const [off, on] = arms;
-        const off2 = arms.find(a => a.name === 'off2') ?? null;
-        // Some rungs missing: the verdict is fitted on the rest, and says so.
-        const partialNote = (
-          offYs: Array<number | null>,
-          onYs: Array<number | null>,
-        ): string => {
-          const missing = [...offYs, ...onYs].filter(v => v == null).length;
-          return missing > 0
-            ? `(${missing} rung(s) failed; fitted on the rest) `
-            : '';
-        };
-        const failedArm = (
-          name: string,
-          offYs: Array<number | null>,
-          onYs: Array<number | null>,
-        ): string | null => {
-          for (const [arm, ys] of [
-            ['off', offYs],
-            ['on', onYs],
-          ] as const) {
-            const err = firstError.get(name)?.get(arm);
-            if (ys.length > 0 && ys.every(v => v == null) && err != null) {
-              return `CANNOT JUDGE (probe failed on every ${arm.toUpperCase()} rung: ${err.slice(0, 80)})`;
-            }
-          }
-          return null;
-        };
-        // No dev roots on either arm: the production row would repeat the raw
-        // one as "did not measure".
-        const shown = names.filter(
-          name =>
-            name !== PROD_TOTAL ||
-            arms.some(arm =>
-              (values.get(arm.name)?.get(name) ?? []).some(v => v != null),
-            ),
-        );
-        const skip = resolveSkip(skip_intervals, arms);
-        const steady = <T>(xs: T[]): T[] => xs.slice(skip);
-        const rows = shown.map(name => {
-          const offYs = values.get('off')?.get(name) ?? [];
-          const onYs = values.get('on')?.get(name) ?? [];
-          const offFit = rateOf(steady(off.cycles), steady(offYs));
-          const onFit = rateOf(steady(on.cycles), steady(onYs));
-          const offAll = rateOf(off.cycles, offYs);
-          const onAll = rateOf(on.cycles, onYs);
-          const peak = (ys: Array<number | null>): number | null => {
-            const nums = ys.filter((v): v is number => v != null);
-            return nums.length > 0 ? Math.max(...nums) : null;
-          };
-          // The cap gate follows the fit: a warm-up rung over the cap must
-          // not let a steady state that never reaches it be judged.
-          const offMax = peak(offYs);
-          const offSteadyMax = peak(steady(offYs));
-          const fmt = (
-            f: ReturnType<typeof rateOf>,
-            all: ReturnType<typeof rateOf>,
-          ) =>
-            f == null
-              ? '—'
-              : `${signed(f.slope)} (r² ${f.r2.toFixed(2)})` +
-                (skip > 0 && all != null
-                  ? `; all rungs ${signed(all.slope)}`
-                  : '');
-          const ratio =
-            offFit != null && onFit != null && Math.abs(offFit.slope) > 1e-9
-              ? (onFit.slope / offFit.slope).toFixed(2)
-              : '—';
-          const verdict = abVerdict(
-            offFit?.slope ?? null,
-            onFit?.slope ?? null,
-            offSteadyMax,
-            caps.get(name),
-            offGrowth(steady(off.cycles), steady(offYs)),
-          );
-          const allVerdict =
-            skip > 0
-              ? abVerdict(
-                  offAll?.slope ?? null,
-                  onAll?.slope ?? null,
-                  offMax,
-                  caps.get(name),
-                  offGrowth(off.cycles, offYs),
-                )
-              : verdict;
-          const off2Ys =
-            off2 != null ? (values.get('off2')?.get(name) ?? []) : [];
-          const off2Fit =
-            off2 != null ? rateOf(steady(off2.cycles), steady(off2Ys)) : null;
-          return [
-            name,
-            offYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
-            fmt(offFit, offAll),
-            onYs.map(v => (v == null ? '—' : formatNumber(v))).join(' → '),
-            fmt(onFit, onAll),
-            ...(off2 != null
-              ? [
-                  off2Fit == null
-                    ? '—'
-                    : `${signed(off2Fit.slope)} (r² ${off2Fit.r2.toFixed(2)})`,
-                ]
-              : []),
-            ratio,
-            failedArm(name, offYs, onYs) ??
-              partialNote(offYs, onYs) +
-                verdict +
-                warmupNote(verdict, allVerdict) +
-                (off2 != null
-                  ? abaNote(
-                      verdict,
-                      offFit?.slope ?? null,
-                      onFit?.slope ?? null,
-                      off2Fit?.slope ?? null,
-                    )
-                  : ''),
-          ];
-        });
-
-        const lines = [
-          `## A/B: \`${off.prop ?? '?'}\` = ${JSON.stringify(off.value)} (OFF) vs ${JSON.stringify(on.value)} (ON)`,
-          '',
-          `OFF arm: ${off.paths.length} rungs, cycles ${off.cycles.join(', ')}. ON arm: ${on.paths.length} rungs, cycles ${on.cycles.join(', ')}.` +
-            (off2 != null
-              ? ` OFF again: ${off2.paths.length} rungs, cycles ${off2.cycles.join(', ')} (an OFF → ON → OFF round: an effect that is the fix reverses in the third arm; one that is drift does not).`
-              : '') +
-            ' Each arm is fitted against its own cycles' +
-            (skip > 0
-              ? `, leaving out its first ${skip === 1 ? 'rung' : `${skip} rungs`} (warm-up after the page load; \`skip_intervals: 0\` fits every rung).`
-              : '.'),
-          '',
-          ...(picked != null
-            ? [
-                `_Probe set \`${picked.name}\`${picked.auto ? ` (its \`match\` \`${picked.set.match}\` is in the round's URL filter)` : ''}._`,
-                '',
-              ]
-            : []),
-          markdownTable(
-            [
-              'Metric',
-              'OFF series',
-              'OFF Δ/cycle',
-              'ON series',
-              'ON Δ/cycle',
-              ...(off2 != null ? ['OFF again Δ/cycle'] : []),
-              'ON/OFF',
-              'Verdict',
-            ],
-            rows,
-          ),
-          '',
-        ];
-        if (errors.length > 0) {
-          lines.push('Probe errors:', ...errors.map(e => `- ${e}`), '');
-        }
-        if (shown.includes(PROD_TOTAL)) {
-          lines.push(
-            '_Judge the arm totals by the production-only row. Where the raw row disagrees, the difference is memory only a dev build holds (a Fast Refresh or `_debug*` table resizing in one arm, for example)._',
-            '',
-          );
-        }
-        lines.push(
-          '_FIX EFFECTIVE = the ON rate is at most 20% of the OFF rate; NO EFFECT = at least 80%. A verdict is about the RATE: a first-mount step shows up in the series but not in the rate. Confirm an effective fix on a second round before filing it — one A/B is one sample._',
-        );
-        return toolResult(lines.join('\n'));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    AB_COMPARE_SCHEMA,
+    async args => abCompare(args),
   );
 }

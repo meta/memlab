@@ -861,6 +861,49 @@ await shapeCheck(
 );
 
 await shapeCheck(
+  'ladder_probe: segment "all" on an A/B round fits each arm in one pass',
+  async () => {
+    // OFF arm: node, node-later; ON arm: node, node (no growth).
+    const run = path.join(tmp, 'ab-round');
+    fs.mkdirSync(run, {recursive: true});
+    const files = [nodeSnapshot, nodeSnapshotLater, nodeSnapshot, nodeSnapshot];
+    const rungs = files.map((f, i) => ({
+      index: i,
+      path: f,
+      cycles: i % 2 === 0 ? 0 : 10,
+      isolate_restarted: i === 2,
+    }));
+    fs.writeFileSync(
+      path.join(run, 'run.json'),
+      JSON.stringify({
+        rungs,
+        ladder_splits_after_rung: [1],
+        ab: {
+          off: {prop: 'p', value: false, rungs: [0, 1]},
+          on: {prop: 'p', value: true, rungs: [2, 3]},
+        },
+      }),
+    );
+    const {text} = await call('memlab_ladder_probe', {
+      run_dir: run,
+      segment: 'all',
+      metrics: {
+        long_strings:
+          "result = helpers.stringsWithPrefix('fixture-long-string-').length",
+      },
+    });
+    assert(
+      /An A\/B round with `segment: "all"`/.test(text) &&
+        /\| long_strings\s*\| 0 → \d+\s*\| \+0\.\d+ [^|]*\| 0 → 0 /.test(
+          text,
+        ) &&
+        /OFF arm: 2 rungs.*ON arm: 2 rungs/.test(text),
+      `ladder_probe all: ${text.slice(0, 900)}`,
+    );
+  },
+);
+
+await shapeCheck(
   'find_nodes_by_class: deep pages continue the shallow order exactly',
   async () => {
     const ids = text => (text.match(/IDs: (.*)/)?.[1] ?? '').split(', ');
