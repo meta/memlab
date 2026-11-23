@@ -548,6 +548,18 @@ await shapeCheck(
       text.includes("1 id(s) the snapshot's id index does not map"),
       `footer: ${text.slice(-600)}`,
     );
+    // A later eval reads the cached check, and must still get the footer.
+    const again = await call('memlab_eval', {
+      code: [
+        "const natives = helpers.classCounts({type: 'native'}).map(c => c.name);",
+        'const n = helpers.byClass(natives[0], {instancesOnly: false}).length;',
+        'result = n;',
+      ].join('\n'),
+    });
+    assert(
+      again.text.includes("1 id(s) the snapshot's id index does not map"),
+      `second eval footer: ${again.text.slice(-600)}`,
+    );
   },
 );
 

@@ -661,6 +661,10 @@ let idMisses = new Map<string, {unresolved: number; shared: number}>();
 
 /** Ids the snapshot's own index misses, mapped to their node positions. */
 const STRAY_IDS = '__strayIdIndex';
+interface StrayIds {
+  of: IHeapSnapshot;
+  at: Map<number, number>;
+}
 
 function recordEdgeSkip(
   kind: 'iteration' | 'malformed' | 'target',
@@ -945,8 +949,8 @@ function nodeByIdOrStray(
 ): IHeapNode | null {
   const hit = snapshot.getNodeById(id);
   if (hit != null) return hit;
-  const strays = getEvalScratch()[STRAY_IDS] as Map<number, number> | undefined;
-  const at = strays?.get(id);
+  const strays = getEvalScratch()[STRAY_IDS] as StrayIds | undefined;
+  const at = strays?.of === snapshot ? strays.at.get(id) : undefined;
   return at == null ? null : (snapshot.nodes.get(at) ?? null);
 }
 
@@ -3518,8 +3522,8 @@ export async function runEval({
       /** Class name -> node POSITIONS (nodeIndex), not ids. */
       byClass: Map<string, number[]>;
       byTypename: Map<string, number[]>;
-      /** Classes whose ids have been checked against the id index. */
-      checked: Set<string>;
+      /** Classes checked against the id index, and what each check missed. */
+      checked: Map<string, {unresolved: number; shared: number}>;
       of: IHeapSnapshot;
     }
     const buildClassTypeIndex = (): ClassTypeIndex => {
@@ -3583,7 +3587,7 @@ export async function runEval({
       const idx: ClassTypeIndex = {
         byClass,
         byTypename,
-        checked: new Set(),
+        checked: new Map(),
         of: snapshot,
       };
       scratch.__classTypeIndex = idx;
@@ -3603,28 +3607,28 @@ export async function runEval({
         const n = snapshot.nodes.get(at);
         if (n != null) nodes.push(n);
       }
-      if (!index.checked.has(name)) {
-        index.checked.add(name);
+      let miss = index.checked.get(name);
+      if (miss == null) {
         let unresolved = 0;
         let shared = 0;
         for (const n of nodes) {
           const back = snapshot.getNodeById(n.id);
           if (back == null) {
-            let strays = scratch[STRAY_IDS] as Map<number, number> | undefined;
-            if (strays == null) {
-              strays = new Map();
+            let strays = scratch[STRAY_IDS] as StrayIds | undefined;
+            if (strays?.of !== snapshot) {
+              strays = {of: snapshot, at: new Map()};
               scratch[STRAY_IDS] = strays;
             }
-            if (!strays.has(n.id)) strays.set(n.id, n.nodeIndex);
+            if (!strays.at.has(n.id)) strays.at.set(n.id, n.nodeIndex);
             unresolved++;
           } else if (back.nodeIndex !== n.nodeIndex) {
             shared++;
           }
         }
-        if (unresolved + shared > 0) {
-          idMisses.set(name, {unresolved, shared});
-        }
+        miss = {unresolved, shared};
+        index.checked.set(name, miss);
       }
+      if (miss.unresolved + miss.shared > 0) idMisses.set(name, miss);
       return nodes;
     };
     /**
