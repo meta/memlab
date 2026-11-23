@@ -99,6 +99,34 @@ test('element positions and numeric slots are not indexed', () => {
   assert.deepEqual(edgeNameIndex(heap()).holders('7'), []);
 });
 
+test('an unreadable edge is skipped, and the index still builds', () => {
+  const h = heap();
+  const [, a, b, x] = [0, 1, 2, 3].map(i => h.nodes.get(i));
+  a.references.push({
+    type: 'property',
+    name_or_index: 'bad',
+    fromNode: a,
+    get toNode() {
+      throw new Error('corrupt edge');
+    },
+  });
+  b.references.push({
+    type: 'property',
+    name_or_index: 'bad',
+    fromNode: b,
+    toNode: null,
+  });
+  b.references.push({type: 7, name_or_index: 'odd', fromNode: b, toNode: x});
+  x.forEachReference = () => {
+    throw new Error('corrupt edge list');
+  };
+  const index = edgeNameIndex(h);
+  assert.deepEqual(index.holders('bad'), [10, 11]);
+  assert.deepEqual(index.targets('bad'), []);
+  assert.deepEqual(index.holders('odd'), []);
+  assert.deepEqual(index.holders('listener'), [10, 11]);
+});
+
 test('a full-heap referrers walk gets the indexed-helper hint', () => {
   const hints = hintsForEval(
     "let c = 0; snapshot.nodes.forEach(n => { for (const e of n.referrers) if (e.name_or_index === 'x') c++; }); result = c;",

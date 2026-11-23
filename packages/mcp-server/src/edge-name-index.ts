@@ -50,22 +50,36 @@ export function edgeNameIndex(snapshot: IHeapSnapshot): EdgeNameIndex | null {
   const counts: number[] = [];
   const typeId = new Map<string, number>();
   const typeNames: string[] = [];
+  // An unreadable edge or edge list is skipped, as the scan helpers in
+  // eval.ts skip it, rather than failing every lookup. Both passes skip the
+  // same edges, so the counts of the first match the fill of the second.
   const visit = (
     cb: (node: IHeapNode, edge: IHeapEdge, name: number) => void,
   ): void => {
     snapshot.nodes.forEach((node: IHeapNode) => {
-      node.forEachReference((edge: IHeapEdge) => {
-        if (edge.type === 'element') return;
-        const raw = edge.name_or_index;
-        if (isPosition(raw)) return;
-        let id = nameId.get(raw as string);
-        if (id == null) {
-          id = counts.length;
-          nameId.set(raw as string, id);
-          counts.push(0);
-        }
-        cb(node, edge, id);
-      });
+      try {
+        node.forEachReference((edge: IHeapEdge) => {
+          let type: unknown;
+          let raw: string | number;
+          try {
+            type = edge.type;
+            raw = edge.name_or_index;
+          } catch {
+            return;
+          }
+          if (typeof type !== 'string' || type === 'element') return;
+          if (isPosition(raw)) return;
+          let id = nameId.get(raw as string);
+          if (id == null) {
+            id = counts.length;
+            nameId.set(raw as string, id);
+            counts.push(0);
+          }
+          cb(node, edge, id);
+        });
+      } catch {
+        // The rest of this node's edge list is unreadable.
+      }
     });
   };
   visit((_node, _edge, id) => {
@@ -81,7 +95,13 @@ export function edgeNameIndex(snapshot: IHeapSnapshot): EdgeNameIndex | null {
   visit((node, edge, id) => {
     const at = fill[id]++;
     from[at] = node.nodeIndex;
-    to[at] = edge.toNode.nodeIndex;
+    let target = -1;
+    try {
+      target = edge.toNode?.nodeIndex ?? -1;
+    } catch {
+      // Left at -1, which `targets` skips.
+    }
+    to[at] = target;
     let t = typeId.get(edge.type);
     if (t == null) {
       t = typeNames.length;
@@ -116,6 +136,7 @@ export function edgeNameIndex(snapshot: IHeapSnapshot): EdgeNameIndex | null {
         if (opts?.skipHidden === true && typeNames[type[i]] === 'hidden') {
           continue;
         }
+        if (to[i] < 0) continue;
         const t = idOf(to[i]);
         if (t > 3) seen.add(t);
       }
