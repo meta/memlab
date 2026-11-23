@@ -93,8 +93,37 @@ interface BatteryRun {
   currentTool: string | null;
   /** Digest rows of each step finished so far, for a status poll mid-run. */
   partial: Array<{tool: string; ms: number; digest: string[]}>;
+  /** Every step, run or not: what it cost and how it ended. */
+  timings: StepTiming[];
   result: string | null;
   error: string | null;
+}
+
+/** One battery step in `battery.done.json` `timings`. */
+export interface StepTiming {
+  tool: string;
+  elapsed_ms: number;
+  chars: number;
+  status: 'ok' | 'error' | 'skipped';
+}
+
+/** `**Slowest:** a 120 s · b 60 s · c 40 s, of 250 s in 14 steps.` */
+export function slowestLine(
+  timings: readonly StepTiming[],
+  n = 3,
+): string | null {
+  const ran = timings.filter(t => t.status !== 'skipped');
+  if (ran.length === 0) return null;
+  const total = ran.reduce((s, t) => s + t.elapsed_ms, 0);
+  const secs = (ms: number): string =>
+    ms < 10_000
+      ? `${(ms / 1000).toFixed(1)} s`
+      : `${formatNumber(Math.round(ms / 1000))} s`;
+  const top = [...ran]
+    .sort((a, b) => b.elapsed_ms - a.elapsed_ms)
+    .slice(0, n)
+    .map(t => `\`${t.tool}\` ${secs(t.elapsed_ms)}`);
+  return `**Slowest:** ${top.join(' · ')}, of ${secs(total)} in ${formatNumber(ran.length)} steps (every step's time is in \`battery.done.json\` \`timings\`).`;
 }
 
 /** Digest lines a RUNNING status reply quotes at most. */
@@ -1738,6 +1767,7 @@ export function registerAnalysisBattery(server: McpServer): void {
           doneSteps: 0,
           currentTool: null,
           partial: [],
+          timings: [],
           result: null,
           error: null,
         };
@@ -1797,10 +1827,19 @@ export function registerAnalysisBattery(server: McpServer): void {
               // which is the same wrong answer as a load that ran and failed — so
               // the two skip paths below have to set `loadFailed` as well.
               const isLoad = step.tool === 'memlab_load_snapshot';
+              const skip = (): void => {
+                tracked.timings.push({
+                  tool: stem,
+                  elapsed_ms: 0,
+                  chars: 0,
+                  status: 'skipped',
+                });
+              };
               if (deadline != null && Date.now() > deadline) {
                 skipped++;
                 if (isLoad) loadFailed = true;
                 tracked.doneSteps = finished;
+                skip();
                 continue;
               }
               if (loadFailed && needsResidentSnapshot(step)) {
@@ -1809,6 +1848,7 @@ export function registerAnalysisBattery(server: McpServer): void {
                   `${step.tool}: skipped — the snapshot load it depends on did not succeed`,
                 );
                 tracked.doneSteps = finished;
+                skip();
                 continue;
               }
               const entry = getRegisteredTool(step.tool);
@@ -1818,6 +1858,7 @@ export function registerAnalysisBattery(server: McpServer): void {
                 failures.push(`${step.tool}: not registered in this build`);
                 if (isLoad) loadFailed = true;
                 tracked.doneSteps = finished;
+                skip();
                 continue;
               }
               const started = Date.now();
@@ -1845,6 +1886,14 @@ export function registerAnalysisBattery(server: McpServer): void {
                 loadFailed = true;
               }
               const ms = Date.now() - started;
+              tracked.timings.push({
+                tool: stem,
+                elapsed_ms: ms,
+                chars: text.length,
+                status: /^(ERROR|❌|Error:)/.test(text.trimStart())
+                  ? 'error'
+                  : 'ok',
+              });
               const file = path.join(outDir, `${stem}.txt`);
               // Recorded BEFORE the write: the app_delta headline is lifted
               // from this map, and a failed disk write is no reason to lose it.
@@ -1939,6 +1988,7 @@ export function registerAnalysisBattery(server: McpServer): void {
             return `**app_delta: OFF ${strip(off)}; ON ${strip(on)}**`;
           })();
 
+          const slowest = slowestLine(tracked.timings);
           const lines: string[] = [
             `## Analysis battery — \`${path.basename(run_dir.replace(/\/$/, ''))}\` (${profile})`,
             '',
@@ -2014,6 +2064,7 @@ export function registerAnalysisBattery(server: McpServer): void {
                     : '') +
                   '.'
                 : ''),
+            ...(slowest != null ? [slowest] : []),
             '',
           ];
 
@@ -2194,6 +2245,7 @@ export function registerAnalysisBattery(server: McpServer): void {
                   report:
                     status === 'done' && error == null ? reportFile : null,
                   error: error ?? null,
+                  timings: tracked.timings,
                 },
                 null,
                 2,

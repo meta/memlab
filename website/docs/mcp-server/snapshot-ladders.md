@@ -55,7 +55,9 @@ while memory allows (`MEMLAB_RETAIN_RUNGS` caps how many).
 - After each step, the battery rewrites `battery.partial.json` with the
   results so far, so you can read the first ones while a slow step runs.
 - It writes `battery.done.json` to its output directory last, so a script can
-  wait for that one file.
+  wait for that one file. Its `timings` array has every step's `elapsed_ms`,
+  output `chars` and `status` (ok, error or skipped), and the report names
+  the three slowest steps, so a slow battery shows what to leave out.
 - From the assistant, `memlab_battery_status({battery_id, wait_ms})` waits for
   it.
 - With `async: true`, the battery runs in a separate copy of the server by

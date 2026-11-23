@@ -197,7 +197,7 @@ Every tool declares MCP annotations (`readOnlyHint`, `destructiveHint`, `idempot
 | `memlab_capture` | Connects to a running Chrome on its remote-debugging port (default 9222), and writes snapshots to `out_dir` |
 | `memlab_prune_run` | Gzips a round's snapshot files in place (`mode: "compress"`), or **deletes** them (`mode: "delete"`). The default, `dry_run`, touches nothing |
 | `memlab_anonymize_snapshot` | Writes a rewritten snapshot to `output_path` (nothing with `audit_only: true`) |
-| `memlab_analysis_battery` | Writes per-tool reports to `out_dir` (default `<run_dir>/analysis`) |
+| `memlab_analysis_battery` | Writes per-tool reports to `out_dir` (default `<run_dir>/analysis`), and `battery.done.json` with each step's time, output size and status (`timings`) |
 | `memlab_finding_index` | Updates the findings file, and `export` writes to the `to` path |
 | `memlab_metric`, `memlab_ladder`, `memlab_probes` | Persist small JSON state files (see [State and Cache Files](#state-and-cache-files)) |
 
