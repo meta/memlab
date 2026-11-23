@@ -166,11 +166,13 @@ export const HEADROOM_SAFETY_FRACTION = 0.8;
  *
  * Written once and parameterised, because the obvious phrasing is wrong in a
  * way that is easy to repeat. An explicit `--max-old-space-size` on the command
- * line OVERRIDES the same flag in NODE_OPTIONS, and both supported launchers —
- * the memlab plugin's start.sh and bin/memlab-cli.js — pass it explicitly. An
- * operator told only to set NODE_OPTIONS therefore changes nothing, restarts,
- * and meets the identical ceiling; that is what made the ceiling look like a
- * hard property of the tool rather than a configured number.
+ * line OVERRIDES the same flag in NODE_OPTIONS, and the memlab plugin's
+ * start.sh and bin/memlab-cli.js pass it explicitly. An operator told only to
+ * set NODE_OPTIONS therefore changes nothing, restarts, and meets the
+ * identical ceiling; that is what made the ceiling look like a hard property
+ * of the tool rather than a configured number. bin/memlab-mcp.js is the
+ * exception: it keeps a heap flag already in NODE_OPTIONS and reads
+ * MEMLAB_MAX_OLD_SPACE_MB only when there is none.
  *
  * The suggested value is derived from the CURRENT limit rather than fixed at
  * 8192: telling a server already running at 8192 to restart at 8192 is exactly
@@ -181,10 +183,12 @@ export function raiseHeapHint(currentHeapMB: number): string {
   const target = Math.max(16384, Math.round(doubled / 1024) * 1024);
   return (
     `restart the server with a larger heap (~${formatNumber(target)} MB). ` +
-    `Set MEMLAB_MAX_OLD_SPACE_MB=${target} if it is started by the memlab plugin, ` +
-    `memlab-mcp or bin/memlab-cli.js — they pass --max-old-space-size explicitly, which OVERRIDES ` +
-    `NODE_OPTIONS — or NODE_OPTIONS="--max-old-space-size=${target}" if you run ` +
-    `dist/index.js directly. Raising it raises the node/edge ceiling with it.`
+    `Set MEMLAB_MAX_OLD_SPACE_MB=${target} if it is started by the memlab plugin ` +
+    `or bin/memlab-cli.js — they pass --max-old-space-size explicitly, which OVERRIDES ` +
+    `NODE_OPTIONS. memlab-mcp reads MEMLAB_MAX_OLD_SPACE_MB too, but keeps a ` +
+    `--max-old-space-size already in NODE_OPTIONS: raise that one instead. ` +
+    `If you run dist/index.js directly, set NODE_OPTIONS="--max-old-space-size=${target}". ` +
+    `Raising it raises the node/edge ceiling with it.`
   );
 }
 

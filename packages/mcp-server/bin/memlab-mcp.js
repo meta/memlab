@@ -12,9 +12,9 @@
 // Node's default old space (~4 GB) refuses snapshots over ~1 GB, so the server
 // is re-run with a heap sized from the machine unless one was chosen already
 // (--max-old-space-size, NODE_OPTIONS, or MEMLAB_MAX_OLD_SPACE_MB).
+import {heapLimitIsSet, resolveMaxOldSpaceMB} from '../dist/launch-heap.js';
 import {spawn} from 'child_process';
 import {fileURLToPath} from 'url';
-import {heapLimitIsSet, resolveMaxOldSpaceMB} from '../dist/launch-heap.js';
 
 const entryUrl = new URL('../dist/index.js', import.meta.url);
 
@@ -47,11 +47,20 @@ if (
     ],
     {stdio: 'inherit', env: {...process.env, MEMLAB_MCP_HEAP_SET: '1'}},
   );
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-    process.on(sig, () => child.kill(sig));
+  const forwarded = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+  const forward = sig => child.kill(sig);
+  for (const sig of forwarded) {
+    process.on(sig, forward);
   }
   child.on('exit', (code, signal) => {
-    if (signal != null) process.kill(process.pid, signal);
-    else process.exit(code ?? 1);
+    if (signal != null) {
+      // Our own listener would catch the re-raised signal and exit 0.
+      for (const sig of forwarded) {
+        process.removeListener(sig, forward);
+      }
+      process.kill(process.pid, signal);
+    } else {
+      process.exit(code ?? 1);
+    }
   });
 }
