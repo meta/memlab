@@ -169,7 +169,10 @@ credits each sample's counters to the combo that was driving. It reports per
 combo the requests per minute, resource errors, unhandled rejections,
 long-task time and time on an error screen. Rows are ranked against the idle
 control round (`baseline_run_dir`, or a sibling directory named `*idle*`), or
-against the round as a whole when there is none. Below the table it lists the
+against the round as a whole when there is none. An idle control that took no
+samples is read from its run.json per-rung request windows instead, which
+give resources per minute and nothing else; the report says so. Below the
+table it lists the
 most-requested paths with their HTTP statuses, from the per-rung request
 windows in run.json. A combo making ten times the requests of the control is
 flagged.

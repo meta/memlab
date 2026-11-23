@@ -191,7 +191,34 @@ export function topRequests(
   return [...by.values()].sort((a, b) => b.count - a.count).slice(0, limit);
 }
 
-type RungRequests = Array<{requests?: {top?: RequestRow[]}}>;
+type RungRequests = Array<{
+  requests?: {top?: RequestRow[]; total?: number; window_s?: number};
+}>;
+
+/**
+ * A round's activity from run.json's per-rung request windows, for an idle
+ * control that took no samples: resources per minute only (each window's
+ * `total` over its `window_s`). Null when no window has both.
+ */
+export function activityFromRungWindows(rungs: RungRequests): Activity | null {
+  const act: Activity = {
+    label: 'all',
+    seconds: 0,
+    totals: Object.fromEntries(COUNTERS.map(c => [c, 0])) as Record<
+      Counter,
+      number
+    >,
+    errorUiSeconds: 0,
+  };
+  for (const r of rungs) {
+    const total = num(r.requests?.total);
+    const secs = num(r.requests?.window_s);
+    if (total == null || secs == null || secs <= 0) continue;
+    act.seconds += secs;
+    act.totals.resources += total;
+  }
+  return act.seconds > 0 ? act : null;
+}
 
 /** run.json `rungs`, or none when there is no readable run.json. */
 function readRungs(dir: string): RungRequests {
@@ -215,7 +242,7 @@ const NOT_DRIVEN = new Set(['setup', '(untagged)']);
 export function registerActivityReport(server: McpServer): void {
   server.tool(
     'memlab_activity_report',
-    'Work without retention: per combo (or per sample tag), the request rate, resource errors, unhandled rejections, long-task time and time spent on an error screen, from the samples a round took between rungs (`samples.jsonl`). Rows are ranked by how far their rates sit above the idle control round (`baseline_run_dir`, or a sibling directory named `*idle*`), or above the round as a whole when there is none. A request loop or a stuck error fallback leaves the heap flat, so `memlab_leak_report` never shows it; this does. Also lists the most-requested paths with their HTTP statuses from the per-rung request windows in run.json.',
+    'Work without retention: per combo (or per sample tag), the request rate, resource errors, unhandled rejections, long-task time and time spent on an error screen, from the samples a round took between rungs (`samples.jsonl`). Rows are ranked by how far their rates sit above the idle control round (`baseline_run_dir`, or a sibling directory named `*idle*`), or above the round as a whole when there is none. An idle control that took no samples is read from its run.json per-rung request windows, for resources per minute only. A request loop or a stuck error fallback leaves the heap flat, so `memlab_leak_report` never shows it; this does. Also lists the most-requested paths with their HTTP statuses from the per-rung request windows in run.json.',
     {
       run_dir: z
         .string()
@@ -260,10 +287,16 @@ export function registerActivityReport(server: McpServer): void {
           ? resolveRoundDir(baseline_run_dir)
           : findIdleSibling(dir);
         const baseFile = baseDir != null ? readSamplesFile(baseDir) : null;
-        if (explicit && baseFile == null) {
+        // An idle control that took no samples still timed its request
+        // windows: a resources-only baseline, said as much.
+        const windows =
+          baseDir != null && baseFile == null
+            ? activityFromRungWindows(readRungs(baseDir))
+            : null;
+        if (explicit && baseFile == null && windows == null) {
           return errorResult(
             new Error(
-              `No samples.jsonl in the baseline ${baseDir}; it cannot be the idle control.`,
+              `No samples.jsonl in the baseline ${baseDir}, and its run.json has no per-rung request windows; it cannot be the idle control.`,
             ),
           );
         }
@@ -274,7 +307,13 @@ export function registerActivityReport(server: McpServer): void {
                   parseSamples(fs.readFileSync(baseFile, 'utf8')),
                 ),
               )
-            : null;
+            : windows;
+        // Which counters the control measured: all of them from samples,
+        // only resources from request windows.
+        const known: ReadonlySet<Counter> =
+          baseFile == null && windows != null
+            ? new Set<Counter>(['resources'])
+            : new Set(COUNTERS);
         // A control with no usable interval would put every ratio over the
         // floor alone: refused when asked for, skipped when found.
         if (explicit && control != null && control.seconds <= 0) {
@@ -286,13 +325,19 @@ export function registerActivityReport(server: McpServer): void {
         }
         const useControl = control != null && control.seconds > 0;
         const base = useControl ? control : overall(acts);
-        const against = useControl
-          ? `the idle control ${path.basename(baseDir ?? '')}`
-          : control != null
-            ? `the round as a whole (the idle control ${path.basename(baseDir ?? '')} has no usable samples)`
-            : 'the round as a whole (no idle control found)';
+        const fromWindows = useControl && baseFile == null;
+        const against = fromWindows
+          ? `the idle control ${path.basename(baseDir ?? '')}, resources per minute only: it took no samples, so its rate comes from run.json's per-rung request windows`
+          : useControl
+            ? `the idle control ${path.basename(baseDir ?? '')}`
+            : control != null
+              ? `the round as a whole (the idle control ${path.basename(baseDir ?? '')} has no usable samples)`
+              : 'the round as a whole (no idle control found)';
+        const measured = (c: Counter): boolean => !useControl || known.has(c);
         const ratio = (a: Activity, c: Counter): number =>
-          perMin(a, c) / Math.max(perMin(base, c), RATIO_FLOOR);
+          measured(c)
+            ? perMin(a, c) / Math.max(perMin(base, c), RATIO_FLOOR)
+            : 0;
         const load = (a: Activity): number =>
           Math.max(ratio(a, 'requests'), ratio(a, 'resources'));
         const score = (a: Activity): number =>

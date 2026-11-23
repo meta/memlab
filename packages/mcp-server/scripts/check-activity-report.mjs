@@ -30,9 +30,8 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {parseSamples, activityByLabel, topRequests} = await import(
-  pathToFileURL(built).href
-);
+const {parseSamples, activityByLabel, topRequests, activityFromRungWindows} =
+  await import(pathToFileURL(built).href);
 
 const jsonl = rows => rows.map(r => JSON.stringify(r)).join('\n');
 
@@ -114,4 +113,17 @@ test('per-rung request windows roll up by path, with statuses', () => {
     status: {403: 4, 200: 1},
   });
   assert.equal(rows.length, 2);
+});
+
+test('an idle control with no samples is read from its request windows', () => {
+  const act = activityFromRungWindows([
+    {requests: {total: 30, window_s: 60}},
+    {requests: {total: 10, window_s: 60}},
+    {requests: {error: 'unreadable'}},
+    {},
+  ]);
+  assert.equal(act.seconds, 120);
+  assert.equal(act.totals.resources, 40);
+  assert.equal(act.totals.requests, 0);
+  assert.equal(activityFromRungWindows([{}]), null);
 });
