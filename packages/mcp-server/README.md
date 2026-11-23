@@ -114,6 +114,7 @@ To check a change, run these in `packages/mcp-server`:
 
 - `npm run test-pkg` reads the source only, so it needs no build or install. It checks that no tool description tells the caller to use a parameter its schema lacks, that every tool is in the tools index, that the tool tables below match that index, and that the version the server reports matches `package.json`.
 - `npm run test-units` unit-tests the shared helpers against the built `dist/`: size parsing (`"1MB"`, `"1MB-10MB"`), the paging contract every ranked list uses, and the report formatters (sizes, counts, clamped labels, collapsed retainer runs, tables).
+- `node scripts/check-huge-heap.mjs` is the huge-heap gate (opt-in: about a minute and ~10 GB of RAM). It writes a synthetic snapshot with more than 2^24 nodes and runs the whole-heap tools on it through the stock `memlab-mcp` launcher. It fails on a `Map`/`Set maximum size exceeded`, on a scan budget that stops a tool with no output, and on a refusal of the loaded file by path. `--server <dist/index.js>` runs another build instead.
 - `npm run test-fixtures` drives the built server against snapshots it generates and checks invariants every report must keep: exact dead-variable answers on hand-built scope-tree snapshots, no share above 100%, partitions that add up, and complete, repeatable paging.
 
 Then configure (`~/.claude.json` for Claude Code, or `.mcp.json` for Cursor/Windsurf):
