@@ -11,7 +11,8 @@
 /**
  * Unit tests for OFF → ON → OFF rounds (tools/ab-compare.ts `readArms`,
  * `abaNote`; run-manifest.ts `settleRungForSegment`), and for the battery on
- * split rounds (tools/analysis-battery.ts `batterySegment`, `segmentPlan`).
+ * split rounds (tools/analysis-battery.ts `batterySegment`, `batteryRungs`,
+ * `segmentPlan`).
  *
  *   npm run build-pkg && npm run test-units
  *
@@ -38,7 +39,7 @@ const {readArms, abaNote} = await import(
 const {loadRunManifest, ladderSegments, settleRungForSegment} = await import(
   pathToFileURL(path.join(dist, 'run-manifest.js')).href
 );
-const {abSegments, batterySegment, segmentPlan} = await import(
+const {abSegments, batteryRungs, batterySegment, segmentPlan} = await import(
   pathToFileURL(path.join(dist, 'tools', 'analysis-battery.js')).href
 );
 
@@ -160,7 +161,7 @@ test('a split round runs its ladder steps on the longest segment', () => {
   assert.equal(batterySegment(loadRunManifest(reloadedRun([]))), null);
   const longest = batterySegment(loadRunManifest(reloadedRun([0])));
   assert.deepEqual([longest.firstRung, longest.lastRung], [1, 4]);
-  // On a tie, the later segment: the deep dive reads the last rung.
+  // On a tie, the later segment.
   const tie = batterySegment(loadRunManifest(reloadedRun([0, 2, 3])));
   assert.deepEqual([tie.firstRung, tie.lastRung], [1, 2]);
 
@@ -186,4 +187,18 @@ test('a split round runs its ladder steps on the longest segment', () => {
     ['rung_1.heapsnapshot', 'rung_4.heapsnapshot'],
   );
   assert.equal(plan[4].args.segment, undefined);
+});
+
+test('a split round deep-dives the last rung of its chosen segment', () => {
+  // Rungs 0-2 | 3 | 4: the first segment is the longest, not the last.
+  const m = loadRunManifest(reloadedRun([2, 3]));
+  const seg = batterySegment(m);
+  assert.deepEqual([seg.firstRung, seg.lastRung], [0, 2]);
+  const {baseRung, finalRung} = batteryRungs(m, seg);
+  assert.deepEqual(
+    [baseRung, finalRung].map(p => path.basename(p)),
+    ['rung_0.heapsnapshot', 'rung_2.heapsnapshot'],
+  );
+  const whole = batteryRungs(m, null);
+  assert.equal(path.basename(whole.finalRung), 'rung_4.heapsnapshot');
 });

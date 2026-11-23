@@ -756,6 +756,18 @@ export function batterySegment(manifest: RunManifest): LadderSegment | null {
 }
 
 /**
+ * The first and last rung the two-snapshot steps and the deep dive read: the
+ * segment's on a split round, so they stay in the ladder steps' isolate.
+ */
+export function batteryRungs(
+  manifest: RunManifest,
+  segment: LadderSegment | null,
+): {baseRung: string; finalRung: string} {
+  const paths = segment?.paths ?? manifest.paths;
+  return {baseRung: paths[0], finalRung: paths[paths.length - 1]};
+}
+
+/**
  * A split round's plan: the ladder steps on one segment, and the two-snapshot
  * steps between that segment's first and last rung. Run on the whole round,
  * every ladder step refuses with "pass `segment`".
@@ -1747,8 +1759,9 @@ export function registerAnalysisBattery(server: McpServer): void {
         const lowDisk =
           freeBytes >= 0 && ladderBytes > 0 && freeBytes < ladderBytes * 3;
 
-        const finalRung = manifest.paths[manifest.paths.length - 1];
-        const baseRung = manifest.paths[0];
+        const ab = abSegments(run_dir, manifest);
+        const splitSegment = ab == null ? batterySegment(manifest) : null;
+        const {baseRung, finalRung} = batteryRungs(manifest, splitSegment);
         const hasSettleRung =
           manifest.settleRungPath != null &&
           snapshotExists(manifest.settleRungPath);
@@ -1769,8 +1782,6 @@ export function registerAnalysisBattery(server: McpServer): void {
             .map(c => ({name: c.name, edge: c.edge, value_keys: c.valueKeys})),
           manifest.familiesFile,
         );
-        const ab = abSegments(run_dir, manifest);
-        const splitSegment = ab == null ? batterySegment(manifest) : null;
         const optimizationReason =
           profile === 'standard' && ab == null
             ? sweepOptimizationReason(run_dir, finalRung)
@@ -2140,7 +2151,7 @@ export function registerAnalysisBattery(server: McpServer): void {
               `> ⚠️ **LADDER SPLIT after rung ${manifest.splitAfterRung.join(', ')}** — rungs across that ` +
                 'boundary are different V8 isolates and must not be compared. Analyze each segment on its own.' +
                 (splitSegment != null
-                  ? ` The ladder steps below ran on segment ${splitSegment.index} (rungs ${splitSegment.firstRung}-${splitSegment.lastRung}, the longest); pass \`segment\` to a tool for another.`
+                  ? ` The ladder steps and the deep dive below ran on segment ${splitSegment.index} (rungs ${splitSegment.firstRung}-${splitSegment.lastRung}, the longest); pass \`segment\` to a tool for another.`
                   : ''),
               '',
             );
