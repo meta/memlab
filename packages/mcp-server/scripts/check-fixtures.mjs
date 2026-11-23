@@ -244,8 +244,10 @@ const nodeSnapshotLater = v8.writeHeapSnapshot(
   path.join(tmp, 'node-later.heapsnapshot'),
 );
 
+const stateDir = path.join(tmp, 'state');
 const child = spawn(process.execPath, [server], {
   stdio: ['pipe', 'pipe', 'ignore'],
+  env: {...process.env, MEMLAB_STATE_DIR: stateDir},
 });
 // However the run ends, do not leave the server or the fixtures behind.
 process.on('exit', () => {
@@ -1215,6 +1217,50 @@ await shapeCheck(
         `${order}: rows 9,991-10,000 differ between the two paths`,
       );
     }
+  },
+);
+
+await shapeCheck(
+  'a background eval saves its metric only once the job succeeds',
+  async () => {
+    const saved = () => {
+      try {
+        return fs.readFileSync(path.join(stateDir, 'probes.json'), 'utf8');
+      } catch {
+        return '';
+      }
+    };
+    // A timeout_ms over 90 s forces the job path on any heap.
+    const job = (code, metric) =>
+      rpc('tools/call', {
+        name: 'memlab_eval',
+        arguments: {
+          code,
+          async: true,
+          timeout_ms: 200_000,
+          save_metric: metric,
+        },
+      });
+    const bad = await job('result = (', 'fx_bad');
+    assert(bad.result?.isError === true, 'an uncompilable eval started a job');
+    for (const [code, metric] of [
+      ['result = null.x;', 'fx_bad'],
+      ['result = 42;', 'fx_good'],
+    ]) {
+      // Each job's metric must be checked before the next one starts.
+      // eslint-disable-next-line no-await-in-loop
+      const {text} = (await job(code, metric)).result.content[0];
+      const id = /job `([^`]+)`/.exec(text)?.[1];
+      assert(id != null, `no job id: ${text}`);
+      let status = '';
+      for (let i = 0; i < 60 && !/\*\*(done|error)\*\*/.test(status); i++) {
+        // eslint-disable-next-line no-await-in-loop
+        status = (await call('memlab_job_status', {job_id: id, wait_ms: 5000}))
+          .text;
+      }
+    }
+    assert(!saved().includes('fx_bad'), `a failed eval was saved: ${saved()}`);
+    assert(saved().includes('fx_good'), 'a successful eval was not saved');
   },
 );
 

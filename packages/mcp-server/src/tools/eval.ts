@@ -1920,10 +1920,7 @@ export function registerEval(server: McpServer): void {
         const longTimeout =
           args.timeout_ms != null && args.timeout_ms > MAX_STATUS_WAIT_MS;
         if (predicted >= INLINE_JOB_BUDGET_MS || longTimeout) {
-          if (save_metric != null) {
-            saveMetric(save_metric, args.code ?? '', args.prelude);
-          }
-          return startEvalJob(args);
+          return startEvalJob(args, saved);
         }
         return saved(
           prependNote(
@@ -2123,7 +2120,13 @@ export function compileEvalSource(source: string, filename: string): vm.Script {
   }
 }
 
-function startEvalJob(args: Parameters<typeof runEval>[0]) {
+/** `onResult` sees the finished job's result, as an inline eval's would. */
+function startEvalJob(
+  args: Parameters<typeof runEval>[0],
+  onResult: (
+    res: Awaited<ReturnType<typeof runEval>>,
+  ) => Awaited<ReturnType<typeof runEval>> = res => res,
+) {
   if ((args.mode ?? 'eval') === 'eval') {
     try {
       compileEvalSource(
@@ -2144,7 +2147,7 @@ function startEvalJob(args: Parameters<typeof runEval>[0]) {
       await prewarmEvalIndexes(`${args.prelude ?? ''}\n;\n${args.code}`);
     }
     currentProgress().note?.('running the eval code');
-    return runEval({...args, ownsScanBudget: true});
+    return onResult(await runEval({...args, ownsScanBudget: true}));
   });
   if (typeof job === 'string') return errorResult(new Error(job));
   return toolResult(
