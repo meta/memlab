@@ -734,6 +734,7 @@ await shapeCheck(
         '  fromNode: helpers.mapEntryNodes(node).length,',
         '  sameNode: snapshot.getNodeById(node).id === node.id,',
         '  retained: helpers.retainedSize(node) > 0,',
+        '  field: node.retainedSize === helpers.retainedSize(node.id) && node.retained_size > 0,',
         "  h: helpers.histogram(helpers.byClass('FixtureWidget'), id => snapshot.getNodeById(id).type),",
         '};',
       ].join('\n'),
@@ -743,7 +744,8 @@ await shapeCheck(
       json.fromRef === 3 &&
         json.fromNode === 3 &&
         json.sameNode &&
-        json.retained,
+        json.retained &&
+        json.field,
       `map: ${text.slice(0, 300)}`,
     );
     assert(

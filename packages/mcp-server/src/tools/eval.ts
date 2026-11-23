@@ -500,6 +500,13 @@ export function jsonSafeResult(value: unknown): unknown {
  */
 const RETAINED_SIZE_PROPS = new Set(['retainedSize', 'retained_size']);
 
+/**
+ * The running eval's `helpers.retainedSize`, so `node.retainedSize` answers
+ * with the id-resolved value instead of throwing: ranking scripts read the
+ * field, and refusing it forced every one to be rewritten.
+ */
+let retainedSizeOf: ((id: number) => number) | null = null;
+
 interface FiberHookRow {
   index: number;
   statefulOrdinal: number | null;
@@ -565,6 +572,9 @@ function wrapNode(node: unknown): unknown {
       }
       if (typeof prop === 'string' && RETAINED_SIZE_PROPS.has(prop)) {
         const id = (target as {id?: unknown}).id;
+        if (retainedSizeOf != null && typeof id === 'number') {
+          return retainedSizeOf(id);
+        }
         throw new Error(
           `node.${prop} is not readable inside eval — it can come back ~0 for every node on some loads, which silently corrupts any ranking built on it. ` +
             `Use helpers.retainedSize(${typeof id === 'number' ? id : 'id'}) for one node, helpers.retainedSizes([ids]) for many, or helpers.aggregateRetained([ids]) for a dominator-deduped total. ` +
@@ -1422,10 +1432,9 @@ shape method side by side.
 
 ### 3. The biggest instance of a class, and what it holds
 
-\`node.retainedSize\` throws inside eval — the sandbox refuses it, because it was
-observed reading back 0 for every node on some loads and a silently wrong size
-ranks a whole analysis wrongly. Sizes come from \`helpers.retainedSizes\`, which
-returns an OBJECT keyed by id.
+\`node.retainedSize\` inside eval is read by id, through \`helpers.retainedSize\`
+(read straight off a node it was observed coming back 0 on some loads). For
+many nodes, \`helpers.retainedSizes\` returns an OBJECT keyed by id.
 
     const nodes = helpers.nodesByClass('MyCache');
     const sizes = helpers.retainedSizes(nodes.map(n => n.id));
@@ -1771,7 +1780,7 @@ export function registerEval(server: McpServer): void {
             'save(name, value) / load(name, {allowCrossSnapshot?}) / listSaved() (SESSION-scoped, survives loading another snapshot) }), ' +
             'and standard JS built-ins. ' +
             'NOTE: `helpers.byClass()` returns IDS, and every one resolves through `snapshot.getNodeById()`, natives included (an id the snapshot index misses is resolved from the class index, and the footer counts them). `helpers.nodesByClass(name)` / `helpers.iterByClass(name)` return the node objects directly. `helpers.props()` on an unresolvable node returns `{__unavailable: true}` rather than `{}`, so "no properties" and "could not read properties" are distinguishable. ' +
-            'NOTE: `node.retainedSize` / `node.retained_size` THROW inside eval — they can read back ~0 for every node on some loads, so a silent wrong number is refused; use helpers.retainedSize(id). `node.self_size` is reliable. ' +
+            'NOTE: `node.retainedSize` / `node.retained_size` inside eval are read by id through helpers.retainedSize (read straight off a node they could come back ~0); for a total over many nodes use helpers.aggregateRetained, since per-node sizes overlap. `node.self_size` is reliable. ' +
             'Node traversal: use node.references (outgoing) and node.referrers (incoming) with for-of or array methods (.filter/.map/.find/.length); node.props is {name: node}. A top-level `return` sets result. ' +
             'Edge properties: .name_or_index, .type, .toNode, .fromNode.',
         ),
@@ -2444,6 +2453,7 @@ export async function runEval({
       const n = resolveNode(nodeOrId);
       return n ? n.retainedSize : 0;
     };
+    retainedSizeOf = id => retainedSize(id);
     const retainedSizes = (ids: NodeRef[]): Record<number, number> => {
       requireRetention('retainedSizes');
       const out: Record<number, number> = {};
@@ -6001,7 +6011,7 @@ export async function runEval({
           'byTypename, withProp, byEdgeName, allByEdgeName, byContextVar, hasShape, shapeKeys, queryNodes, findWithin ' +
           '(name-based: they read 0 on a MINIFIED build — use module(name) / moduleExportProp(name, prop, {class}) there); ' +
           'retainedSize(id), retainedSizes(ids), aggregateRetained(ids) — ' +
-          'node.retainedSize THROWS here; rootPath, pathBetween, owner, contextOf, ' +
+          '(node.retainedSize reads through retainedSize(id)); rootPath, pathBetween, owner, contextOf, ' +
           'groupReferrersByEdge, detachedNamed, listenerRecords, closureCensus; ' +
           'entries/mapEntries/elements/setElements for Map/Set/array contents ' +
           '(they hang off internal `table`/`elements` edges, not properties); ' +
@@ -6285,14 +6295,6 @@ function lintEval(code: string): string {
   if (/for\s*\(\s*const\s+\w+\s+of\s+snapshot\.nodes/.test(code)) {
     lines.push(
       '- ❌ `snapshot.nodes` is NOT for-of iterable. Use `snapshot.nodes.forEach(node => { ... })`.',
-    );
-  }
-  if (
-    /\.\s*retained_?[Ss]ize\b/.test(code) &&
-    !/helpers\.retainedSize/.test(code)
-  ) {
-    lines.push(
-      '- ⚠ `node.retainedSize` / `node.retained_size` THROW inside eval (they read back ~0 on some loads). Use `helpers.retainedSize(id)` / `helpers.retainedSizes([ids])` / `helpers.aggregateRetained([ids])`.',
     );
   }
 
@@ -6651,8 +6653,8 @@ function describeEnvLines(): string[] {
     '## IHeapNode API',
     '`.id`, `.name`, `.type`, `.self_size`, `.edge_count`, `.is_detached`, `.numOfReferrers` (alias `.referrer_count`), `.isString`, `.toStringNode()?.stringValue`, `.hasPathEdge`, `.pathEdge`, `.dominatorNode`, `.location` (`script_id`/`line`/`column`).',
     '',
-    '## `.retainedSize` THROWS here',
-    '`node.retainedSize` / `node.retained_size` raise inside eval instead of returning a number. They have been observed reading back ~0 for every node on some loads while the same id read via `snapshot.getNodeById(id)` returns the true value — and a silently wrong number ranks a whole analysis wrongly with nothing in the output to say so. Use `helpers.retainedSize(id)` (number), `helpers.retainedSizes([ids])` (a `Record<id, bytes>` OBJECT — index it as `sizes[id]` or iterate `Object.values(sizes)`, do not `.map`/`.reduce` it directly), or `helpers.aggregateRetained([ids])` for a dominator-deduped total. `node.self_size` is read straight from the snapshot and is reliable.',
+    '## `.retainedSize` is read by id',
+    '`node.retainedSize` / `node.retained_size` inside eval return `helpers.retainedSize(node.id)`: read straight off a node they were observed coming back ~0 on some loads, while the id-resolved value is right. For many nodes use `helpers.retainedSizes([ids])` (a `Record<id, bytes>` OBJECT — index it as `sizes[id]` or iterate `Object.values(sizes)`, do not `.map`/`.reduce` it directly), and `helpers.aggregateRetained([ids])` for a dominator-deduped total (per-node sizes overlap). On a LIGHT load there are no retained sizes, and the read is refused. `node.self_size` is read straight from the snapshot and is reliable.',
     '',
     '## IHeapEdge API',
     '`.name_or_index`, `.type` (property/element/context/internal/hidden/shortcut), `.toNode`, `.fromNode`.',
