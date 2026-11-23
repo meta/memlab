@@ -9,6 +9,7 @@
  */
 
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
+import {caveatId, caveatRef} from '../caveat-id.js';
 import fs from 'fs';
 import path from 'path';
 import {z} from 'zod';
@@ -1045,12 +1046,16 @@ export function registerRoundAudit(server: McpServer): void {
         }
         if (standing.roundCaveats.length > 0) {
           lines.push('', '### Caveats recorded by the runner', '');
-          for (const c of standing.roundCaveats) lines.push(`- ${c}`);
+          for (const c of standing.roundCaveats) {
+            lines.push(`- \`#${caveatId(c)}\` ${c}`);
+          }
         }
         if (standing.standingCaveats.length > 0) {
+          // By id and cut short: the full text was printed in the round it
+          // first appeared, and is in run.json `caveats`.
           lines.push('', '### Standing caveats (not this round)', '');
           for (const c of standing.standingCaveats) {
-            lines.push(`- ${c.text} _(unchanged since ${c.since})_`);
+            lines.push(`- ${caveatRef(c.text)} _(unchanged since ${c.since})_`);
           }
         }
         // Printed verbatim, like the caveats. The check above tells the reader

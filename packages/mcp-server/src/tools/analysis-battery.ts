@@ -51,6 +51,7 @@ import {readArms} from './ab-compare.js';
 import type {Arm} from './ab-compare.js';
 import {hasInvariants} from '../judges.js';
 import {resolveProbeSet} from '../probe-sets.js';
+import {caveatId, caveatKey} from '../caveat-id.js';
 import {getRegisteredTool} from '../tool-registry.js';
 import {makeProgressReporter} from '../progress.js';
 import {flushSidecarWrites, snapshotExists} from '../snapshot-index.js';
@@ -1253,22 +1254,18 @@ function caveatLedgerFile(): string {
   );
 }
 
-/**
- * Counts in a caveat (scanned 12/40, 3 prop(s)) vary per round; the text does
- * not. Digits inside a name (`web_memlab_fixes_4`) are kept: a new prop is a
- * new caveat.
- */
-function caveatKey(caveat: string): string {
-  return caveat.replace(/(?<![A-Za-z_])\d+(\.\d+)?/g, '#');
-}
-
 export function splitRepeatedCaveats(
   runDir: string,
   caveats: string[],
   // Match the text as is, figures included; a caveat matches with its
   // numbers masked.
   exact = false,
-): {fresh: string[]; repeated: number; since: string | null} {
+): {
+  fresh: string[];
+  repeated: number;
+  since: string | null;
+  repeatedIds: string[];
+} {
   const keyOf = exact ? (c: string) => c : caveatKey;
   const self = path.resolve(runDir.replace(/\/$/, ''));
   const sweep = path.dirname(self);
@@ -1282,6 +1279,7 @@ export function splitRepeatedCaveats(
   }
   const seen = ledger[sweep] ?? {};
   const fresh: string[] = [];
+  const repeatedIds: string[] = [];
   let repeated = 0;
   let since: string | null = null;
   for (const c of caveats) {
@@ -1289,6 +1287,7 @@ export function splitRepeatedCaveats(
     // Re-analysing the same round shows its caveats again.
     if (first != null && first !== round) {
       repeated++;
+      repeatedIds.push(`#${caveatId(c)}`);
       if (
         since === null ||
         first.localeCompare(since, undefined, {numeric: true}) < 0
@@ -1315,7 +1314,7 @@ export function splitRepeatedCaveats(
   } catch {
     // Best effort: a digest that repeats caveats is still correct.
   }
-  return {fresh, repeated, since};
+  return {fresh, repeated, since, repeatedIds};
 }
 
 const MIN_USABLE_RUNGS = 4;
@@ -2069,17 +2068,17 @@ export function registerAnalysisBattery(server: McpServer): void {
           ];
 
           if (manifest.caveats.length > 0) {
-            const {fresh, repeated, since} = splitRepeatedCaveats(
+            const {fresh, repeated, since, repeatedIds} = splitRepeatedCaveats(
               run_dir,
               manifest.caveats,
             );
             if (fresh.length > 0) {
               lines.push('**Caveats recorded by the runner:**');
-              for (const c of fresh) lines.push(`- ${c}`);
+              for (const c of fresh) lines.push(`- \`#${caveatId(c)}\` ${c}`);
             }
             if (repeated > 0) {
               lines.push(
-                `_${repeated} caveat(s) unchanged since \`${since}\`, an earlier round of this sweep; all are in run.json \`caveats\`._`,
+                `_${repeated} caveat(s) unchanged since \`${since}\`, an earlier round of this sweep (${repeatedIds.join(', ')}); all are in run.json \`caveats\`._`,
               );
             }
             lines.push('');
