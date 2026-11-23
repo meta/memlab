@@ -228,6 +228,32 @@ function normalizeStepName(name: string): string {
 /** Hop separator used by the compact single-line path rendering. */
 const PATH_SEP = ' → ';
 
+/**
+ * For each path, the earlier path it shares the longest head with, when that
+ * head is at least `min` segments: printed as "same as #j for the first k
+ * steps", then only the rest. A prefix shared by ALL paths is elided
+ * already; this catches the paths that share a long head with SOME of the
+ * others, which each printed in full. `shared` stays below the path's own
+ * length, so every path keeps at least its last segment.
+ */
+export function priorSharedHeads(
+  paths: ReadonlyArray<ReadonlyArray<string>>,
+  min = 3,
+): Array<{ref: number; shared: number} | null> {
+  return paths.map((segs, i) => {
+    let best: {ref: number; shared: number} | null = null;
+    for (let j = 0; j < i; j++) {
+      const other = paths[j];
+      let k = 0;
+      while (k < segs.length - 1 && k < other.length && segs[k] === other[k])
+        k++;
+      if (k >= min && (best == null || k > best.shared))
+        best = {ref: j, shared: k};
+    }
+    return best;
+  });
+}
+
 /** Marker a rendered body carries when a shared head was already elided. */
 const ELISION = '… → ';
 
@@ -938,6 +964,16 @@ export function registerRetainerSummary(server: McpServer): void {
           );
         }
 
+        // Compact bodies are ` → `-separated; full ones are one hop per
+        // `--edge--> `.
+        const compactBody = (body: string): boolean => body.includes(PATH_SEP);
+        const segsOf = (body: string): string[] =>
+          compactBody(body)
+            ? body.split(PATH_SEP).slice(sharedPrefix?.segments ?? 0)
+            : body.split(/(?<=--> )/);
+        const joinSegs = (body: string, segs: string[]): string =>
+          segs.join(compactBody(body) ? PATH_SEP : '');
+        const heads = priorSharedHeads(merged.map(p => segsOf(p.body)));
         for (let i = 0; i < merged.length; i++) {
           const p = merged[i];
           const pct = ((p.count / totalSampled) * 100).toFixed(0);
@@ -945,11 +981,18 @@ export function registerRetainerSummary(server: McpServer): void {
             `### Pattern ${i + 1}: ${p.count}/${totalSampled} instances (${pct}%), ${formatBytes(p.total_retained)} retained`,
           );
           lines.push('');
-          lines.push(
-            sharedPrefix != null
-              ? `… → ${p.body.split(PATH_SEP).slice(sharedPrefix.segments).join(PATH_SEP)}`
-              : p.body,
-          );
+          const head = heads[i];
+          if (head != null) {
+            lines.push(
+              `_Same as Pattern ${head.ref + 1} for its first ${head.shared} steps, then:_ … ${compactBody(p.body) ? '→ ' : ''}${joinSegs(p.body, segsOf(p.body).slice(head.shared))}`,
+            );
+          } else {
+            lines.push(
+              sharedPrefix != null && compactBody(p.body)
+                ? `… → ${joinSegs(p.body, segsOf(p.body))}`
+                : p.body,
+            );
+          }
           lines.push('');
           lines.push(
             `Example nodes: ${p.example_ids.map(id => `@${id}`).join(', ')}`,

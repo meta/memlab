@@ -20,6 +20,7 @@ import {
   getProductionTrace,
   getRetainerTrace,
   traceToKey,
+  priorSharedHeads,
   type TraceStep,
 } from './retainer-summary.js';
 import {
@@ -445,13 +446,24 @@ export function registerTraceAll(server: McpServer): void {
           }
         }
 
+        // A long head shared with an earlier path is named, not reprinted.
+        const heads = priorSharedHeads(
+          rendered.map(c =>
+            c.steps.map(
+              st => `${st.name}\u0000${st.type}\u0000${st.edgeName ?? ''}`,
+            ),
+          ),
+        );
         rendered.forEach((c, i) => {
           const bytes = bytesByKey.get(c.key);
+          const head = heads[i];
           lines.push(
             '',
             `### Path ${i + 1}${c.devOnly ? ' — DEV-ONLY (no production path)' : ''} — ${formatNumber(c.count)} object(s), ${((c.count / totalTraced) * 100).toFixed(1)}%${bytes != null ? `, ${formatBytes(bytes.retained)} retained` : ''}`,
             '',
-            renderClusterChain(c.steps),
+            head != null
+              ? `_Same as Path ${head.ref + 1} for its first ${head.shared} hops, then:_ … ${renderClusterChain(c.steps.slice(head.shared - 1))}`
+              : renderClusterChain(c.steps),
             '',
             `Examples: ${c.exampleIds.map(id => `@${id}`).join(', ')}`,
           );
