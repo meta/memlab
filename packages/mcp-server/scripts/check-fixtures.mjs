@@ -178,6 +178,19 @@ function FixtureMixedRow() {}
   });
   globalThis.__fixtureMixedFibers = [owner, ...top, ...kids];
 }
+// A component that passes its string `children` to a host element.
+function FixtureLabelRow() {}
+function FixtureLabel() {}
+{
+  const row = new FiberNode(FixtureLabelRow, {});
+  const label = new FiberNode(FixtureLabel, {children: 'Send now'});
+  const span = new FiberNode('span', {children: 'Send now'});
+  row.child = label;
+  label.return = row;
+  label.child = span;
+  span.return = label;
+  globalThis.__fixtureLabelFibers = [row, label, span];
+}
 // A promise that never settles, gaining `.then` reactions between snapshots.
 function fixturePendingHandler() {}
 globalThis.__fixturePending = new Promise(() => {});
@@ -963,6 +976,7 @@ await shapeCheck(
       code: [
         'result = {',
         "  rows: helpers.fiberText('FixtureChatRow'),",
+        "  label: helpers.fiberText('FixtureLabelRow'),",
         '  short: helpers.countStrings(/^You added/, {maxLen: 15}),',
         '  all: helpers.countStrings(/^You added/),',
         '  again: helpers.countStrings(/^You added/),',
@@ -973,8 +987,9 @@ await shapeCheck(
     const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
     assert(
       json.rows.length === 1 &&
-        json.rows[0].text === 'You added  & You added Alice & Bob',
-      `fiberText: ${JSON.stringify(json.rows)}`,
+        json.rows[0].text === 'You added  & You added Alice & Bob' &&
+        json.label[0]?.text === 'Send now',
+      `fiberText: ${JSON.stringify([json.rows, json.label])}`,
     );
     assert(
       json.all >= 2 &&

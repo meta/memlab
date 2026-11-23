@@ -121,10 +121,14 @@ export function fiberSubtreeText(fiber: IHeapNode, maxFibers = 500): string {
   for (let seen = 0; stack.length > 0 && seen < maxFibers; seen++) {
     const f = stack.pop() as IHeapNode;
     const props = edgeTo(f, 'memoizedProps');
-    // A text fiber's props ARE its string.
+    // A text fiber's props ARE its string. Only a host element shows its
+    // string `children`; a component passes them down to one.
+    const type = edgeTo(f, 'type');
     const t =
       stringOf(props) ??
-      (props != null ? stringOf(edgeTo(props, 'children')) : null);
+      (props != null && type != null && elementTypeName(type)?.startsWith('<')
+        ? stringOf(edgeTo(props, 'children'))
+        : null);
     if (t != null) parts.push(t);
     const sibling = edgeTo(f, 'sibling');
     if (sibling != null) stack.push(sibling);
