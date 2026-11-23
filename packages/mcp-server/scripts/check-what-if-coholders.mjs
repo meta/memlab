@@ -29,12 +29,22 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {coHoldersOf} = await import(pathToFileURL(built).href);
+const {coHoldersOf, heldOnlyWithTooling, reachabilityOf} = await import(
+  pathToFileURL(built).href
+);
 
 function graph() {
   const nodes = new Map();
-  const node = (id, name, retainedSize = 0, type = 'object') => {
-    const n = {id, name, type, retainedSize, references: [], referrers: []};
+  const node = (id, name, retainedSize = 0, type = 'object', self_size = 0) => {
+    const n = {
+      id,
+      name,
+      type,
+      retainedSize,
+      self_size,
+      references: [],
+      referrers: [],
+    };
     nodes.set(id, n);
     return n;
   };
@@ -47,7 +57,10 @@ function graph() {
     nodes,
     node,
     edge,
-    snapshot: {getNodeById: id => nodes.get(id) ?? null},
+    snapshot: {
+      getNodeById: id => nodes.get(id) ?? null,
+      nodes: {forEach: fn => nodes.forEach(n => fn(n))},
+    },
   };
 }
 
@@ -87,4 +100,48 @@ test('ignores weak edges, structural edges and members of the population', () =>
   const {payload, groups} = coHoldersOf(g.snapshot, [10]);
   assert.equal(payload, 100_000);
   assert.equal(groups.length, 0);
+});
+
+test("the population's own subgraph is not another holder", () => {
+  const g = graph();
+  const entry = g.node(10, 'Entry');
+  const config = g.node(20, 'Config', 1_000);
+  const schema = g.node(21, 'ConfigSchema', 400_000);
+  const box = g.node(22, 'Box', 2_000);
+  const inner = g.node(23, 'Inner');
+  inner.dominatorNode = box;
+  box.dominatorNode = entry;
+  const cache = g.node(30, 'Cache');
+  g.edge(entry, config, 'config');
+  g.edge(entry, schema, 'schema');
+  g.edge(entry, box, 'box');
+  g.edge(config, schema, 'schema');
+  g.edge(box, inner, 'inner');
+  g.edge(inner, schema, 'schema');
+  g.edge(cache, schema, 'last');
+  const {groups} = coHoldersOf(g.snapshot, [10]);
+  assert.deepEqual(
+    groups.map(x => x.label),
+    ['Cache.last'],
+  );
+});
+
+test('tooling share counts only what the population and tooling hold together', () => {
+  const g = graph();
+  const root = g.node(1, '(GC roots)', 0, 'synthetic');
+  const app = g.node(5, 'App', 0, 'object', 10);
+  const entry = g.node(10, 'Entry', 0, 'object', 100);
+  const shared = g.node(20, 'Payload', 0, 'object', 1_000);
+  const own = g.node(21, 'Owned', 0, 'object', 7);
+  const consoleRoot = g.node(31, 'Console', 0, 'object', 50);
+  const logged = g.node(40, 'Logged', 0, 'object', 5_000);
+  g.edge(root, app, 'app');
+  g.edge(root, consoleRoot, 'console');
+  g.edge(app, entry, 'entry');
+  g.edge(entry, shared, 'data');
+  g.edge(entry, own, 'own');
+  g.edge(consoleRoot, shared, '0');
+  g.edge(consoleRoot, logged, '1');
+  const reach = reachabilityOf(g.snapshot);
+  assert.equal(heldOnlyWithTooling(g.snapshot, [10], [31], reach), 1_000);
 });

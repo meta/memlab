@@ -174,6 +174,38 @@ export function freedByReleasing(
   return {bytes, nodes};
 }
 
+/**
+ * Self bytes freed by releasing `ids` together with `devIds` that neither set
+ * frees alone: what the population and the tooling roots hold between them
+ * and nothing else does.
+ */
+export function heldOnlyWithTooling(
+  snapshot: IHeapSnapshot,
+  ids: readonly number[],
+  devIds: readonly number[],
+  reach: Reachability,
+): number {
+  const {roots, maxId, before} = reach;
+  const walk = (cut: readonly number[]) => {
+    const removed = new Uint8Array(maxId + 1);
+    for (const id of cut) if (id <= maxId) removed[id] = 1;
+    return reachableFrom(snapshot, roots, removed, maxId);
+  };
+  // 1 = not counted: it survives the joint cut, or one cut alone frees it.
+  const skip = walk([...ids, ...devIds]);
+  for (const cut of [ids, devIds]) {
+    const after = walk(cut);
+    for (let id = 0; id <= maxId; id++) if (after[id] !== 1) skip[id] = 1;
+  }
+  let bytes = 0;
+  for (let id = 0; id <= maxId; id++) {
+    if (before[id] === 1 && skip[id] !== 1) {
+      bytes += snapshot.getNodeById(id)?.self_size ?? 0;
+    }
+  }
+  return bytes;
+}
+
 const STRUCTURAL = new Set(['__proto__', 'map', 'constructor', 'prototype']);
 const GENERIC_CONTAINERS = new Set(['Array', 'Object', 'Map', 'Set']);
 const NOT_PAYLOAD_TYPES = new Set(['code', 'hidden', 'synthetic', 'native']);
@@ -236,6 +268,22 @@ export function coHoldersOf(
   const top = [...children.values()]
     .sort((a, b) => b.retainedSize - a.retainedSize)
     .slice(0, maxChildren);
+  // A child, or anything a member dominates, goes with the population.
+  const owned = new Map<number, boolean>();
+  const ownedByPop = (n: IHeapNode): boolean => {
+    let hit = owned.get(n.id);
+    if (hit != null) return hit;
+    hit = children.has(n.id);
+    let cur: IHeapNode | null = n;
+    for (let i = 0; !hit && cur != null && i < 64; i++) {
+      const d: IHeapNode | null = cur.dominatorNode ?? null;
+      if (d == null || d.id === cur.id) break;
+      hit = pop.has(d.id);
+      cur = d;
+    }
+    owned.set(n.id, hit);
+    return hit;
+  };
   let payload = 0;
   const groups = new Map<string, CoHolder>();
   for (const c of top) {
@@ -244,7 +292,7 @@ export function coHoldersOf(
     for (const r of c.referrers) {
       if (r.type === 'weak' || r.type === 'shortcut') continue;
       const from = r.fromNode;
-      if (pop.has(from.id) || from.id === c.id) continue;
+      if (pop.has(from.id) || from.id === c.id || ownedByPop(from)) continue;
       if (NOT_PAYLOAD_TYPES.has(from.type) || from.name.startsWith('(')) {
         continue;
       }
@@ -546,17 +594,23 @@ export function registerWhatIf(server: McpServer): void {
         if (co.payload >= 64 * 1024 && retained < 0.1 * co.payload) {
           const top = co.groups.slice(0, 3);
           const cuttable = top.filter(g => g.holders.size <= CUTTABLE_HOLDERS);
-          const reach = reachabilityOf(snapshot);
-          const joint = freedByReleasing(
-            snapshot,
-            [...ids, ...cuttable.flatMap(g => [...g.holders])],
-            reach,
-          );
           const devIds = [...collectDevRoots(snapshot).byId.keys()];
-          const withoutDev =
-            devIds.length > 0
-              ? freedByReleasing(snapshot, [...ids, ...devIds], reach)
+          const reach =
+            cuttable.length > 0 || devIds.length > 0
+              ? reachabilityOf(snapshot)
               : null;
+          const joint =
+            reach != null && cuttable.length > 0
+              ? freedByReleasing(
+                  snapshot,
+                  [...ids, ...cuttable.flatMap(g => [...g.holders])],
+                  reach,
+                )
+              : null;
+          const toolingOnly =
+            reach != null && devIds.length > 0
+              ? heldOnlyWithTooling(snapshot, ids, devIds, reach)
+              : 0;
           lines.push(
             '',
             '### Why so little comes back',
@@ -581,14 +635,14 @@ export function registerWhatIf(server: McpServer): void {
                 )
               : '_No other holder found among the direct children: the bytes are held further down._',
             '',
-            cuttable.length > 0
+            joint != null
               ? `**Cutting the population and the ${cuttable.length} small holder group(s) above together frees ${formatBytes(joint.bytes)}** (${formatNumber(joint.nodes)} nodes, a reachability walk). That joint cut is the fix to size.`
               : top.length > 0
                 ? `Every holder group above has more than ${CUTTABLE_HOLDERS} holders, so no single joint cut is measured: the children are shared widely, not pinned by one owner.`
                 : '',
-            ...(withoutDev != null && withoutDev.bytes - retained >= 64 * 1024
+            ...(toolingOnly >= 64 * 1024
               ? [
-                  `Without the DevTools / automation roots as well, the population frees ${formatBytes(withoutDev.bytes)}: the difference is held only through tooling a production page would not have.`,
+                  `Releasing the DevTools / automation roots with the population frees another ${formatBytes(toolingOnly)} that neither frees alone: that is held only by the population and tooling a production page would not have.`,
                 ]
               : []),
           );
