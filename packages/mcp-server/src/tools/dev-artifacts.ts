@@ -529,6 +529,184 @@ export function computeReachableWithoutDevRoots(
   return reached;
 }
 
+export interface ToolingSplit {
+  node: IHeapNode;
+  /** The object itself has a path from a GC root that avoids every dev root. */
+  appReachable: boolean;
+  /** Self bytes of its dominated subtree reachable only through dev roots. */
+  toolingOnly: number;
+  /** Self bytes of its dominated subtree still reachable without them. */
+  appHeld: number;
+  /** A GC-root path that avoids the dev roots, or null. */
+  path: string | null;
+}
+
+/**
+ * For each object, splits its dominated subtree into the bytes held only
+ * through DevTools / automation roots and the bytes the app still holds once
+ * those roots are removed.
+ */
+export function toolingSplit(
+  snapshot: IHeapSnapshot,
+  devRoots: DevRoots,
+  reached: Uint8Array,
+  ids: readonly number[],
+): ToolingSplit[] {
+  const n = snapshot.nodes.length;
+  // -2 = not yet resolved, -1 = under no target, k = under target k.
+  const owner = new Int32Array(n).fill(-2);
+  const targets: IHeapNode[] = [];
+  for (const id of ids) {
+    const node = snapshot.getNodeById(id);
+    if (node == null || owner[node.nodeIndex] !== -2) continue;
+    owner[node.nodeIndex] = targets.length;
+    targets.push(node);
+  }
+  const toolingOnly = new Float64Array(targets.length);
+  const appHeld = new Float64Array(targets.length);
+  const chain: number[] = [];
+  snapshot.nodes.forEach(node => {
+    let at: IHeapNode | null = node;
+    chain.length = 0;
+    while (at != null && owner[at.nodeIndex] === -2) {
+      chain.push(at.nodeIndex);
+      const dom: IHeapNode | null = at.dominatorNode;
+      at = dom == null || dom.nodeIndex === at.nodeIndex ? null : dom;
+    }
+    const k = at == null ? -1 : owner[at.nodeIndex];
+    for (const idx of chain) owner[idx] = k;
+    const mine = owner[node.nodeIndex];
+    if (mine < 0) return;
+    if (reached[node.nodeIndex]) appHeld[mine] += node.self_size;
+    else toolingOnly[mine] += node.self_size;
+  });
+  const parentTarget = new Int32Array(targets.length).fill(-1);
+  const children = new Uint32Array(targets.length);
+  targets.forEach((node, k) => {
+    const dom = node.dominatorNode;
+    if (dom == null || dom.nodeIndex === node.nodeIndex) return;
+    const p = owner[dom.nodeIndex];
+    if (p < 0) return;
+    parentTarget[k] = p;
+    children[p]++;
+  });
+  const leaves: number[] = [];
+  targets.forEach((_, k) => {
+    if (children[k] === 0) leaves.push(k);
+  });
+  for (let head = 0; head < leaves.length; head++) {
+    const k = leaves[head];
+    const p = parentTarget[k];
+    if (p < 0) continue;
+    toolingOnly[p] += toolingOnly[k];
+    appHeld[p] += appHeld[k];
+    if (--children[p] === 0) leaves.push(p);
+  }
+  const paths = productionPaths(snapshot, devRoots, targets);
+  return targets.map((node, k) => ({
+    node,
+    appReachable: reached[node.nodeIndex] === 1,
+    toolingOnly: toolingOnly[k],
+    appHeld: appHeld[k],
+    path: paths.get(node.nodeIndex) ?? null,
+  }));
+}
+
+/**
+ * Shortest strong GC-root paths to `targets` that avoid every dev root. A path
+ * through an accessor of a dev global (`get __REACT_DEVTOOLS_GLOBAL_HOOK__`) is
+ * or through React DevTools' console patch is used only when no other path
+ * exists, since it reads as tooling.
+ */
+function productionPaths(
+  snapshot: IHeapSnapshot,
+  devRoots: DevRoots,
+  targets: readonly IHeapNode[],
+): Map<number, string> {
+  const out = shortestPaths(snapshot, devRoots, targets, true);
+  const rest = targets.filter(t => !out.has(t.nodeIndex));
+  if (rest.length > 0) {
+    for (const [k, v] of shortestPaths(snapshot, devRoots, rest, false)) {
+      out.set(k, v);
+    }
+  }
+  return out;
+}
+
+/** Closures React DevTools installs over `console.*`. */
+const DEVTOOLS_PATCH_NAMES = new Set(['overrideMethod']);
+
+function namesDevGlobal(edgeName: string, extra: Set<string>): boolean {
+  const bare = edgeName.replace(/^[gs]et /, '');
+  return DEV_GLOBAL_EDGE_NAMES.has(bare) || extra.has(bare);
+}
+
+function shortestPaths(
+  snapshot: IHeapSnapshot,
+  devRoots: DevRoots,
+  targets: readonly IHeapNode[],
+  avoidDevNames: boolean,
+): Map<number, string> {
+  const out = new Map<number, string>();
+  const want = new Set(targets.map(t => t.nodeIndex));
+  if (want.size === 0) return out;
+  const devModules = devModuleNodes(snapshot);
+  const extra = extraDevGlobalNames();
+  const parent = new Int32Array(snapshot.nodes.length).fill(-1);
+  const via = new Map<number, string>();
+  const queue: IHeapNode[] = [];
+  snapshot.nodes.forEach(node => {
+    if (node.type !== 'synthetic' && node.id > 3) return;
+    if (parent[node.nodeIndex] !== -1) return;
+    parent[node.nodeIndex] = node.nodeIndex;
+    if (!devRoots.byId.has(node.id)) queue.push(node);
+  });
+  for (let head = 0; head < queue.length && want.size > 0; head++) {
+    const node = queue[head];
+    node.forEachReference((edge: IHeapEdge) => {
+      if (edge.type === 'weak') return;
+      const to = edge.toNode;
+      if (parent[to.nodeIndex] !== -1) return;
+      if (devStepReason(edge, node, devModules) != null) return;
+      if (devRoots.byId.has(to.id)) return;
+      if (
+        avoidDevNames &&
+        (namesDevGlobal(String(edge.name_or_index), extra) ||
+          DEVTOOLS_PATCH_NAMES.has(to.name))
+      ) {
+        return;
+      }
+      parent[to.nodeIndex] = node.nodeIndex;
+      via.set(to.nodeIndex, String(edge.name_or_index));
+      if (want.has(to.nodeIndex)) {
+        want.delete(to.nodeIndex);
+      }
+      queue.push(to);
+    });
+  }
+  const nodeAt = (idx: number): IHeapNode =>
+    snapshot.nodes.get(idx) as IHeapNode;
+  for (const t of targets) {
+    if (parent[t.nodeIndex] === -1) continue;
+    const hops: string[] = [];
+    let idx = t.nodeIndex;
+    while (parent[idx] !== idx && hops.length < 12) {
+      const from = nodeAt(parent[idx]);
+      const name = via.get(idx) ?? '?';
+      const label = from.name
+        ? truncateNodeName(from.name, from.type, from.self_size, 40)
+        : `(${from.type})`;
+      hops.unshift(`${label}.${name}`);
+      idx = from.nodeIndex;
+    }
+    out.set(
+      t.nodeIndex,
+      `${parent[idx] === idx ? '' : '… → '}${hops.join(' → ')} → @${t.id}`,
+    );
+  }
+  return out;
+}
+
 export interface DevOnlyTotals {
   nodes: number;
   retained: number;
@@ -846,6 +1024,60 @@ function namedDevPatterns(
   return out;
 }
 
+function formatToolingSplit(
+  rows: readonly ToolingSplit[],
+  asked: number,
+  rootsLine: string,
+): string {
+  const verdict = (r: ToolingSplit): string => {
+    if (r.appReachable) return 'app-held: a production path exists';
+    if (r.appHeld < 1024) return 'tooling-only';
+    return 'mixed: the object is tooling-only, part of what it dominates is not';
+  };
+  const lines = [
+    '## Held by tooling, or by the app?',
+    '',
+    `Dev/automation roots present: ${rootsLine}`,
+    '',
+    markdownTable(
+      [
+        'Object',
+        'Retained',
+        'Held only via tooling',
+        'App-held remainder',
+        'Verdict',
+      ],
+      rows.map(r => [
+        `@${r.node.id} ${truncateNodeName(r.node.name, r.node.type, r.node.self_size, 30)}`,
+        formatBytes(r.node.retainedSize),
+        formatBytes(r.toolingOnly),
+        formatBytes(r.appHeld),
+        verdict(r),
+      ]),
+      new Set([1, 2, 3]),
+    ),
+  ];
+  if (rows.length < asked) {
+    lines.push(
+      '',
+      `_${formatNumber(asked - rows.length)} id(s) were not found in this snapshot._`,
+    );
+  }
+  const withPath = rows.filter(r => r.path != null);
+  if (withPath.length > 0) {
+    lines.push(
+      '',
+      '**Production paths** (shortest strong path from a GC root that avoids every dev root):',
+      ...withPath.map(r => `- @${r.node.id}: ${r.path}`),
+    );
+  }
+  lines.push(
+    '',
+    '_Only the "held only via tooling" bytes may be discounted as a DevTools / automation artifact. The app-held remainder is real in production and needs its own explanation: a bound that caps it, the live code that reads it, or a finding._',
+  );
+  return lines.join('\n');
+}
+
 export function registerDevArtifacts(server: McpServer): void {
   server.tool(
     'memlab_dev_artifacts',
@@ -885,6 +1117,12 @@ export function registerDevArtifacts(server: McpServer): void {
         .describe(
           'List every dev/automation root by name instead of summarizing them as counts per family (default false). The full list is unbounded — one root per a11y object and per bridge export — and cost ~1,500 tokens per call on a measured run. Use it only when chasing one specific root.',
         ),
+      node_ids: z
+        .array(z.number())
+        .optional()
+        .describe(
+          'Ask about specific objects instead of the whole heap: for each, the bytes of its dominated subtree held ONLY through DevTools / automation roots, the app-held remainder once those roots are removed, and a GC-root path that avoids them. This is the evidence an "artifact" verdict needs: only the tooling-only part may be discounted.',
+        ),
       summary_only: z
         .boolean()
         .optional()
@@ -899,6 +1137,7 @@ export function registerDevArtifacts(server: McpServer): void {
       only_dev,
       show_roots,
       explain,
+      node_ids,
       summary_only,
     }) => {
       try {
@@ -907,6 +1146,15 @@ export function registerDevArtifacts(server: McpServer): void {
         const totalSize = meta?.totalSize ?? 0;
         const devRoots = collectDevRoots(snapshot);
 
+        if (
+          devRoots.byId.size === 0 &&
+          node_ids != null &&
+          node_ids.length > 0
+        ) {
+          return toolResult(
+            'No dev/extension globals, console handles or accessibility caches were found, so nothing in this snapshot is held only by tooling: every byte of these objects is app-held. Do not file them as a tooling artifact.',
+          );
+        }
         if (devRoots.byId.size === 0) {
           // The hook-guard pattern needs no dev root, so it is still checked.
           const patterns = namedDevPatterns(snapshot, devRoots, {
@@ -929,6 +1177,16 @@ export function registerDevArtifacts(server: McpServer): void {
         // classification below — catches multi-dev-root co-retention that a
         // per-node dominator walk misses.
         const reached = computeReachableWithoutDevRoots(snapshot, devRoots);
+
+        if (node_ids != null && node_ids.length > 0) {
+          return toolResult(
+            formatToolingSplit(
+              toolingSplit(snapshot, devRoots, reached, node_ids),
+              node_ids.length,
+              summarizeDevRoots(devRoots, show_roots),
+            ),
+          );
+        }
 
         // Collect the largest inspectable objects, then classify each.
         interface Cand {

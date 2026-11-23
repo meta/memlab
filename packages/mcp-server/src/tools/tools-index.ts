@@ -530,7 +530,7 @@ const GROUPS: Group[] = [
       ],
       [
         'memlab_dev_artifacts',
-        'Memory retained ONLY by dev/automation roots — DevTools, extensions, React Fast Refresh, the a11y cache. Run before calling anything a production leak.',
+        'Memory retained ONLY by dev/automation roots — DevTools, extensions, React Fast Refresh, the a11y cache. Run before calling anything a production leak; `node_ids` splits named objects into tooling-only and app-held bytes, with a path that avoids the tooling.',
       ],
       [
         'memlab_explain_delta',

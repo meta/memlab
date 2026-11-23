@@ -1177,7 +1177,9 @@ export function registerDetachedDom(server: McpServer): void {
                   `**${formatNumber(devOnlyTotal)} of them (${devOnlyPct.toFixed(1)}%) are dev-only** ` +
                     '(React Fast Refresh, DevTools, or the automation bridge) and do not exist in ' +
                     'production. Subtract them before quoting a total: a measured capture read 98.3% ' +
-                    'Fast Refresh while every per-node check still said "pinned — actionable leak".',
+                    'Fast Refresh while every per-node check still said "pinned — actionable leak". ' +
+                    `**The other ${formatNumber(totalDetached - devOnlyTotal)} stay held by the app** once those holders are removed: ` +
+                    'an "artifact" verdict covers only the dev-only part.',
                 ]
               : []),
             ...formatReachabilitySplit(split, snapshot),
@@ -1306,7 +1308,7 @@ export function registerDetachedDom(server: McpServer): void {
                 : '0';
             lines.push(
               '',
-              `⚠ **${formatBytes(devOnlyRetained)} (${pct}%) of this detached DOM is retained ONLY via dev/automation artifacts** (${summarizeDevRoots(devRoots)}) — dev-global retention would be GC'd in production, and a11y/CDP-cache retention is automation-inflated (not present at that scale in a normal session). Exclude it from leak totals; run \`memlab_dev_artifacts\` for the breakdown.`,
+              `⚠ **${formatBytes(devOnlyRetained)} (${pct}%) of this detached DOM is retained ONLY via dev/automation artifacts** (${summarizeDevRoots(devRoots)}) — dev-global retention would be GC'd in production, and a11y/CDP-cache retention is automation-inflated (not present at that scale in a normal session). Exclude it from leak totals; run \`memlab_dev_artifacts\` for the breakdown. The rest is app-held and needs its own explanation; \`memlab_dev_artifacts({node_ids: [<owner>]})\` splits one owner into its tooling-only and app-held bytes.`,
             );
           }
 
