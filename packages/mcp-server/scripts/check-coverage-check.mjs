@@ -360,6 +360,24 @@ test('markdown: a finding heading that mentions "ignored" stays a finding', () =
   );
 });
 
+test('markdown: an underscore-emphasized "Ignored" heading is a not-problems section', () => {
+  const items = parseDraft(
+    '# Findings\n## F1 Leak\nbody\n\n## _Ignored_\n- dev-only buffer\n\n## __Ignored leads__ (3)\n- console retention\n\n## F2 Timer\nbody\n\n## _Ignored_ items (2)\n- warm-up cache\n',
+  );
+  assert.equal(
+    items.find(i => /warm-up cache/.test(i.text))?.kind,
+    'not_problem',
+  );
+  assert.equal(
+    items.find(i => /dev-only buffer/.test(i.text))?.kind,
+    'not_problem',
+  );
+  assert.equal(
+    items.find(i => /console retention/.test(i.text))?.kind,
+    'not_problem',
+  );
+});
+
 test('bottom-up leads: a shape that grew by count is listed with its check', () => {
   const grew = lead({
     label: 't{context, eventType, key, listener, remove, subscriber}',

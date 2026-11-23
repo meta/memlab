@@ -30,7 +30,7 @@ export interface DraftItem {
 // "Ignored" counts only as the whole heading, so a finding titled
 // "F2 abort signal ignored on unmount" stays a finding.
 const NP_HEADING =
-  /not[\s_-]*(a[\s_-]*)?problems?|ruled[\s_-]*out|non-issues|^\W*ignored(\s+(leads?|items?))?[\W\d]*$/i;
+  /not[\s_-]*(a[\s_-]*)?problems?|ruled[\s_-]*out|non-issues|^[\W_]*ignored([\W_]+(leads?|items?))?[\W\d_]*$/i;
 
 /** report.json (`findings`, `not_problems`), else markdown split by heading. */
 export function parseDraft(raw: string): DraftItem[] {
