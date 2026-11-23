@@ -163,3 +163,30 @@ test('with a windows-only control, a rejection loop still outranks a quiet row',
   );
   fs.rmSync(root, {recursive: true, force: true});
 });
+
+test('an idle control on another build than the round is called out', async () => {
+  const {controlBuildMismatch} = await import(
+    pathToFileURL(path.join(here, '..', 'dist', 'tools', 'leak-report.js')).href
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ctl-build-'));
+  const round = (name, dev) => {
+    const d = path.join(root, name);
+    fs.mkdirSync(d);
+    fs.writeFileSync(
+      path.join(d, 'run.json'),
+      JSON.stringify(dev == null ? {} : {environment: {dev_build: dev}}),
+    );
+    return d;
+  };
+  const dev = round('r1', true);
+  const prod = round('idle-control', false);
+  const dev2 = round('r2', true);
+  const unknown = round('r3', null);
+  assert.match(
+    controlBuildMismatch(dev, prod),
+    /ran a prod-like build and this round a dev build/,
+  );
+  assert.equal(controlBuildMismatch(dev, dev2), null);
+  assert.equal(controlBuildMismatch(unknown, prod), null);
+  fs.rmSync(root, {recursive: true});
+});

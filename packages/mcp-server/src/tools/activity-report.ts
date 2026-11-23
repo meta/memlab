@@ -14,7 +14,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import {resolveRoundDir} from '../round-index.js';
 import {errorResult, markdownTable, toolResult} from '../utils.js';
-import {findIdleSibling} from './leak-report.js';
+import {controlBuildMismatch, findIdleSibling} from './leak-report.js';
 
 /**
  * Work without retention: a combo that fires requests, long tasks, rejections
@@ -363,6 +363,11 @@ export function registerActivityReport(server: McpServer): void {
           '',
           `_Rates per minute of driving under each label, from ${path.basename(file)}; ratios against ${against}._`,
           '',
+          ...(useControl && baseDir != null
+            ? [controlBuildMismatch(dir, baseDir)]
+                .filter((m): m is string => m != null)
+                .flatMap(m => [m, ''])
+            : []),
           markdownTable(
             [
               'Label',

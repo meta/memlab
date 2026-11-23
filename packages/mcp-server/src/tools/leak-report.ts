@@ -242,6 +242,37 @@ export function findIdleSibling(runDir: string): string | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
+/** run.json `environment.dev_build` of a round directory, when it says. */
+function devBuildOf(runDir: string): boolean | null {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'))
+      ?.environment?.dev_build;
+    return typeof v === 'boolean' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A warning when the idle control ran another build than the round: a
+ * prod-like control has none of a dev build's polling (hot reload, DEV-only
+ * requests) or dev-only populations, so it is no floor for them.
+ */
+export function controlBuildMismatch(
+  runDir: string,
+  controlDir: string,
+): string | null {
+  const round = devBuildOf(runDir);
+  const control = devBuildOf(controlDir);
+  if (round == null || control == null || round === control) return null;
+  const name = (b: boolean) => (b ? 'a dev build' : 'a prod-like build');
+  return (
+    `⚠ The idle control \`${path.basename(controlDir.replace(/\/$/, ''))}\` ran ${name(control)} and this round ${name(round)}, ` +
+    `so what only ${round ? 'the dev build' : 'one build'} does has no floor in it, and rates above the control overstate this round. ` +
+    'Drive an idle control on the same build.'
+  );
+}
+
 const EXTERNAL_STRING_KEY = 'native::system / ExternalStringData';
 
 const SCRIPT_PREFIX = 'system / Script';
@@ -1603,6 +1634,11 @@ export function registerLeakReport(server: McpServer): void {
           lines.push(
             '',
             `**Idle floor subtracted** against \`${idleLabel}\`: ${formatNumber(idleFloorClasses)} class(es) sit at or below the floor.`,
+            ...(run_dir != null && idleDir != null
+              ? [controlBuildMismatch(run_dir, idleDir)].filter(
+                  (m): m is string => m != null,
+                )
+              : []),
             '',
             // A note of its own, so a session prints it once.
             '_Rows are ranked by EXCESS over the idle control, not by absolute rate. A class at or below the floor ' +
