@@ -126,6 +126,28 @@ test("the population's own subgraph is not another holder", () => {
   );
 });
 
+test('a node a member dominates from far down is not another holder', () => {
+  const g = graph();
+  const entry = g.node(10, 'Entry');
+  const schema = g.node(20, 'ConfigSchema', 400_000);
+  g.edge(entry, schema, 'schema');
+  let prev = entry;
+  for (let i = 0; i < 100; i++) {
+    const link = g.node(100 + i, 'Link');
+    link.dominatorNode = prev;
+    g.edge(prev, link, 'next');
+    prev = link;
+  }
+  g.edge(prev, schema, 'schema');
+  const cache = g.node(30, 'Cache');
+  g.edge(cache, schema, 'last');
+  const {groups} = coHoldersOf(g.snapshot, [10]);
+  assert.deepEqual(
+    groups.map(x => x.label),
+    ['Cache.last'],
+  );
+});
+
 test('tooling share counts only what the population and tooling hold together', () => {
   const g = graph();
   const root = g.node(1, '(GC roots)', 0, 'synthetic');

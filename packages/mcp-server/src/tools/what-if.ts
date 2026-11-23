@@ -269,21 +269,31 @@ export function coHoldersOf(
     .sort((a, b) => b.retainedSize - a.retainedSize)
     .slice(0, maxChildren);
   // A child, or anything a member dominates, goes with the population.
-  const owned = new Map<number, boolean>();
-  const ownedByPop = (n: IHeapNode): boolean => {
-    let hit = owned.get(n.id);
-    if (hit != null) return hit;
-    hit = children.has(n.id);
-    let cur: IHeapNode | null = n;
-    for (let i = 0; !hit && cur != null && i < 64; i++) {
+  const underPop = new Map<number, boolean>();
+  const dominatedByPop = (n: IHeapNode): boolean => {
+    const chain: number[] = [];
+    let cur = n;
+    let hit = false;
+    for (;;) {
+      const known = underPop.get(cur.id);
+      if (known != null) {
+        hit = known;
+        break;
+      }
+      chain.push(cur.id);
       const d: IHeapNode | null = cur.dominatorNode ?? null;
       if (d == null || d.id === cur.id) break;
-      hit = pop.has(d.id);
+      if (pop.has(d.id)) {
+        hit = true;
+        break;
+      }
       cur = d;
     }
-    owned.set(n.id, hit);
+    for (const id of chain) underPop.set(id, hit);
     return hit;
   };
+  const ownedByPop = (n: IHeapNode): boolean =>
+    children.has(n.id) || dominatedByPop(n);
   let payload = 0;
   const groups = new Map<string, CoHolder>();
   for (const c of top) {
