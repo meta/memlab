@@ -9,7 +9,7 @@
  */
 
 import type {IHeapNode, IHeapSnapshot} from '@memlab/core';
-import {realmClasses} from './realm-tags.js';
+import {isNonPageRealm, realmClasses} from './realm-tags.js';
 import {classifyArtifact} from './artifact-classes.js';
 import type {ArtifactKind} from './artifact-classes.js';
 import {
@@ -118,11 +118,8 @@ export function computeHeapBudget(snapshot: IHeapSnapshot): HeapBudget {
     reached != null && reached[node.nodeIndex] === 0;
   const scriptSource = scriptSourceStringData(snapshot);
   const realms = realmClasses(snapshot);
-  const isOtherRealm = (node: IHeapNode): boolean => {
-    if (realms == null || realms.page < 0) return false;
-    const o = realms.owner[node.nodeIndex];
-    return o >= 0 && o !== realms.page;
-  };
+  const isOtherRealm = (node: IHeapNode): boolean =>
+    realms != null && isNonPageRealm(realms, realms.owner[node.nodeIndex]);
 
   snapshot.nodes.forEach((node: IHeapNode) => {
     if (node.id <= 3) return;

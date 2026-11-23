@@ -29,7 +29,9 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {classifyRealmList} = await import(pathToFileURL(built).href);
+const {classifyRealmList, isNonPageRealm} = await import(
+  pathToFileURL(built).href
+);
 
 const ctx = (ordinal, label, attributedSize, detached = false) => ({
   ordinal,
@@ -43,7 +45,7 @@ const ctx = (ordinal, label, attributedSize, detached = false) => ({
 });
 
 test('the largest web realm is the page; others are classified against it', () => {
-  const {page, kinds} = classifyRealmList([
+  const {kinds, page} = classifyRealmList([
     ctx(1, 'https://app.example.com', 100),
     ctx(2, 'https://app.example.com/frame', 10),
     ctx(3, 'chrome-extension://abcdef', 50),
@@ -71,7 +73,30 @@ test('an extension never becomes the page, even when it owns the most', () => {
 });
 
 test('with no tags, the largest untagged realm is the page', () => {
-  const {page, kinds} = classifyRealmList([ctx(1, '', 5), ctx(2, '', 50)]);
+  const {kinds, page} = classifyRealmList([ctx(1, '', 5), ctx(2, '', 50)]);
   assert.equal(page, 2);
   assert.equal(kinds.get(1), 'untagged');
+});
+
+test('a page that is not http(s), such as file://, is still the page', () => {
+  const {kinds, page} = classifyRealmList([
+    ctx(1, 'file:///app/index.html', 100),
+    ctx(2, 'chrome-extension://abcdef', 500),
+  ]);
+  assert.equal(page, 1);
+  assert.equal(kinds.get(1), 'page');
+  assert.equal(kinds.get(2), 'extension');
+});
+
+test("a detached realm's memory is not another realm's", () => {
+  const {kinds, page} = classifyRealmList([
+    ctx(1, 'https://app.example.com', 100),
+    ctx(2, 'https://app.example.com', 20, true),
+    ctx(3, 'chrome-extension://abcdef', 50),
+  ]);
+  const classes = {page, kindByOrdinal: kinds};
+  assert.equal(isNonPageRealm(classes, 1), false);
+  assert.equal(isNonPageRealm(classes, 2), false);
+  assert.equal(isNonPageRealm(classes, 3), true);
+  assert.equal(isNonPageRealm({page: -1, kindByOrdinal: kinds}, 3), false);
 });

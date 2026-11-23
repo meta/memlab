@@ -65,7 +65,13 @@ export function classifyRealmList(contexts: readonly NativeContextInfo[]): {
   const kinds = new Map<number, RealmKind>();
   const live = contexts.filter(c => !c.detached);
   const web = live.filter(c => /^https?:\/\//.test(c.label));
-  const pool = web.length > 0 ? web : live.filter(c => c.label === '');
+  const pool =
+    web.length > 0
+      ? web
+      : live.filter(
+          c =>
+            !EXTENSION_RE.test(c.label) && !c.label.startsWith('devtools://'),
+        );
   let page: NativeContextInfo | null = null;
   for (const c of pool) {
     if (page == null || c.attributedSize > page.attributedSize) page = c;
@@ -83,6 +89,22 @@ export function classifyRealmList(contexts: readonly NativeContextInfo[]): {
     kinds.set(c.ordinal, kind);
   }
   return {page: page?.ordinal ?? -1, kinds};
+}
+
+/**
+ * Whether memory owned by realm `o` is not the page's. A detached realm is not
+ * another realm: page code that still holds a removed frame is a page leak.
+ */
+export function isNonPageRealm(
+  classes: Pick<RealmClasses, 'page' | 'kindByOrdinal'>,
+  o: number,
+): boolean {
+  return (
+    classes.page >= 0 &&
+    o >= 0 &&
+    o !== classes.page &&
+    classes.kindByOrdinal.get(o) !== 'detached'
+  );
 }
 
 const cache = new WeakMap<IHeapSnapshot, RealmClasses | null>();
@@ -131,6 +153,10 @@ export function ownerRealm(
   if (o === SHARED || o === UNATTRIBUTED) return null;
   const kind = classes.kindByOrdinal.get(o);
   if (kind == null) return null;
+  // With no page realm, only kinds read off the label alone are known.
+  if (classes.page < 0 && kind !== 'extension' && kind !== 'devtools') {
+    return null;
+  }
   return {kind, label: classes.labelByOrdinal.get(o) ?? ''};
 }
 
@@ -156,6 +182,8 @@ export function realmNotice(
   node: IHeapNode,
 ): string | null {
   const realm = ownerRealm(snapshot, node);
-  if (realm == null || realm.kind === 'page') return null;
+  if (realm == null || realm.kind === 'page' || realm.kind === 'detached') {
+    return null;
+  }
   return `⚠ **Not the page's memory:** @${node.id} is owned by a ${REALM_KIND_LABEL[realm.kind]}${realm.label ? ` (\`${realm.label}\`)` : ''}, not the page realm. Do not file it as an app finding without showing the page code that creates or holds it.`;
 }
