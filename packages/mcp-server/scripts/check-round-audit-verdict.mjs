@@ -124,6 +124,32 @@ test('a non-A/B round with `ab: {}` is judged as one ladder', () => {
   assert.equal(status(audit, 'ladder continuity'), 'blocking');
 });
 
+test('a request fault that matched nothing blocks', () => {
+  const m = {
+    ...base(),
+    faults: {
+      kinds: ['hidden', 'xhr-fail'],
+      failed_requests: 0,
+      matched_requests: {'xhr-fail': 0},
+      xhr_patterns: ['*/ajax/bootloader-endpoint/*'],
+    },
+  };
+  const audit = auditManifest(m);
+  assert.equal(status(audit, 'faults'), 'blocking');
+  assert.match(
+    audit.checks.find(c => c.name === 'faults').detail,
+    /fault xhr-fail matched 0 requests \(xhr pattern `\*\/ajax\/bootloader-endpoint\/\*`\)/,
+  );
+  assert.equal(audit.verdict, 'UNTRUSTWORTHY');
+  m.faults.matched_requests = {'xhr-fail': 76};
+  assert.equal(status(auditManifest(m), 'faults'), 'ok');
+  // An older round: only the total.
+  const old = {...base(), faults: {kinds: ['xhr-fail'], failed_requests: 0}};
+  assert.equal(status(auditManifest(old), 'faults'), 'blocking');
+  const hidden = {...base(), faults: {kinds: ['hidden'], failed_requests: 0}};
+  assert.equal(status(auditManifest(hidden), 'faults'), undefined);
+});
+
 function sweep(rounds) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-standing-'));
   for (const [name, m] of Object.entries(rounds)) {

@@ -94,6 +94,13 @@ interface RunManifest {
     on?: AbArmRecord;
     off2?: AbArmRecord;
   } | null;
+  /** The runner's `--fault` record: kinds, and requests each kind failed. */
+  faults?: {
+    kinds?: string[];
+    failed_requests?: number;
+    matched_requests?: Record<string, number>;
+    xhr_patterns?: string[] | null;
+  } | null;
 }
 
 interface AbArmRecord {
@@ -195,6 +202,8 @@ export function auditManifest(
   );
   const armCheck = abArmCheck(m);
   if (armCheck != null) checks.push(armCheck);
+  const fault = faultCheck(m);
+  if (fault != null) checks.push(fault);
 
   const steps = m.steps ?? {};
   const stepNames = Object.keys(steps);
@@ -635,6 +644,46 @@ function abBoundary(m: RunManifest): {
       return hit != null && explainsSplit(Number(hit[1]));
     },
   };
+}
+
+const REQUEST_FAULTS = ['codeload-fail', 'xhr-fail'];
+
+/**
+ * A request-failing fault that matched no request left the round unfaulted:
+ * the app never requested what the pattern names. Read as faulted, its flat
+ * ladder says the app recovers from a failure it never saw.
+ */
+function faultCheck(m: RunManifest): AuditCheck | null {
+  const kinds = (m.faults?.kinds ?? []).filter(k => REQUEST_FAULTS.includes(k));
+  if (kinds.length === 0) return null;
+  const matched = m.faults?.matched_requests;
+  // Older rounds record only the total across kinds.
+  const counts: Array<[string, number]> =
+    matched != null
+      ? kinds.map(k => [k, matched[k] ?? 0])
+      : [[kinds.join('+'), m.faults?.failed_requests ?? 0]];
+  const none = counts.filter(([, n]) => n === 0);
+  const patterns = m.faults?.xhr_patterns;
+  const where =
+    patterns != null && patterns.length > 0
+      ? ` (xhr pattern ${patterns.map(p => `\`${p}\``).join(', ')})`
+      : '';
+  return none.length > 0
+    ? {
+        name: 'faults',
+        status: 'blocking',
+        detail:
+          `${none.map(([k]) => `fault ${k} matched 0 requests`).join('; ')}${where}. ` +
+          'The round ran unfaulted. Re-drive it with a `--fault-xhr-pattern` the app requests.',
+      }
+    : {
+        name: 'faults',
+        status: 'ok',
+        detail:
+          counts
+            .map(([k, n]) => `${k} failed ${formatNumber(n)} request(s)`)
+            .join('; ') + '.',
+      };
 }
 
 const MIN_ARM_RUNGS = 2;

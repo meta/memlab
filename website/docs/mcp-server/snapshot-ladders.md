@@ -119,6 +119,9 @@ is at least 25% larger than any scanned so far.
   is marked "unchanged since rN" and doesn't make the round CAVEATED. In an
   A/B round, the reload between the two arms is expected: each arm must be
   continuous and have at least 2 rungs.
+- A round run under a request-failing fault (`codeload-fail`, `xhr-fail`) is
+  UNTRUSTWORTHY when the fault matched 0 requests: the app never requested
+  what the pattern names, so the round ran unfaulted.
 - A structure found once to be dev-only or capped (a profiler list, a trace
   buffer) can be registered in the round's families file with
   `"kind": "dev_only"` or `"bounded_window"` and a `"locator"` (the stable key
