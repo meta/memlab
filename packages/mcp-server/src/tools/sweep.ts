@@ -64,6 +64,7 @@ import {finishedStateSweepSection} from './finished-state.js';
 import {renderGrowthAnchors} from './growth-anchors.js';
 import {cachedModuleScopes} from './module-attribution.js';
 import {nodeServerFlagLines} from './node-server.js';
+import {shapeClustersSection} from './shape-clusters.js';
 import {nodeServerPinsSweepSection} from './node-server-pins.js';
 import {formatObjectGrowth, ObjectGrowthTracker} from './object-growth.js';
 import {
@@ -87,6 +88,7 @@ const CAPS = {
   strings: 6,
   buffers: 8,
   holders: 5,
+  shapes: 8,
   growth: 10,
   anchors: 8,
   cuts: 10,
@@ -706,7 +708,7 @@ function fileMB(filePath: string | undefined): number {
 export function registerSweep(server: McpServer): void {
   server.tool(
     'memlab_sweep',
-    'The one call to make after memlab_load_snapshot: every first-pass lead in ONE compact report. Runs the sweep the best manual investigations followed, each section capped and omitted when empty: (1) top ~30 retained objects (strings and code excluded) with holder, marked when held directly by the GC root, a global or a module; (2) collections with ≥500 entries flagged at least 25% dead, plus the largest; (3) string families; (4) flagged framework buffers (per-call keys, cancelled scheduler tasks, cancelled-in-place listener arrays, oversized logs); (5) diagnostic buffers: error histories with repeated errors, the Performance timeline, telemetry queues; (6) finished traces, streams and uploads that still own their buffers; (7) React state holding dead UI: effect cleanups capturing detached DOM, registries keyed to unmounted fibers; (8) React lists: rendered items vs virtualized shells and per-item child counts; (9) the largest class by self size, and heap numbers, grouped by holder `Class.edge`; (10) async flags and Node.js server flags, including vm realms held per cache key and scripts loaded but never evaluated; (11) with 2+ snapshots (`paths`, or several resident): same-id objects that grew at every rung and growth anchors; (12) a ready-to-paste memlab_residual call that cuts the top leads, to look at the long tail. ' +
+    'The one call to make after memlab_load_snapshot: every first-pass lead in ONE compact report. Runs the sweep the best manual investigations followed, each section capped and omitted when empty: (1) top ~30 retained objects (strings and code excluded) with holder, marked when held directly by the GC root, a global or a module; (2) collections with ≥500 entries flagged at least 25% dead, plus the largest; (3) string families; (4) flagged framework buffers (per-call keys, cancelled scheduler tasks, cancelled-in-place listener arrays, oversized logs); (5) diagnostic buffers: error histories with repeated errors, the Performance timeline, telemetry queues; (6) finished traces, streams and uploads that still own their buffers; (7) React state holding dead UI: effect cleanups capturing detached DOM, registries keyed to unmounted fibers; (8) React lists: rendered items vs virtualized shells and per-item child counts; (9) the largest class by self size, and heap numbers, grouped by holder `Class.edge`, then shape clusters (constructor plus property set, ≥ 50 instances) ranked by what cutting every instance frees, with closures per instance — the bottom-up cost of many small records; (10) async flags and Node.js server flags, including vm realms held per cache key and scripts loaded but never evaluated; (11) with 2+ snapshots (`paths`, or several resident): same-id objects that grew at every rung and growth anchors; (12) a ready-to-paste memlab_residual call that cuts the top leads, to look at the long tail. ' +
       'Each lead is one line or row with @id, holder, bytes, why, and the tool to drill with. Leads are not verdicts: a single snapshot shows standing sizes, not rates. About 15 KB by default; `detail:"full"` raises every cap (about 34 KB). Section timings are in the footer. Each section has its own scan budget, scaled to the snapshot size (`timeout_ms` overrides it); a section that runs out is listed as skipped and the others still report.',
     {
       paths: z
@@ -821,6 +823,9 @@ export function registerSweep(server: McpServer): void {
             laterSections(s, caps, leads, 'lists'),
           )),
           ...(await timed('classes', () => classByHolder(s, caps))),
+          ...(await timed('shapes', () =>
+            shapeClustersSection(s, caps.shapes),
+          )),
           ...(await timed('async', () => asyncAndNode(s, env, leads))),
         ];
         if (rungs.length > 0) {
