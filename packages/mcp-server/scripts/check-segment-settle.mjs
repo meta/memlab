@@ -35,7 +35,7 @@ if (!fs.existsSync(path.join(dist, 'run-manifest.js'))) {
 const {loadRunManifest, ladderSegments, settleRungForSegment} = await import(
   pathToFileURL(path.join(dist, 'run-manifest.js')).href
 );
-const {segmentSettlePlan} = await import(
+const {registerSettleCheck, segmentSettlePlan} = await import(
   pathToFileURL(path.join(dist, 'tools', 'settle-check.js')).href
 );
 
@@ -112,4 +112,49 @@ test('an unsplit run keeps its one settle rung and no per-segment plan', () => {
     /rung_99_settle/,
   );
   assert.equal(segmentSettlePlan(dir), null);
+});
+
+test('with no settle rung at all, the note does not point at another segment', () => {
+  const dir = abRun({offSettle: false});
+  const run = JSON.parse(fs.readFileSync(path.join(dir, 'run.json'), 'utf8'));
+  delete run.settle_rung;
+  fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify(run));
+  const m = loadRunManifest(dir);
+  for (const seg of ladderSegments(m)) {
+    const {note, path: p} = settleRungForSegment(m, seg, 2);
+    assert.equal(p, null);
+    assert.match(note, /the round captured no settle rung/);
+    assert.doesNotMatch(note, /segment 1's|no segment/);
+  }
+});
+
+test('an earlier arm is told the settle rung is in a later segment', () => {
+  const dir = abRun({offSettle: false});
+  const m = loadRunManifest(dir);
+  const {note} = settleRungForSegment(m, ladderSegments(m)[0], 2);
+  assert.match(note, /in a later segment's isolate, after a reload/);
+});
+
+test('a segment whose rungs cannot be loaded does not fail the others', async () => {
+  // As the server sets it: a bad snapshot throws instead of exiting.
+  const {default: memlabCore} = await import('@memlab/core');
+  memlabCore.config.errorHandling = memlabCore.ErrorHandling.Throw;
+  const dir = abRun({offSettle: true});
+  let handler;
+  registerSettleCheck({
+    tool: (_name, _description, _schema, cb) => {
+      handler = cb;
+    },
+  });
+  const result = await handler({
+    run_dir: dir,
+    limit: 25,
+    min_growth: 100,
+    trace_held: false,
+    trace_sample: 40,
+  });
+  assert.notEqual(result.isError, true);
+  const text = result.content.map(c => c.text ?? '').join('\n');
+  assert.match(text, /### Segment 0 \(OFF arm\)[\s\S]*Not adjudicated/);
+  assert.match(text, /### Segment 1 \(ON arm\)[\s\S]*Not adjudicated/);
 });

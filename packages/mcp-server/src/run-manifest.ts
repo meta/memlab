@@ -467,9 +467,17 @@ export function settleRungForSegment(
           : isLast,
   );
   if (inside != null) return {path: inside.path, note: null};
+  const where =
+    manifest.settleRungs.length === 0
+      ? 'the round captured no settle rung'
+      : manifest.settleRungs.some(
+            r => r.afterRung != null && r.afterRung > segment.lastRung,
+          )
+        ? "the round's settle rung was captured in a later segment's isolate, after a reload"
+        : "the round's settle rungs belong to other segments' isolates";
   return {
     path: null,
-    note: `segment ${segment.index} (rungs ${segment.firstRung}-${segment.lastRung}) has no settle rung of its own, so it is NOT adjudicated: the round's settle rung was captured in ${isLast ? 'no segment' : `segment ${segmentCount - 1}`}'s isolate, after a reload.`,
+    note: `segment ${segment.index} (rungs ${segment.firstRung}-${segment.lastRung}) has no settle rung of its own, so it is NOT adjudicated: ${where}.`,
   };
 }
 

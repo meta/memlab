@@ -582,12 +582,15 @@ export function registerSettleCheck(server: McpServer): void {
           // and reported the weaker "ranks reclamation, not leaks" wording on
           // the path that actually had the stronger evidence.
           const hasBaseline = baseHist != null;
-          const baselineLabel =
-            baseline_handle ?? "the run dir's baseline rung";
+          const baselineLabel = baseline_handle ?? 'the baseline rung';
 
           if (rows.length === 0) {
             return [
-              `No class grew by at least ${formatNumber(min_growth)} between ${hasBaseline ? baselineLabel : '(no baseline)'} and ${busy_handle ?? 'the last driven rung'}. Lower min_growth, or check that the rungs are in the right order (busy, then settled).`,
+              title,
+              '',
+              source,
+              '',
+              `No class grew by at least ${formatNumber(min_growth)} between ${hasBaseline ? baselineLabel : '(no baseline)'} and ${busy_handle ?? 'the busy rung'}. Lower min_growth, or check that the rungs are in the right order (busy, then settled).`,
             ];
           }
 
@@ -821,33 +824,44 @@ export function registerSettleCheck(server: McpServer): void {
                 out.push('', title, '', `**Not adjudicated.** ${p.note ?? ''}`);
                 continue;
               }
-              const busyH = await withSnapshotAt(p.busyPath, async snap =>
-                hist(snap, p.busyPath),
-              );
-              const settledH = await withSnapshotAt(p.settledPath, async snap =>
-                hist(snap, p.settledPath as string),
-              );
-              const baseH =
-                p.baselinePath != null
-                  ? await withSnapshotAt(p.baselinePath, async snap =>
-                      hist(snap, p.baselinePath as string),
-                    )
-                  : null;
-              out.push(
-                '',
-                ...(await analyzePair(
-                  busyH,
-                  settledH,
-                  baseH,
-                  `busy   : ${path.basename(p.busyPath)}\nsettled: ${path.basename(p.settledPath)}` +
-                    (p.baselinePath != null
-                      ? `\nbaseline: ${path.basename(p.baselinePath)}`
-                      : ''),
-                  p.cycles > 0 ? p.cycles : null,
-                  p.settledPath,
+              const settledPath = p.settledPath;
+              // One segment's failed load must not discard the others' verdicts.
+              try {
+                const busyH = await withSnapshotAt(p.busyPath, async snap =>
+                  hist(snap, p.busyPath),
+                );
+                const settledH = await withSnapshotAt(settledPath, async snap =>
+                  hist(snap, settledPath),
+                );
+                const baseH =
+                  p.baselinePath != null
+                    ? await withSnapshotAt(p.baselinePath, async snap =>
+                        hist(snap, p.baselinePath as string),
+                      )
+                    : null;
+                out.push(
+                  '',
+                  ...(await analyzePair(
+                    busyH,
+                    settledH,
+                    baseH,
+                    `busy   : ${path.basename(p.busyPath)}\nsettled: ${path.basename(settledPath)}` +
+                      (p.baselinePath != null
+                        ? `\nbaseline: ${path.basename(p.baselinePath)}`
+                        : ''),
+                    p.cycles > 0 ? p.cycles : null,
+                    settledPath,
+                    title,
+                  )),
+                );
+              } catch (e) {
+                out.push(
+                  '',
                   title,
-                )),
-              );
+                  '',
+                  `**Not adjudicated.** It could not be scored: ${e instanceof Error ? e.message : String(e)}`,
+                );
+              }
             }
             const excludedLine = exclusionLine();
             if (excludedLine !== '') out.splice(4, 0, excludedLine.trim());
