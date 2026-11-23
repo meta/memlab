@@ -97,6 +97,11 @@ is at least 25% larger than any scanned so far.
   since …" line; the verdict always shows. The audit also names each recorded
   fix whose `fixed_behind` flag the build doesn't serve, because that round
   ran without the fix.
+- The audit verdict is about the round, not the sweep. An environment caveat
+  the previous round already had (the same unserved-flag list, a warm isolate)
+  is marked "unchanged since rN" and doesn't make the round CAVEATED. In an
+  A/B round, the reload between the two arms is expected: each arm must be
+  continuous and have at least 2 rungs.
 - `memlab_hypothesis({run_dir, predicates, watch: true})` keeps predicates for
   the rest of the sweep. Every later battery checks them again and names any
   whose PASS or FAIL changed since the previous round. `unwatch: [label]`

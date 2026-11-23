@@ -13,7 +13,7 @@ import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {z} from 'zod';
 import fs from 'fs';
 import path from 'path';
-import {auditManifest} from './round-audit.js';
+import {auditManifest, withStanding} from './round-audit.js';
 import {rungMetricsSection} from '../rung-metrics.js';
 import {
   errorResult,
@@ -372,7 +372,7 @@ export function registerRoundDigest(server: McpServer): void {
           return toolResult(docMarkdown(roundFacts(dir, manifest), prev));
         }
 
-        const audit = auditManifest(manifest);
+        const audit = withStanding(dir, manifest, auditManifest(manifest));
         const rungs = manifest.rungs ?? [];
         const splits = manifest.ladder_splits_after_rung ?? [];
 
@@ -601,7 +601,7 @@ function appDeltaOf(dir: string, tool: string): string | null {
 }
 
 function roundFacts(dir: string, m: RunManifest): RoundFacts {
-  const audit = auditManifest(m);
+  const audit = withStanding(dir, m, auditManifest(m));
   const rungs = m.rungs ?? [];
   const first = rungs[0]?.post_gc_heap_mb;
   const last = rungs[rungs.length - 1]?.post_gc_heap_mb;

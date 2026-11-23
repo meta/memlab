@@ -88,6 +88,17 @@ interface RunManifest {
   stop_reason?: string;
   /** `dev_build: false` is a production-like (minified, __DEV__=0) round. */
   environment?: {dev_build?: boolean | null};
+  /** An A/B round's arms (hunt_runner --ab): rung indices and cycles per arm. */
+  ab?: {
+    off?: AbArmRecord;
+    on?: AbArmRecord;
+  } | null;
+}
+
+interface AbArmRecord {
+  prop?: string;
+  rungs?: number[];
+  cycles?: number;
 }
 
 const MIN_ANALYZABLE_RUNGS = 3;
@@ -152,23 +163,37 @@ export function auditManifest(
   );
 
   const splits = m.ladder_splits_after_rung ?? [];
-  const restarted = rungs.filter(r => r.isolate_restarted).length;
+  const boundary = abBoundary(m);
+  // The reload between an A/B round's arms is the one the A/B requires, not a
+  // defect: judged as one ladder, every A/B round was UNTRUSTWORTHY.
+  const strays = splits.filter(s => !boundary?.explainsSplit(s));
+  const restarted = rungs.filter(
+    r => r.isolate_restarted && !boundary?.explainsRestart(r.index),
+  ).length;
   checks.push(
-    splits.length === 0 && restarted === 0
+    strays.length === 0 && restarted === 0
       ? {
           name: 'ladder continuity',
           status: 'ok',
-          detail: 'One isolate throughout — all rungs are comparable.',
+          detail:
+            boundary != null
+              ? `${splits.length > 0 ? '2 segments' : 'One isolate'} (A/B arms: OFF rungs ${boundary.off}, ON rungs ${boundary.on})` +
+                `${splits.length > 0 ? ', each continuous. The reload between them is the one the A/B makes' : ''}. ` +
+                'Compare the arms by rate (`memlab_ab_compare`), not by a delta across the boundary.'
+              : 'One isolate throughout — all rungs are comparable.',
         }
       : {
           name: 'ladder continuity',
           status: 'blocking',
           detail:
-            `The page reloaded after rung(s) ${splits.join(', ')} (${restarted} rung(s) flagged). ` +
-            'Rungs across that boundary are DIFFERENT V8 isolates. Any delta spanning it is ' +
+            `The page reloaded after rung(s) ${strays.join(', ')} (${restarted} rung(s) flagged)` +
+            (boundary != null ? ', inside an A/B arm' : '') +
+            '. Rungs across that boundary are DIFFERENT V8 isolates. Any delta spanning it is ' +
             'meaningless — analyze each segment on its own, or re-drive.',
         },
   );
+  const armCheck = abArmCheck(m);
+  if (armCheck != null) checks.push(armCheck);
 
   const steps = m.steps ?? {};
   const stepNames = Object.keys(steps);
@@ -526,7 +551,9 @@ export function auditManifest(
     });
   }
 
-  const caveats = m.caveats ?? [];
+  const caveats = (m.caveats ?? []).filter(
+    c => boundary == null || !boundary.explainsCaveat(c),
+  );
   if (caveats.length > 0) {
     checks.push({
       name: 'recorded caveats',
@@ -535,12 +562,213 @@ export function auditManifest(
     });
   }
 
-  const verdict = checks.some(c => c.status === 'blocking')
+  return {checks, verdict: verdictOf(checks)};
+}
+
+export type Verdict = 'TRUSTWORTHY' | 'CAVEATED' | 'UNTRUSTWORTHY';
+
+export function verdictOf(checks: readonly AuditCheck[]): Verdict {
+  return checks.some(c => c.status === 'blocking')
     ? 'UNTRUSTWORTHY'
     : checks.some(c => c.status === 'caveat')
       ? 'CAVEATED'
       : 'TRUSTWORTHY';
-  return {checks, verdict};
+}
+
+function abArms(
+  m: RunManifest,
+): {off: AbArmRecord | null; on: AbArmRecord | null} | null {
+  const ab = m.ab;
+  if (ab == null || typeof ab !== 'object') return null;
+  if (ab.off == null && ab.on == null) return null;
+  return {off: ab.off ?? null, on: ab.on ?? null};
+}
+
+const span = (xs: number[]): string =>
+  xs.length === 0 ? 'none' : `${Math.min(...xs)}–${Math.max(...xs)}`;
+
+/** Where an A/B round's arms meet, when both arms recorded rungs. */
+function abBoundary(m: RunManifest): {
+  off: string;
+  on: string;
+  explainsSplit(after: number): boolean;
+  explainsRestart(index: number | undefined): boolean;
+  explainsCaveat(caveat: string): boolean;
+} | null {
+  const arms = abArms(m);
+  const off = arms?.off?.rungs ?? [];
+  const on = arms?.on?.rungs ?? [];
+  if (off.length === 0 || on.length === 0) return null;
+  const last = Math.max(...off);
+  const first = Math.min(...on);
+  if (last >= first) return null;
+  const explainsSplit = (after: number): boolean =>
+    after >= last && after < first;
+  return {
+    off: span(off),
+    on: span(on),
+    explainsSplit,
+    explainsRestart: index => index != null && index > last && index <= first,
+    // The runner's own note about the same reload.
+    explainsCaveat: c => {
+      const hit = /^LADDER SPLIT: .*between rung (\d+) and rung (\d+)/.exec(c);
+      return hit != null && explainsSplit(Number(hit[1]));
+    },
+  };
+}
+
+const MIN_ARM_RUNGS = 2;
+
+/** An A/B round is only as good as its weaker arm. */
+function abArmCheck(m: RunManifest): AuditCheck | null {
+  const arms = abArms(m);
+  if (arms == null) return null;
+  const broken: string[] = [];
+  const parts: string[] = [];
+  for (const name of ['off', 'on'] as const) {
+    const arm = arms[name];
+    const n = arm?.rungs?.length ?? 0;
+    const cycles = arm?.cycles;
+    if (arm == null) {
+      broken.push(`${name.toUpperCase()} never ran`);
+      continue;
+    }
+    parts.push(
+      `${name.toUpperCase()} ${n} rung(s)${cycles != null ? `, ${formatNumber(cycles)} cycles` : ''}`,
+    );
+    if (cycles === 0) broken.push(`${name.toUpperCase()} drove 0 cycles`);
+    else if (n < MIN_ARM_RUNGS)
+      broken.push(`${name.toUpperCase()} has ${n} rung(s)`);
+  }
+  return broken.length > 0
+    ? {
+        name: 'A/B arms',
+        status: 'blocking',
+        detail:
+          `${broken.join('; ')}. An arm needs ${MIN_ARM_RUNGS}+ rungs to have a rate, so there is ` +
+          'nothing to compare the other arm against. Re-drive the A/B.',
+      }
+    : {
+        name: 'A/B arms',
+        status: 'ok',
+        detail: `Both arms driven: ${parts.join('; ')}.`,
+      };
+}
+
+/**
+ * Checks that a caveat from the sweep's environment rather than the round can
+ * trip. The same dead-props list and the same warm-isolate note made every
+ * round of a sweep CAVEATED, so the verdict said nothing about the round.
+ */
+const STANDING_ELIGIBLE = new Set([
+  'baseline isolate age',
+  'gating',
+  'prod-like build',
+]);
+
+export interface StandingResult {
+  checks: AuditCheck[];
+  verdict: Verdict;
+  /** Recorded caveats unchanged since an earlier round, with that round. */
+  standingCaveats: Array<{text: string; since: string}>;
+  roundCaveats: string[];
+}
+
+/** Earlier rounds of the same sweep: sibling directories with a run.json. */
+function earlierRounds(runDir: string, maxBack = 50): string[] {
+  const parent = path.dirname(path.resolve(runDir));
+  const self = path.basename(path.resolve(runDir));
+  let names: string[];
+  try {
+    names = fs
+      .readdirSync(parent)
+      .filter(n => fs.existsSync(path.join(parent, n, 'run.json')));
+  } catch {
+    return [];
+  }
+  names.sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  const at = names.indexOf(self);
+  if (at <= 0) return [];
+  return names
+    .slice(Math.max(0, at - maxBack), at)
+    .reverse()
+    .map(n => path.join(parent, n));
+}
+
+/**
+ * Re-adjudicate `audit` against the sweep's earlier rounds: an environment
+ * caveat the previous round already had (same check, same status; or the same
+ * recorded caveat text) is reported once as standing, "unchanged since rN",
+ * and no longer decides this round's verdict.
+ */
+export function withStanding(
+  runDir: string,
+  m: RunManifest,
+  audit: {checks: AuditCheck[]},
+): StandingResult {
+  const boundary = abBoundary(m);
+  const own = [...new Set(m.caveats ?? [])].filter(
+    c => boundary == null || !boundary.explainsCaveat(c),
+  );
+  const checkSince = new Map<string, string>();
+  const caveatSince = new Map<string, string>();
+  let openChecks = new Set(
+    audit.checks
+      .filter(c => c.status === 'caveat' && STANDING_ELIGIBLE.has(c.name))
+      .map(c => c.name),
+  );
+  let openCaveats = new Set(own);
+  for (const dir of earlierRounds(runDir)) {
+    if (openChecks.size === 0 && openCaveats.size === 0) break;
+    let prev: RunManifest;
+    try {
+      prev = JSON.parse(
+        fs.readFileSync(path.join(dir, 'run.json'), 'utf8'),
+      ) as RunManifest;
+    } catch {
+      break;
+    }
+    const label = prev.run_id ?? path.basename(dir);
+    const prevChecks = new Set(
+      auditManifest(prev)
+        .checks.filter(c => c.status === 'caveat')
+        .map(c => c.name),
+    );
+    const prevCaveats = new Set(prev.caveats ?? []);
+    openChecks = new Set([...openChecks].filter(n => prevChecks.has(n)));
+    openCaveats = new Set([...openCaveats].filter(c => prevCaveats.has(c)));
+    for (const n of openChecks) checkSince.set(n, label);
+    for (const c of openCaveats) caveatSince.set(c, label);
+  }
+  const roundCaveats = own.filter(c => !caveatSince.has(c));
+  const standingCaveats = own
+    .filter(c => caveatSince.has(c))
+    .map(text => ({text, since: caveatSince.get(text) as string}));
+  const checks = audit.checks.map((c): AuditCheck => {
+    const since = checkSince.get(c.name);
+    if (since != null) {
+      return {
+        ...c,
+        status: 'info',
+        detail: `${c.detail} _Standing: unchanged since ${since}, so it does not decide this round's verdict._`,
+      };
+    }
+    if (c.name === 'recorded caveats' && standingCaveats.length > 0) {
+      const since = [...new Set(standingCaveats.map(s => s.since))].join(', ');
+      return roundCaveats.length === 0
+        ? {
+            ...c,
+            status: 'info',
+            detail: `${standingCaveats.length} caveat(s) recorded by the runner, all unchanged since ${since} — standing, so they do not decide this round's verdict.`,
+          }
+        : {
+            ...c,
+            detail: `${roundCaveats.length} caveat(s) specific to this round — read them before concluding (${standingCaveats.length} more unchanged since ${since}).`,
+          };
+    }
+    return c;
+  });
+  return {checks, verdict: verdictOf(checks), standingCaveats, roundCaveats};
 }
 
 const ICON: Record<CheckStatus, string> = {
@@ -702,7 +930,12 @@ export function registerRoundAudit(server: McpServer): void {
             );
           }
         }
-        const {checks, verdict} = auditManifest(manifest, external);
+        const standing = withStanding(
+          path.dirname(manifestPath),
+          manifest,
+          auditManifest(manifest, external),
+        );
+        const {checks} = standing;
         const gated = gatedFixes(path.dirname(manifestPath));
         const fixGates =
           gated.error != null
@@ -713,6 +946,7 @@ export function registerRoundAudit(server: McpServer): void {
               }
             : fixGateCheck(manifest, gated.fixes);
         if (fixGates != null) checks.push(fixGates);
+        const verdict = verdictOf(checks);
 
         const lines: string[] = [
           `## Round audit — \`${manifest.run_id ?? path.basename(path.dirname(manifestPath))}\``,
@@ -741,9 +975,15 @@ export function registerRoundAudit(server: McpServer): void {
               'replication (`memlab_replicate`) and retainer evidence are separate questions.',
           );
         }
-        if ((manifest.caveats ?? []).length > 0) {
+        if (standing.roundCaveats.length > 0) {
           lines.push('', '### Caveats recorded by the runner', '');
-          for (const c of new Set(manifest.caveats ?? [])) lines.push(`- ${c}`);
+          for (const c of standing.roundCaveats) lines.push(`- ${c}`);
+        }
+        if (standing.standingCaveats.length > 0) {
+          lines.push('', '### Standing caveats (not this round)', '');
+          for (const c of standing.standingCaveats) {
+            lines.push(`- ${c.text} _(unchanged since ${c.since})_`);
+          }
         }
         // Printed verbatim, like the caveats. The check above tells the reader
         // there are N observations to resolve; without the text it is an
