@@ -595,34 +595,40 @@ export function clearAllSnapshots(): void {
  * derived from the file name and may have been disambiguated.
  */
 export function findResidentByPath(filePath: string): SnapshotMetadata | null {
-  const hit = residentByPath(filePath);
-  if (hit == null || hit.fileStat == null) return hit;
-  // A rung file rewritten since it was parsed (a round re-driven into the
-  // same directory) is a different capture under the same name.
-  const now = statOrNull(hit.filePath);
-  if (
-    now != null &&
-    (now.size !== hit.fileStat.size || now.mtimeMs !== hit.fileStat.mtimeMs) &&
-    isCachedHandle(hit.handle) &&
-    !pinned.has(hit.handle)
-  ) {
-    removeSnapshot(hit.handle);
-    return null;
+  for (const hit of residentsByPath(filePath)) {
+    if (hit.fileStat == null) return hit;
+    const now = statOrNull(hit.filePath);
+    if (
+      now == null ||
+      (now.size === hit.fileStat.size && now.mtimeMs === hit.fileStat.mtimeMs)
+    ) {
+      return hit;
+    }
+    // A file rewritten since it was parsed (a round re-driven into the same
+    // directory) is a different capture under the same name. A cached rung
+    // is dropped; a snapshot the user loaded stays, but is not served.
+    if (isCachedHandle(hit.handle) && !pinned.has(hit.handle)) {
+      removeSnapshot(hit.handle);
+    }
   }
-  return hit;
+  return null;
 }
 
-function residentByPath(filePath: string): SnapshotMetadata | null {
+function* residentsByPath(filePath: string): Generator<SnapshotMetadata> {
   for (const {metadata} of loaded.values()) {
-    if (metadata.filePath === filePath) return metadata;
+    if (metadata.filePath === filePath) yield metadata;
   }
   // The same file through a relative path or a symlink.
   const real = realPathOrNull(filePath);
-  if (real == null) return null;
+  if (real == null) return;
   for (const {metadata} of loaded.values()) {
-    if (realPathOrNull(metadata.filePath) === real) return metadata;
+    if (
+      metadata.filePath !== filePath &&
+      realPathOrNull(metadata.filePath) === real
+    ) {
+      yield metadata;
+    }
   }
-  return null;
 }
 
 function statOrNull(filePath: string): {size: number; mtimeMs: number} | null {

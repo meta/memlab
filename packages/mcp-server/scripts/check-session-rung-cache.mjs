@@ -11,7 +11,8 @@
 /**
  * Unit tests for the session rung cache bookkeeping (heap-state.ts): cached
  * rungs are found by path but not listed as resident, a rewritten file is
- * not served from the cache, and a cached rung the user switches to is theirs.
+ * not served from the cache or from a load, and a cached rung the user
+ * switches to is theirs.
  *
  *   npm run build-pkg && npm run test-units
  *
@@ -79,6 +80,17 @@ test('a rewritten rung file is not served from the cache', () => {
   fs.writeFileSync(rung, 'a different, longer capture');
   assert.equal(hs.findResidentByPath(rung), null);
   assert.equal(hs.getMetadataByHandle(b.handle), null);
+});
+
+test('a loaded snapshot whose file was rewritten is kept, not served', () => {
+  hs.clearAllSnapshots();
+  const rung = file('after.heapsnapshot');
+  const a = hs.setSnapshot({}, rung, meta('after'));
+  fs.writeFileSync(rung, 'the capture taken after the fix');
+  assert.equal(hs.findResidentByPath(rung), null);
+  assert.equal(hs.getMetadataByHandle(a.handle)?.handle, a.handle);
+  const b = hs.setSnapshot({}, rung, meta('after'), {replace: false});
+  assert.equal(hs.findResidentByPath(rung)?.handle, b.handle);
 });
 
 test('switching to a cached rung makes it a listed snapshot', () => {
