@@ -49,7 +49,8 @@ export interface Registration {
   kind: 'emitter' | 'set' | 'dom';
 }
 
-const NOT_A_SUBSCRIBER = /^(undefined|null|true|false|the_hole|system \/ )/;
+const NOT_A_SUBSCRIBER =
+  /^(?:(?:undefined|null|true|false|the_hole)(?![\w$])|system \/ )/;
 
 /** A context that is a real object, else 0 (an `undefined` context is none). */
 function subscriberId(snapshot: IHeapSnapshot, id: number): number {
@@ -224,7 +225,7 @@ export function collectRegistrations(snapshot: IHeapSnapshot): Registration[] {
             cb = e.toNode;
           } else if (CONTEXT_PROPS.has(p)) ctx = e.toNode.id;
         }
-        if (cb == null) return;
+        if (cb == null) continue;
         regs.push([ctx, cb]);
       }
       const owner = ownerLabel(node);
@@ -271,6 +272,7 @@ export function duplicateGroups(regs: readonly Registration[]): {
     codeLabel: string;
     registrations: number;
     subscribers: number;
+    subs: ReadonlySet<number>;
   }>;
 } {
   const byKey = new Map<string, DuplicateGroup & {ids: Set<number>}>();
@@ -333,7 +335,7 @@ export function duplicateGroups(regs: readonly Registration[]): {
     )
     .sort((a, b) => b.registrations - a.registrations);
   const perCode = [...byCode.values()]
-    .map(({subs, ...c}) => ({...c, subscribers: subs.size}))
+    .map(c => ({...c, subscribers: c.subs.size}))
     .sort((a, b) => b.registrations - a.registrations);
   return {duplicates, perCode};
 }
@@ -456,17 +458,25 @@ export function registerDuplicateSubscriptions(server: McpServer): void {
             event: string;
             codeLabel: string;
             registrations: number;
-            subscribers: number;
+            subs: Set<number>;
             stores: number;
           }
         >();
         for (const c of perCode) {
           const k = `${c.store}\u0000${c.event}\u0000${c.codeLabel}`;
           const f = folded.get(k);
-          if (f == null) folded.set(k, {...c, stores: 1});
-          else {
+          if (f == null) {
+            folded.set(k, {
+              store: c.store,
+              event: c.event,
+              codeLabel: c.codeLabel,
+              registrations: c.registrations,
+              subs: new Set(c.subs),
+              stores: 1,
+            });
+          } else {
             f.registrations += c.registrations;
-            f.subscribers += c.subscribers;
+            for (const sub of c.subs) f.subs.add(sub);
             f.stores++;
           }
         }
@@ -486,7 +496,7 @@ export function registerDuplicateSubscriptions(server: McpServer): void {
                 c.event === '' ? '—' : `\`${c.event}\``,
                 `\`${c.codeLabel}\``,
                 formatNumber(c.registrations),
-                formatNumber(c.subscribers),
+                formatNumber(c.subs.size),
               ]),
               new Set([3, 4]),
             ),

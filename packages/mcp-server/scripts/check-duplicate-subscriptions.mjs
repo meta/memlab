@@ -315,3 +315,42 @@ test('growth includes registrations spread across one-listener events and Sets',
     /Subject\.listeners` \| — \| `onChange` \| 1 \| 2 \| \+1 \|/,
   );
 });
+
+test('a Set element with no callback is skipped, not the whole Set', () => {
+  const g = graph();
+  g.listenerSet([g.callback(), g.callback(), g.node('Handler')]);
+  const regs = collectRegistrations(g.snapshot);
+  assert.equal(regs.filter(r => r.kind === 'set').length, 2);
+});
+
+test('a subscriber whose class name starts with an oddball name is kept', () => {
+  const g = graph();
+  const sub = g.node('trueRouteListener');
+  const record = g.node('Subscription');
+  g.edge(record, 'callback', g.callback());
+  g.edge(record, 'context', sub);
+  g.registry([record]);
+  const regs = collectRegistrations(g.snapshot).filter(
+    r => r.event === 'change',
+  );
+  assert.deepEqual(
+    regs.map(r => r.subscriber),
+    [sub.id],
+  );
+});
+
+test('folded stores count a subscriber on several of them once', async () => {
+  const g = graph();
+  const sub = g.node('View');
+  for (let i = 0; i < 25; i++) {
+    const record = g.node('Subscription');
+    g.edge(record, 'callback', g.callback());
+    g.edge(record, 'context', sub);
+    g.registry([record]);
+  }
+  const text = (await render([g.snapshot])).replace(/ +/g, ' ');
+  assert.match(
+    text,
+    /Collection\._events` ×25 stores\s*\| `change` \| `onChange` \| 25 \| 1 \|/,
+  );
+});
