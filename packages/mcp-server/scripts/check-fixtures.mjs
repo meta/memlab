@@ -649,6 +649,50 @@ await shapeCheck(
 );
 
 await shapeCheck(
+  'eval helpers: newest takes ids, nodes or a predicate and returns ids',
+  async () => {
+    const {text} = await call('memlab_eval', {
+      code: [
+        "const ids = helpers.byClass('FixtureWidget', {type: 'object'});",
+        'result = {',
+        '  fromIds: helpers.newest(ids, 2),',
+        "  fromNodes: helpers.newest(helpers.iterByClass('FixtureWidget'), 2),",
+        "  fromPred: helpers.newest(n => n.name === 'FixtureWidget' && n.type === 'object', 2),",
+        '};',
+      ].join('\n'),
+    });
+    const json = JSON.parse(text.match(/^\{[\s\S]*?^\}$/m)[0]);
+    assert(
+      Array.isArray(json.fromPred) &&
+        json.fromPred.length === 2 &&
+        JSON.stringify(json.fromPred) === JSON.stringify(json.fromIds) &&
+        JSON.stringify(json.fromNodes) === JSON.stringify(json.fromIds),
+      `newest: ${text.slice(0, 300)}`,
+    );
+    const refusal = await call('memlab_eval', {
+      code: "result = helpers.pathAll(helpers.byClass('FixtureWidget'), 'x').map(n => n);",
+    }).then(
+      r => r.text,
+      err => String(err),
+    );
+    assert(
+      /Refused before the scan[\s\S]*`pathAll` returns object \{ids, hops\}/.test(
+        refusal,
+      ),
+      `refusal: ${refusal.slice(0, 300)}`,
+    );
+    const env = await call('memlab_eval', {
+      mode: 'describe_env',
+      section: 'return shapes',
+    });
+    assert(
+      /ids\[\]: .*`newest`/.test(env.text),
+      `describe_env: ${env.text.slice(0, 300)}`,
+    );
+  },
+);
+
+await shapeCheck(
   'eval helpers: a node works where an id is expected',
   async () => {
     const {text} = await call('memlab_eval', {

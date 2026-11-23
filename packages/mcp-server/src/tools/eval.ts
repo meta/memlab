@@ -1742,7 +1742,7 @@ export function registerEval(server: McpServer): void {
             'moduleSource(name, {maxLen?})->[{script, offset, kind, length, source}] (the module\'s served source: the `__d("<name>"` span of every script that defines it, or a script whose URL names it; `source` is capped at maxLen, default 20000 — the in-eval form of memlab_module_source, for reading a declaration or a call site next to a heap query), ' +
             "moduleExportProp(moduleName, prop, {class?})->id|null (an export property, else a top-level variable named prop, else — with class, e.g. {class:'Map'} — the module's ONLY top-level variable of that class: the minification-safe way to reach a module-level cache), " +
             'minified()->{minified, shortNameShare, namedClosures} (is this a minified bundle? name-based lookups read 0 there), ' +
-            "newest(ids, n=10)->ids[] & ageRank(nodeOrId)->0..1|null & maxObjectId()->id (by heap-object id, the odd ids V8 hands out in increasing order: larger = first seen later by the heap profiler; SAME ISOLATE ONLY — ids from another tab or a reload mean nothing; between two rungs, ids above the earlier rung's maxObjectId() were allocated since it; native/synthetic nodes have even ids with no age and are skipped), " +
+            "newest(ids | nodes | predicate, n=10)->ids[] & ageRank(nodeOrId)->0..1|null & maxObjectId()->id (by heap-object id, the odd ids V8 hands out in increasing order: larger = first seen later by the heap profiler; SAME ISOLATE ONLY — ids from another tab or a reload mean nothing; between two rungs, ids above the earlier rung's maxObjectId() were allocated since it; native/synthetic nodes have even ids with no age and are skipped), " +
             'stringsBySize({minLen=1000, limit=1000})->[{id, length}] (flat string nodes longest first, from an index built once per snapshot; Node.js snapshots truncate string contents at 1024 characters), ' +
             'scripts({match?})->[{id, url, sourceId, length}] (every script and its source string, longest first; read one with stringValue(sourceId, {maxLen}) — a source search over these does not scan every string node), ' +
             'stringsWithPrefix(prefix, {limit?})->ids[] (string nodes whose value starts with prefix, e.g. "blob:"; bucketed once per snapshot, so repeated prefix questions do not re-walk the heap — for a per-rung COUNT across a ladder, `memlab_string_prefix_census` answers from the sidecar index without loading at all), ' +
@@ -2674,12 +2674,28 @@ export async function runEval({
       }
       return sorted;
     };
-    const newest = (ids: Array<number | {id: number}>, n = 10): number[] =>
-      ids
-        .map(x => (typeof x === 'number' ? x : x.id))
-        .filter(isObjectId)
-        .sort((a, b) => b - a)
-        .slice(0, n);
+    // Ids, nodes, any iterable of them, or a node predicate (every node
+    // matching it). Always an id array: a non-array return made the next
+    // `.map` throw after a full load.
+    const newest = (
+      ids: Iterable<number | {id: number}> | ((node: IHeapNode) => boolean),
+      n = 10,
+    ): number[] => {
+      const all: number[] = [];
+      if (typeof ids === 'function') {
+        snapshot.nodes.forEach((node: IHeapNode) => {
+          if (isObjectId(node.id) && ids(wrapNode(node) as IHeapNode)) {
+            all.push(node.id);
+          }
+        });
+      } else {
+        for (const x of ids) {
+          const id = typeof x === 'number' ? x : x?.id;
+          if (typeof id === 'number' && isObjectId(id)) all.push(id);
+        }
+      }
+      return all.sort((a, b) => b - a).slice(0, n);
+    };
     const ageRank = (nodeOrId: number | {id: number}): number | null => {
       const id = typeof nodeOrId === 'number' ? nodeOrId : nodeOrId.id;
       if (!isObjectId(id) || snapshot.getNodeById(id) == null) return null;
@@ -6283,6 +6299,9 @@ function lintEval(code: string): string {
   for (const r of contextTypeRefusal(stripComments(code))) {
     lines.push(`- ❌ ${r}`);
   }
+  for (const r of arrayMethodMisuse(stripComments(code))) {
+    lines.push(`- ❌ ${r}`);
+  }
 
   lines.push(
     '',
@@ -6342,6 +6361,7 @@ function lintRefusals(source: string, helperNames: string[]): string[] {
     );
   }
   out.push(...contextTypeRefusal(code));
+  out.push(...arrayMethodMisuse(code));
   return out;
 }
 
@@ -6420,6 +6440,99 @@ function describeEnv(section?: string): string {
   ].join('\n');
 }
 
+/**
+ * What each collection helper returns, for `describe_env` and for the lint
+ * that flags an array method on a helper that does not return an array.
+ * `ids[]` is `number[]`; `nodes[]` holds node objects; `rows[]` holds plain
+ * objects. Every other value is named as it is.
+ */
+export const HELPER_RETURNS: Readonly<Record<string, string>> = {
+  byClass: 'ids[]',
+  byTypename: 'ids[]',
+  byShape: 'ids[]',
+  withProp: 'ids[]',
+  byEdgeName: 'ids[]',
+  byReferrerEdge: 'ids[]',
+  targets: 'ids[]',
+  byContextSlot: 'ids[]',
+  byContextVar: 'ids[]',
+  stringsWithPrefix: 'ids[]',
+  newest: 'ids[]',
+  detachedElements: 'ids[]',
+  iterByClass: 'nodes[]',
+  nodesByClass: 'nodes[]',
+  iterByType: 'nodes[]',
+  setElementNodes: 'nodes[]',
+  mapEntryNodes: 'rows[] ({keyNode, valueNode})',
+  mapEntries: 'rows[] ({key, value})',
+  setElements: 'rows[] (briefs)',
+  entries: 'rows[] ({key, value})',
+  classCounts: 'rows[]',
+  histogram: 'rows[] ({key, count})',
+  groupCount: 'rows[] ({key, count})',
+  contextSlotCensus: 'rows[]',
+  closureCensus: 'rows[]',
+  listenerRecords: 'rows[]',
+  detachedNamed: 'rows[] ({id, name})',
+  allByEdgeName: 'rows[]',
+  sampleNatives: 'rows[]',
+  memoCacheSlots: 'rows[]',
+  fiberHooks: 'rows[]',
+  sample: 'the same items, as an array',
+  hooks: 'rows[] | null',
+  pathAll: 'object {ids, hops} — use `.ids`',
+  walkChain: 'object {length, terminated, …}',
+  pathBetween: 'object {found, exhausted, path}',
+  aggregateRetained: 'object {retained, exact}',
+  retainedSizes: 'object {id: bytes}',
+  countShapes: 'object {shape: count}',
+  props: 'object',
+  ownProps: 'object',
+  shapeKeys: 'Set<string> — use `.size` / `.has`',
+  module: 'object | null',
+  ctxVars: 'object | null',
+  promiseReactions: 'object | null',
+  owner: 'object',
+  elements: 'object | null',
+  pathTree: 'object',
+  countStrings: 'number',
+  retainedSize: 'number',
+  arrayLen: 'number',
+  len: 'number',
+};
+
+const ARRAY_METHODS =
+  /^\s*\.\s*(map|filter|forEach|reduce|slice|some|every|find|findIndex|flatMap|sort|concat|includes|join|indexOf|length|at)\b/;
+
+/**
+ * `helpers.X(...).map(...)` where X does not return an array: the cheapest
+ * place to catch it is before a load that takes a minute.
+ */
+export function arrayMethodMisuse(code: string): string[] {
+  const out = new Set<string>();
+  const re = /helpers\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+  for (let m = re.exec(code); m != null; m = re.exec(code)) {
+    const shape = HELPER_RETURNS[m[1]];
+    if (shape == null || /\[\]/.test(shape) || shape.startsWith('the same')) {
+      continue;
+    }
+    let depth = 1;
+    let i = m.index + m[0].length;
+    for (; i < code.length && depth > 0; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')') depth--;
+    }
+    const after = ARRAY_METHODS.exec(code.slice(i));
+    // A Set has its own forEach.
+    if (after != null && !(shape.startsWith('Set') && after[1] === 'forEach')) {
+      out.add(
+        `\`helpers.${m[1]}(...).${after[1]}\`: \`${m[1]}\` returns ${shape}, not an array.`,
+      );
+    }
+  }
+  return [...out];
+}
+
 function describeEnvLines(): string[] {
   return [
     '# memlab_eval environment',
@@ -6435,6 +6548,18 @@ function describeEnvLines(): string[] {
     '- `utils` — @memlab/core utils (e.g. `aggregateDominatorMetrics`, `isFiberNode`, `isDetachedDOMNode`).',
     '- `helpers` — `serializeNodeSummary`, `serializeNodeDetail`, `formatBytes`, `formatNumber`, `markdownTable`, `isNodeWorthInspecting`, `filterLargestObjects`, `queryNodes`, `groupReferrersByEdge(nodeId)`, `groupByShape(ids, {limit})`, `topRetainers(ids, {limit})`, `referrerChains(id, {depth, limit})`, `edgeWalk(id, [edge names])`, `groupArrayElementsByProperty(arrayNodeId, prop)`, `isOrphaned(nodeId, ownerEdges[])`, `countUniqueTargets(arrayNodeId, prop)`, `retainedSize(id) -> number`, `retainedSizes(ids[]) -> Record<id, bytes>` (an OBJECT keyed by id, NOT an array — use `sizes[id]` or `Object.values(sizes)`, not `.reduce`/`.map` directly).',
     '- Standard JS built-ins (Array, Object, Map, Set, JSON, Math, RegExp, …). No require/process/fs/network.',
+    '',
+    '## Return shapes',
+    '- Every id lookup returns `ids[]` (a plain `number[]`), every node iteration `nodes[]`, every census `rows[]`; none returns an iterator. The rest are named here: `.map` on one of them is the commonest failed eval.',
+    ...Object.entries(
+      Object.entries(HELPER_RETURNS).reduce<Record<string, string[]>>(
+        (acc, [name, shape]) => {
+          (acc[shape] ??= []).push(`\`${name}\``);
+          return acc;
+        },
+        {},
+      ),
+    ).map(([shape, names]) => `- ${shape}: ${names.join(', ')}`),
     '',
     '## Collection / shape / index helpers (prefer these over hand-rolling)',
     '- `helpers.stringValue(nodeOrId, {maxLen=10000, slices="parent"}) -> string` — text of any string node. Flattens `(concatenated string)` ropes and reads a `(sliced string)` as its whole parent (the snapshot records no slice offset); `slices: "marker"` renders `‹slice›` instead, for grouping. The snapshot keeps only the first 1,024 chars of a flat string, so a longer one comes back cut (with a warning): its `.length` is not the string length, and equal texts are the same string only if `self_size` matches too. `toStringNode().stringValue` returns `<sliced string of @id>` for a slice and throws on a broken rope.',
