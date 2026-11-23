@@ -118,6 +118,9 @@ globalThis.__fixtureModels = [
   new FixtureChat('fixture-u2'),
   new FixtureMsg('fixture-m1'),
   new FixtureMsg('fixture-m1'),
+  // Not given an id yet: not copies of each other.
+  new FixtureMsg(''),
+  new FixtureMsg(''),
 ];
 // Fiber-shaped records: a row whose text lost both of its parameters.
 class FiberNode {
@@ -235,6 +238,11 @@ for (let i = 0; i < 3; i++) {
 globalThis.__fixtureModels.push(
   new FixtureMsg('fixture-m2'),
   new FixtureMsg('fixture-m2'),
+  // An id made of an invisible character must not print as an empty cell.
+  new FixtureMsg('fixture-\u200d'),
+  new FixtureMsg('fixture-\u200d'),
+  new FixtureMsg('fixture-\uf44d'),
+  new FixtureMsg('fixture-\uf44d'),
 );
 globalThis.__fixtureErrors.push(
   new Error('fixture-error id=3'),
@@ -723,6 +731,10 @@ await shapeCheck(
       `top copy: ${text.slice(0, 900)}`,
     );
     assert(
+      /2 record\(s\) with an empty identity are left out/.test(text),
+      `empty identity: ${text.slice(0, 600)}`,
+    );
+    assert(
       /Same id, different model types.*: 2 identit/.test(text) &&
         /`FixtureChat` \+ `FixtureContact` +\| +2 /.test(text),
       `cross-type: ${text.slice(-700)}`,
@@ -740,6 +752,37 @@ await shapeCheck(
       /`FixtureMsg` +\| `fixture-m2` +\| +0 \| +2 \|/.test(ladder.text),
       `absent at the first rung: ${ladder.text.slice(0, 1200)}`,
     );
+    assert(
+      ladder.text.includes('`fixture-\\u{200d}`') &&
+        ladder.text.includes('`fixture-\\u{f44d}`'),
+      `invisible identity escaped: ${ladder.text.slice(0, 1500)}`,
+    );
+  },
+);
+
+await check(
+  'model_duplicates: identity escaping preserves character boundaries',
+  async () => {
+    const {showIdentity} = await import(
+      pathToFileURL(
+        path.join(here, '..', 'dist', 'tools', 'model-duplicates.js'),
+      ).href
+    );
+    for (const n of [
+      0x0, 0x1f, 0x7f, 0x9f, 0xad, 0x34f, 0x61c, 0x115f, 0x1160, 0x17b4, 0x17b5,
+      0x180e, 0x200b, 0x200f, 0x202a, 0x202e, 0x2060, 0x206f, 0x3164, 0xe000,
+      0xf44d, 0xf8ff, 0xfe00, 0xfe0f, 0xfeff, 0xffa0,
+    ]) {
+      const text = `a${String.fromCharCode(n)}b`;
+      assert(
+        showIdentity(text) === `a\\u{${n.toString(16)}}b`,
+        `code point ${n.toString(16)} was not escaped`,
+      );
+    }
+    const visible =
+      'visible \u0020\u007e\u00a0\u034e\u0350\u115e\u1161\u17b3\u17b6\u200a\u2010\u2029\u202f\u205f\u2070\udfff\uf900\ufdff\ufe10\uffa1👍';
+    assert(showIdentity(visible) === visible, 'visible characters changed');
+    assert(showIdentity('') === '', 'empty identity changed');
   },
 );
 

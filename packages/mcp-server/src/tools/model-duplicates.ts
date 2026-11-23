@@ -105,6 +105,8 @@ function retainerTail(node: IHeapNode): string {
 export interface DuplicateReport {
   candidates: number;
   readable: number;
+  /** Records whose identity is the empty string: not given an id yet, so not copies. */
+  emptyIdentity: number;
   identities: number;
   duplicated: number;
   extras: number;
@@ -149,10 +151,15 @@ export function modelDuplicates(
   const byIdentity = new Map<string, number[]>();
   const classesOf = new Map<string, Set<string>>();
   let readable = 0;
+  let emptyIdentity = 0;
   for (const node of candidates) {
     if (node.type !== 'object') continue;
     const id = identityOf(node, sel.path);
     if (id == null) continue;
+    if (id === '') {
+      emptyIdentity++;
+      continue;
+    }
     readable++;
     const key = `${node.name}\u0000${id}`;
     const list = byIdentity.get(key);
@@ -226,6 +233,7 @@ export function modelDuplicates(
   return {
     candidates: candidates.length,
     readable,
+    emptyIdentity,
     identities: classesOf.size,
     duplicated: top.length,
     extras: extras.length,
@@ -245,8 +253,41 @@ function headline(r: DuplicateReport): string {
   return (
     `${formatNumber(r.candidates)} candidate(s), ${formatNumber(r.readable)} with a readable identity, ` +
     `${formatNumber(r.identities)} distinct. **${formatNumber(r.duplicated)} (class, identity) pair(s) have copies: ` +
-    `${formatNumber(r.extras)} extra cop(ies) retaining ${formatBytes(r.extrasRetained)}.**`
+    `${formatNumber(r.extras)} extra cop(ies) retaining ${formatBytes(r.extrasRetained)}.**` +
+    (r.emptyIdentity > 0
+      ? ` ${formatNumber(r.emptyIdentity)} record(s) with an empty identity are left out: a record not given an id yet is not a copy.`
+      : '')
   );
+}
+
+/**
+ * An identity as text a table can show. Invisible code points are escaped, so
+ * two rows never look alike. So is the Private Use Area: V8's snapshot writer
+ * keeps only the low 16 bits of a character outside the BMP (👍 U+1F44D is
+ * written as U+F44D), which most fonts draw as nothing.
+ */
+export function showIdentity(id: string): string {
+  return Array.from(id, c => {
+    const n = c.charCodeAt(0);
+    const invisible =
+      n <= 0x1f ||
+      (n >= 0x7f && n <= 0x9f) ||
+      n === 0xad ||
+      n === 0x34f ||
+      n === 0x61c ||
+      (n >= 0x115f && n <= 0x1160) ||
+      (n >= 0x17b4 && n <= 0x17b5) ||
+      n === 0x180e ||
+      (n >= 0x200b && n <= 0x200f) ||
+      (n >= 0x202a && n <= 0x202e) ||
+      (n >= 0x2060 && n <= 0x206f) ||
+      n === 0x3164 ||
+      (n >= 0xe000 && n <= 0xf8ff) ||
+      (n >= 0xfe00 && n <= 0xfe0f) ||
+      n === 0xfeff ||
+      n === 0xffa0;
+    return invisible ? `\\u{${n.toString(16)}}` : c;
+  }).join('');
 }
 
 function crossTypeLines(r: DuplicateReport): string[] {
@@ -260,7 +301,7 @@ function crossTypeLines(r: DuplicateReport): string[] {
       r.crossType.combos.map(c => [
         c.classes.map(x => `\`${clampLabelTo(x, 30)}\``).join(' + '),
         formatNumber(c.identities),
-        `\`${clampLabelTo(c.sample, 40).replace(/`/g, "'")}\``,
+        `\`${clampLabelTo(showIdentity(c.sample), 40).replace(/`/g, "'")}\``,
       ]),
       new Set([1]),
     ),
@@ -300,7 +341,7 @@ function details(
       ],
       r.top.map(t => [
         `\`${clampLabelTo(t.cls, 30)}\``,
-        `\`${clampLabelTo(t.identity, 60).replace(/`/g, "'")}\``,
+        `\`${clampLabelTo(showIdentity(t.identity), 60).replace(/`/g, "'")}\``,
         ...(first != null
           ? [
               formatNumber(
