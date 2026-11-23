@@ -179,7 +179,10 @@ function topRetained(s: IHeapSnapshot, caps: Caps, leads: Lead[]): string[] {
     // itself, not a cut.
     if (node.retainedSize < total * 0.1 && !registries.has(node.id)) {
       leads.push({
-        label: holder,
+        label:
+          holder === '-'
+            ? truncateNodeName(node.name, node.type, 0, 40)
+            : holder,
         bytes: node.retainedSize,
         ids: [node.id],
         section: SEC.top,
@@ -660,6 +663,34 @@ export async function runSection(
   }
 }
 
+/** The share of the budget kept for section 11 when a sweep compares rungs. */
+export const LADDER_SHARE = 0.4;
+
+/**
+ * Fits the per-snapshot sections and section 11 into `room` characters. The
+ * budget used to cut from the end, so section 11, the reason to pass `paths`,
+ * was the first thing lost; it now keeps up to LADDER_SHARE of the room, and
+ * the per-snapshot sections are cut first.
+ */
+export function fitSections(
+  snapshotText: string,
+  ladderText: string,
+  room: number,
+  budget: number,
+): string {
+  const cut = (t: string, r: number) =>
+    t.length <= r
+      ? t
+      : `${t.slice(0, Math.max(0, r))}\n… (cut at ${formatBytes(budget)}; \`detail:"full"\` raises the caps)\n`;
+  if (ladderText === '') return cut(snapshotText, room);
+  const ladderMin = Math.min(
+    ladderText.length,
+    Math.floor(room * LADDER_SHARE),
+  );
+  const head = cut(snapshotText, Math.max(0, room - ladderMin));
+  return `${head}\n${cut(ladderText, Math.max(ladderMin, room - head.length))}`;
+}
+
 /** Section 12: the residual call that cuts the top leads, ready to paste. */
 export function residualCall(leads: Lead[], cap: number): string | null {
   // One lead per section in turn, largest first, ladder growth first and the
@@ -844,8 +875,9 @@ export function registerSweep(server: McpServer): void {
           )),
           ...(await timed('async', () => asyncAndNode(s, env, leads))),
         ];
+        const ladderLines: string[] = [];
         if (rungs.length > 0) {
-          lines.push(
+          ladderLines.push(
             ...(await timed('ladder', () =>
               ladder(
                 s,
@@ -857,8 +889,9 @@ export function registerSweep(server: McpServer): void {
             )),
           );
         }
+        const notes: string[] = [];
         if (skipped.length > 0) {
-          lines.push(
+          notes.push(
             `> ⚠ **Skipped** (each ran past its ${(sectionBudgetMs / 1000).toFixed(sectionBudgetMs < 10_000 ? 1 : 0)}s scan budget): ${skipped.join(', ')}. ` +
               'The other sections are complete. Re-run with a larger `timeout_ms` (per section) to include them.',
             '',
@@ -879,11 +912,13 @@ export function registerSweep(server: McpServer): void {
           );
         }
         // The budget cuts the sections, never the residual call.
-        let text = lines.join('\n');
-        const room = caps.budget - tail.join('\n').length;
-        if (text.length > room) {
-          text = `${text.slice(0, Math.max(0, room))}\n… (cut at ${formatBytes(caps.budget)}; \`detail:"full"\` raises the caps)\n`;
-        }
+        let text = fitSections(
+          lines.join('\n'),
+          ladderLines.join('\n'),
+          caps.budget - tail.join('\n').length - notes.join('\n').length,
+          caps.budget,
+        );
+        if (notes.length > 0) text += `\n${notes.join('\n')}`;
         text += `\n${tail.join('\n')}`;
         times.push(`total ${((Date.now() - t0) / 1000).toFixed(1)}s`);
         return toolResult(

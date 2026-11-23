@@ -233,3 +233,25 @@ test('a section out of budget takes back the leads it pushed', async () => {
     /boom/,
   );
 });
+
+test('a ladder sweep keeps room for section 11 and cuts the snapshot sections first', () => {
+  const {fitSections, LADDER_SHARE} = sweep;
+  const snap = 'S'.repeat(20_000);
+  const ladder = '## 11. Growth\n' + 'L'.repeat(5_000);
+  const out = fitSections(snap, ladder, 10_000, 15_000);
+  assert.ok(out.includes('## 11. Growth'), 'section 11 heading kept');
+  const kept = out.length - out.indexOf('## 11. Growth');
+  assert.ok(kept >= 10_000 * LADDER_SHARE, `section 11 kept ${kept} chars`);
+  assert.ok(out.length <= 10_000 + 200, `fits the room: ${out.length}`);
+  assert.equal(fitSections('abc', 'def', 100, 15_000), 'abc\ndef');
+  assert.equal(fitSections('abc', '', 100, 15_000), 'abc');
+  const small = fitSections(snap, '## 11.\nshort', 10_000, 15_000);
+  assert.ok(
+    small.endsWith('## 11.\nshort'),
+    'a short section 11 is kept whole',
+  );
+  assert.ok(
+    small.length > 9_000,
+    'the snapshot sections use the room it leaves',
+  );
+});
