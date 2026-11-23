@@ -24,7 +24,8 @@ import {
 } from '../utils.js';
 import {resolveRunOrPaths} from './ladder.js';
 import {segmentArg} from '../run-manifest.js';
-import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
+import {fileSizeRefusal, resolveSnapshotPath} from './load-snapshot.js';
+import {findResidentByPath, getSnapshotByHandle} from '../heap-state.js';
 
 const {utils: memlabUtils} = memlabCore;
 
@@ -219,16 +220,23 @@ export async function measureLadder(
     }
     if (!fs.existsSync(local)) throw new Error(`File not found: ${local}`);
     const sizeMB = fs.statSync(local).size / (1024 * 1024);
-    const limit = resolveMaxFileSizeMB(maxFileSizeMB, fetchedFrom != null);
-    if (sizeMB > limit) {
-      throw new Error(
-        `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${limit} MB per-file safety limit. Raise it with max_file_size_mb: ${Math.ceil(sizeMB + 100)}.`,
-      );
-    }
-    const snapshot = await memlabUtils.getSnapshotFromFile(local, {
-      buildNodeIdIndex: true,
-      verbose: false,
-    });
+    const refusal = fileSizeRefusal(
+      p,
+      local,
+      sizeMB,
+      maxFileSizeMB,
+      fetchedFrom != null,
+    );
+    if (refusal != null) throw new Error(refusal);
+    const resident = findResidentByPath(local);
+    const residentSnapshot =
+      resident != null ? getSnapshotByHandle(resident.handle) : null;
+    const snapshot =
+      residentSnapshot ??
+      (await memlabUtils.getSnapshotFromFile(local, {
+        buildNodeIdIndex: true,
+        verbose: false,
+      }));
     labels.push(fetchedFrom ?? p.replace(/^.*\//, ''));
     perRung.push(measureLocators(snapshot, locators));
   }

@@ -25,7 +25,8 @@ import {
 } from '../utils.js';
 import {countEntries, parseLocator, resolvePath} from './collection-trend.js';
 import {resolveLadderPaths} from './ladder.js';
-import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
+import {fileSizeRefusal, resolveSnapshotPath} from './load-snapshot.js';
+import {findResidentByPath, getSnapshotByHandle} from '../heap-state.js';
 import {fitSlope, poolFits, rateVerdict} from '../slope-stats.js';
 import {compareArmSetups, pairOrder, readArmSetup} from '../arm-setup.js';
 import type {ArmSetup} from '../arm-setup.js';
@@ -171,24 +172,36 @@ async function measureArm(
     }
     if (!fs.existsSync(local)) throw new Error(`File not found: ${local}`);
     const sizeMB = fs.statSync(local).size / (1024 * 1024);
-    const limit = resolveMaxFileSizeMB(maxFileSizeMB, fetchedFrom != null);
-    if (sizeMB > limit) {
-      throw new Error(
-        `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${limit} MB per-file safety limit. Raise it with max_file_size_mb: ${Math.ceil(sizeMB + 100)}.`,
-      );
-    }
+    const refusal = fileSizeRefusal(
+      p,
+      local,
+      sizeMB,
+      maxFileSizeMB,
+      fetchedFrom != null,
+    );
+    if (refusal != null) throw new Error(refusal);
     // Light parse by default: most metrics are read off names and edges, so the
     // dominator/retained-size pass would be paid on every rung of both arms for
     // nothing. `retained_size` is the exception and must have it — on a light
     // snapshot `retainedSize` reads back 0 WITHOUT failing, so a silent zero
     // would be reported as "the fix removed everything", which is the most
     // damaging possible wrong answer from a fix-verification tool.
-    const snapshot = needsRetainedSizes(kind)
-      ? await getFullHeapFromFile(local)
-      : await memlabUtils.getSnapshotFromFile(local, {
-          buildNodeIdIndex: true,
-          verbose: false,
-        });
+    const resident = findResidentByPath(local);
+    const residentSnapshot =
+      resident != null ? getSnapshotByHandle(resident.handle) : null;
+    if (resident?.light && needsRetainedSizes(kind)) {
+      throw new Error(
+        `Snapshot "${resident.handle}" was loaded in LIGHT mode; retained_size needs the dominator pass. Reload for full analysis: memlab_load_snapshot({file_path: "${local}"}).`,
+      );
+    }
+    const snapshot =
+      residentSnapshot ??
+      (needsRetainedSizes(kind)
+        ? await getFullHeapFromFile(local)
+        : await memlabUtils.getSnapshotFromFile(local, {
+            buildNodeIdIndex: true,
+            verbose: false,
+          }));
     labels.push(fetchedFrom ?? p.replace(/^.*\//, ''));
     values.push(measureMetric(snapshot, kind, locator, chainEdge));
   }
@@ -311,9 +324,8 @@ export function registerVerifyFix(server: McpServer): void {
         const repeatPaths = before_repeat_paths
           ? resolveLadderPaths(before_repeat_paths).paths
           : null;
-        // Name BOTH arms: this tool never reads the resident snapshot, and a
-        // fix-validation result labelled with an unrelated capture is the
-        // worst place to leave a reader guessing which build was measured.
+        // Name BOTH arms: a fix-validation result labelled with an unrelated
+        // active capture leaves the reader guessing which build was measured.
         const armsHeader = pathsHeader([
           ...before.map(p => `before:${p.replace(/^.*\//, '')}`),
           ...after.map(p => `after:${p.replace(/^.*\//, '')}`),

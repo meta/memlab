@@ -29,7 +29,8 @@ import {cachedModuleScopes} from './module-attribution.js';
 import {moduleOfScope} from '../module-registry.js';
 import {resolveRunOrPaths} from './ladder.js';
 import {segmentArg} from '../run-manifest.js';
-import {resolveMaxFileSizeMB, resolveSnapshotPath} from './load-snapshot.js';
+import {fileSizeRefusal, resolveSnapshotPath} from './load-snapshot.js';
+import {findResidentByPath, getSnapshotByHandle} from '../heap-state.js';
 import memlabHeapAnalysis from '@memlab/heap-analysis';
 import {ObjectGrowthTracker, formatObjectGrowth} from './object-growth.js';
 
@@ -573,22 +574,30 @@ export function registerCollectionDiff(server: McpServer): void {
             return errorResult(`File not found: ${local}`);
           }
           const sizeMB = fs.statSync(local).size / (1024 * 1024);
-          const cap = resolveMaxFileSizeMB(
+          const refusal = fileSizeRefusal(
+            p,
+            local,
+            sizeMB,
             max_file_size_mb,
             fetchedFrom != null,
           );
-          if (sizeMB > cap) {
+          if (refusal != null) return errorResult(refusal);
+          const resident = findResidentByPath(local);
+          const residentSnapshot =
+            resident != null ? getSnapshotByHandle(resident.handle) : null;
+          if (resident?.light && tracker != null) {
             return errorResult(
-              `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${cap} MB per-file safety limit. Raise it with max_file_size_mb: ${Math.ceil(sizeMB + 100)}.`,
+              `Snapshot "${resident.handle}" was loaded in LIGHT mode; include_objects needs retained sizes. Reload for full analysis: memlab_load_snapshot({file_path: "${local}"}).`,
             );
           }
           const snapshot =
-            tracker != null
+            residentSnapshot ??
+            (tracker != null
               ? await getFullHeapFromFile(local)
               : await memlabUtils.getSnapshotFromFile(local, {
                   buildNodeIdIndex: true,
                   verbose: false,
-                });
+                }));
           labels.push(fetchedFrom ?? p.replace(/^.*\//, ''));
           perRung.push(censusCollections(snapshot));
           if (tracker != null) {

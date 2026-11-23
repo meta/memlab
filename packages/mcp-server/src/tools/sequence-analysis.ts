@@ -23,11 +23,9 @@ import memlabCore from '@memlab/core';
 const {utils: memlabUtils} = memlabCore;
 const {getFullHeapFromFile} = memlabHeapAnalysis;
 import {
-  getOldSpaceLimitMB,
+  fileSizeRefusal,
   LOCAL_FILE_SIZE_LIMIT_MB,
   MANIFOLD_FETCH_SIZE_LIMIT_MB,
-  raiseHeapHint,
-  resolveMaxFileSizeMB,
   resolveSnapshotPath,
 } from './load-snapshot.js';
 import {
@@ -287,17 +285,15 @@ export async function computeSequenceTrends(
       throw new Error(`File not found: ${local}`);
     }
     const sizeMB = fs.statSync(local).size / (1024 * 1024);
-    const effectiveMaxFileSizeMB = resolveMaxFileSizeMB(
+    const refusal = fileSizeRefusal(
+      p,
+      local,
+      sizeMB,
       opts.maxFileSizeMB,
       fetchedFrom != null,
+      toolName,
     );
-    if (sizeMB > effectiveMaxFileSizeMB) {
-      throw new Error(
-        `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${effectiveMaxFileSizeMB} MB per-file safety limit. ` +
-          `Raise it with ${toolName}({max_file_size_mb: ${Math.ceil(sizeMB + 100)}}), ` +
-          `or ${raiseHeapHint(getOldSpaceLimitMB())}`,
-      );
-    }
+    if (refusal != null) throw new Error(refusal);
     // A valid sidecar answers this pass WITHOUT opening the graph.
     //
     // The trend needs a per-class count and a heap total, nothing else — and

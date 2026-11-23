@@ -341,6 +341,36 @@ export function resolveMaxFileSizeMB(
 }
 
 /**
+ * The per-file size refusal for `p`, or null when it may be read.
+ *
+ * A file that is already resident is never refused: it was loaded under the
+ * limit that applied then (an explicit `max_file_size_mb`, say), and reading it
+ * again by path parses nothing.
+ */
+export function fileSizeRefusal(
+  p: string,
+  localPath: string,
+  sizeMB: number,
+  explicit: number | undefined,
+  fetched: boolean,
+  toolName?: string,
+): string | null {
+  if (findResidentByPath(localPath) != null) return null;
+  const limit = resolveMaxFileSizeMB(explicit, fetched);
+  if (sizeMB <= limit) return null;
+  const raise = Math.ceil(sizeMB + 100);
+  const how =
+    toolName != null
+      ? `${toolName}({max_file_size_mb: ${raise}})`
+      : `max_file_size_mb: ${raise}`;
+  // An explicit limit is the caller's own choice; the heap is only the remedy
+  // for the default, which scales with it.
+  return explicit != null
+    ? `${p} is ${sizeMB.toFixed(0)} MB — over the max_file_size_mb of ${limit} MB passed to this call. Raise it with ${how}.`
+    : `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${limit} MB per-file safety limit. Raise it with ${how}, or ${raiseHeapHint(getOldSpaceLimitMB())}`;
+}
+
+/**
  * Resolve a `file_path` that may be a local path, a `manifold://bucket/key`
  * URL, or a bare snapshot filename to a local path, fetching from Manifold
  * into a temp dir when needed. Returns {localPath, fetchedFrom}.

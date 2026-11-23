@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import fs from 'fs';
 import type {IHeapSnapshot} from '@memlab/core';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import path from 'path';
@@ -565,7 +566,21 @@ export function findResidentByPath(filePath: string): SnapshotMetadata | null {
   for (const {metadata} of loaded.values()) {
     if (metadata.filePath === filePath) return metadata;
   }
+  // The same file through a relative path or a symlink.
+  const real = realPathOrNull(filePath);
+  if (real == null) return null;
+  for (const {metadata} of loaded.values()) {
+    if (realPathOrNull(metadata.filePath) === real) return metadata;
+  }
   return null;
+}
+
+function realPathOrNull(filePath: string): string | null {
+  try {
+    return fs.realpathSync(filePath);
+  } catch {
+    return null;
+  }
 }
 
 /**

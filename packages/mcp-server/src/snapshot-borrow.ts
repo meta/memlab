@@ -35,8 +35,8 @@ import {
 import {beginAnalysisBudget} from './analysis-budget.js';
 import {
   estimateLoadHeapMB,
+  fileSizeRefusal,
   getHeapHeadroomMB,
-  resolveMaxFileSizeMB,
   resolveSnapshotPath,
 } from './tools/load-snapshot.js';
 import {noteSnapshotRead} from './read-scope.js';
@@ -333,13 +333,14 @@ export function resolveRungs(
     }
     const sizeMB = fs.statSync(localPath).size / (1024 * 1024);
     largestMB = Math.max(largestMB, sizeMB);
-    const limit = resolveMaxFileSizeMB(maxFileSizeMB, fetchedFrom != null);
-    if (sizeMB > limit) {
-      throw new Error(
-        `${p} is ${sizeMB.toFixed(0)} MB — exceeds the ${limit} MB per-file ` +
-          'limit. Raise it with max_file_size_mb.',
-      );
-    }
+    const refusal = fileSizeRefusal(
+      p,
+      localPath,
+      sizeMB,
+      maxFileSizeMB,
+      fetchedFrom != null,
+    );
+    if (refusal != null) throw new Error(refusal);
     rungs.push({label: p.replace(/^.*\//, ''), localPath, sizeMB});
   }
   return {rungs, largestMB};
