@@ -30,7 +30,9 @@ if (!fs.existsSync(built)) {
   );
   process.exit(1);
 }
-const {composeQueries, protoKeyTrap} = await import(pathToFileURL(built).href);
+const {arrayMethodMisuse, composeQueries, protoKeyTrap} = await import(
+  pathToFileURL(built).href
+);
 
 const run = queries => {
   const ctx = {result: undefined};
@@ -65,6 +67,21 @@ test("queries do not see each other's locals", () => {
     {name: 'b', code: 'return typeof shared;'},
   ]);
   assert.deepEqual(out, {a: 1, b: 'undefined'});
+});
+
+test("lint: an object helper's own field is not array misuse", () => {
+  assert.deepEqual(
+    arrayMethodMisuse("result = helpers.walkChain(id, 'next').length;"),
+    [],
+  );
+  assert.equal(
+    arrayMethodMisuse("result = helpers.walkChain(id, 'next').map(f);").length,
+    1,
+  );
+  assert.equal(
+    arrayMethodMisuse('result = helpers.pathAll(id).length;').length,
+    1,
+  );
 });
 
 test('lint: a plain {} keyed by heap names is flagged, a literal key is not', () => {

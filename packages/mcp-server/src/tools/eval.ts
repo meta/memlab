@@ -6686,8 +6686,17 @@ export function arrayMethodMisuse(code: string): string[] {
       else if (code[i] === ')') depth--;
     }
     const after = ARRAY_METHODS.exec(code.slice(i));
-    // A Set has its own forEach.
-    if (after != null && !(shape.startsWith('Set') && after[1] === 'forEach')) {
+    // A Set has its own forEach, and `object {length, …}` its own `length`.
+    const fields =
+      /\{([^}]*)\}/
+        .exec(shape)?.[1]
+        .split(',')
+        .map(f => f.trim()) ?? [];
+    if (
+      after != null &&
+      !(shape.startsWith('Set') && after[1] === 'forEach') &&
+      !fields.includes(after[1])
+    ) {
       out.add(
         `\`helpers.${m[1]}(...).${after[1]}\`: \`${m[1]}\` returns ${shape}, not an array.`,
       );
