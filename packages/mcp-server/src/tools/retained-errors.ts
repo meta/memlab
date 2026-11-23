@@ -65,7 +65,8 @@ export function errorTemplate(text: string): string {
   const line = text.split('\n')[0].trim();
   const t = line
     .replace(/https?:\/\/\S+/g, '<url>')
-    .replace(/(["'`])(?:(?!\1).){1,200}\1/g, '"…"')
+    // A `'` inside a word is an apostrophe (Can't, isn't), not a quote.
+    .replace(/(["`])(?:(?!\1).){1,200}\1|(?<!\w)'[^']{1,200}'(?!\w)/g, '"…"')
     .replace(/\b0x[0-9a-f]+\b/gi, '<hex>')
     .replace(/\d+(?:\.\d+)?/g, '<n>');
   return clampLabelTo(t, 140);
@@ -99,6 +100,45 @@ export interface ErrorTemplateGroup {
   frames: string[];
   /** First frame that is not a wrapper shared by most templates. */
   frame: string | null;
+}
+
+/** The stack text of an Error whose `.stack` was already read. */
+function formattedStackOf(err: IHeapNode): string | null {
+  for (const e of err.references) {
+    if (!String(e.name_or_index).includes('symbol')) continue;
+    const t = e.toNode;
+    const text = t.isString ? t.toStringNode()?.stringValue : null;
+    if (text != null && /\n\s+at /.test(text)) return text;
+  }
+  return null;
+}
+
+/**
+ * Each group's first frame that is not a wrapper. A wrapper leads the frames
+ * of 2+ templates; past one wrapper the next frame is checked the same way,
+ * so a chain of logging wrappers is skipped too.
+ */
+export function pickFirstAppFrames(
+  groups: Iterable<{frames: string[]; frame: string | null}>,
+): void {
+  const all = [...groups];
+  const framed = all.filter(g => g.frames.length > 0);
+  const wrappers = new Set<string>();
+  if (framed.length >= 3) {
+    for (let depth = 0; depth < FRAMES_KEPT; depth++) {
+      const leading = new Map<string, number>();
+      for (const g of framed) {
+        const f = g.frames.find(x => !wrappers.has(x));
+        if (f != null) leading.set(f, (leading.get(f) ?? 0) + 1);
+      }
+      const shared = [...leading].filter(([, n]) => n >= 2);
+      if (shared.length === 0) break;
+      for (const [f] of shared) wrappers.add(f);
+    }
+  }
+  for (const g of all) {
+    g.frame = g.frames.find(f => !wrappers.has(f)) ?? g.frames[0] ?? null;
+  }
 }
 
 function isErrorObject(node: IHeapNode): string | null {
@@ -143,7 +183,11 @@ export function collectRetainedErrors(
       const name = node.name === 'Object' ? 'Error' : node.name;
       add(`${name}: ${msg}`, node.id, 'objects', () => {
         const arr = frameArrayOf(node);
-        if (arr == null || arr === 'formatted') return [];
+        if (arr == null) return [];
+        if (arr === 'formatted') {
+          const stack = formattedStackOf(node);
+          return stack != null ? stackFrames(stack) : [];
+        }
         return frameClosures(arr)
           .filter(f => !GENERIC_FRAME_RE.test(f.name || '(anonymous)'))
           .slice(0, FRAMES_KEPT)
@@ -154,29 +198,23 @@ export function collectRetainedErrors(
     if (!node.isString || node.name.length < 16) return;
     const text = node.toStringNode()?.stringValue ?? node.name;
     if (!ERROR_TEXT_RE.test(text)) return;
-    // The `.stack` / `.message` of an Error already counted above.
+    // The `.stack` / `.message` of an Error already counted above, or a part
+    // of a longer error string counted on its own.
     for (const e of node.referrers) {
-      if (isErrorObject(e.fromNode) != null) return;
+      const from = e.fromNode;
+      if (isErrorObject(from) != null) return;
+      if (
+        from.isString &&
+        ERROR_TEXT_RE.test(from.toStringNode()?.stringValue ?? from.name)
+      ) {
+        return;
+      }
     }
     add(text, node.id, 'strings', () => stackFrames(text));
   });
   // A logging wrapper is the top frame of nearly every template, so it names
-  // no call site: skip frames that lead most templates.
-  const leading = new Map<string, number>();
-  let framed = 0;
-  for (const g of groups.values()) {
-    if (g.frames.length === 0) continue;
-    framed++;
-    for (const f of new Set(g.frames)) {
-      leading.set(f, (leading.get(f) ?? 0) + 1);
-    }
-  }
-  for (const g of groups.values()) {
-    g.frame =
-      g.frames.find(f => framed < 3 || (leading.get(f) ?? 0) < 2) ??
-      g.frames[0] ??
-      null;
-  }
+  // no call site.
+  pickFirstAppFrames(groups.values());
   return groups;
 }
 

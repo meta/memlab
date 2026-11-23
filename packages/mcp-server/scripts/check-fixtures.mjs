@@ -161,6 +161,24 @@ globalThis.__fixtureErrors = [
   new Error('fixture-error id=2'),
   JSON.parse(JSON.stringify('TypeError: fixture text failed at step 7')),
 ];
+// An Error whose `.stack` was read, and a logged header + stack: one string
+// whose first part is itself error text.
+function fixtureRaiseReadStack() {
+  const e = new Error('fixture-read-stack');
+  void e.stack;
+  return e;
+}
+// Built at run time and in a function: a source literal of the header, or an
+// intermediate left on the stack, would be counted too.
+function fixtureLoggedHeader() {
+  return JSON.parse(
+    JSON.stringify('TypeError'.concat(': fixture logged at step 9')),
+  );
+}
+globalThis.__fixtureErrors.push(
+  fixtureRaiseReadStack(),
+  fixtureLoggedHeader() + '\n    at fixtureLogger (fixture.js:1:1)',
+);
 const nodeSnapshot = v8.writeHeapSnapshot(path.join(tmp, 'node.heapsnapshot'));
 // Distinct long strings that exist only in the second snapshot. A flat
 // string's class name is its content, so each is a "class" that grew.
@@ -625,8 +643,51 @@ await shapeCheck(
       ),
       `string template: ${text.slice(0, 1500)}`,
     );
+    assert(
+      /`TypeError: fixture logged at step <n>` +\| +1 \| +1 \|/.test(text),
+      `a logged header + stack counts once: ${text.slice(0, 1500)}`,
+    );
+    assert(
+      /`Error: fixture-read-stack` .*`fixtureRaiseReadStack`/.test(text),
+      `frame from a read stack: ${text.slice(0, 1500)}`,
+    );
   },
 );
+
+await check('retained_errors: templates and first app frames', async () => {
+  const {errorTemplate, pickFirstAppFrames} = await import(
+    pathToFileURL(path.join(here, '..', 'dist', 'tools', 'retained-errors.js'))
+      .href
+  );
+  const a = errorTemplate("Error: Can't load A, it isn't ready");
+  const b = errorTemplate("Error: Can't save B, it isn't ready");
+  assert(a !== b, `apostrophes merged two templates: ${a}`);
+  assert(
+    errorTemplate("TypeError: Cannot read 'foo' of undefined") ===
+      'TypeError: Cannot read "…" of undefined',
+    'a quoted part is still replaced',
+  );
+  const groups = [
+    {frames: ['X', 'Y'], frame: null},
+    {frames: ['Z', 'X'], frame: null},
+    {frames: ['W'], frame: null},
+  ];
+  pickFirstAppFrames(groups);
+  assert(
+    groups[0].frame === 'X',
+    `a frame deeper in another stack is not a wrapper: ${groups[0].frame}`,
+  );
+  const wrapped = [
+    {frames: ['log', 'logWrap', 'A'], frame: null},
+    {frames: ['log', 'logWrap', 'B'], frame: null},
+    {frames: ['log', 'C'], frame: null},
+  ];
+  pickFirstAppFrames(wrapped);
+  assert(
+    wrapped.map(g => g.frame).join() === 'A,B,C',
+    `wrapper chain: ${wrapped.map(g => g.frame).join()}`,
+  );
+});
 
 await shapeCheck(
   'pending_promises: reactions per creator across rungs, and handlers in eval',
