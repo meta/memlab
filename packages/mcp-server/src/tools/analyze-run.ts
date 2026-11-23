@@ -26,6 +26,7 @@ import {
   evictLeastRecentlyUsed,
   getSnapshotMetadata,
   listSnapshots,
+  removeSnapshot,
   setCurrentSnapshot,
   setSnapshot,
   type SnapshotMetadata,
@@ -211,6 +212,19 @@ function makeRoomForRungs(rungPaths: string[]): SnapshotMetadata[] {
     free += estimateLoadHeapMB(victim, false);
   }
   return unloaded;
+}
+
+const RUN_RUNG = /^run_(first|last)(#\d+)?$/;
+
+/**
+ * Unload the deep dive's own `run_first`/`run_last`, so a new pair never
+ * shares those handles, or the heap, with an earlier call's pair, and a pair
+ * whose second rung failed to load is not left half there.
+ */
+export function dropRunRungs(): SnapshotMetadata[] {
+  const old = listSnapshots().filter(m => RUN_RUNG.test(m.handle));
+  for (const m of old) removeSnapshot(m.handle);
+  return old;
 }
 
 /** Load a snapshot file and register it under `alias`, keeping the others. */
@@ -534,13 +548,17 @@ export function registerAnalyzeRun(server: McpServer): void {
             'owner attribution, detached-DOM population diff and artifact classification (skip_deep_dive was set)',
           );
         } else {
-          unloaded = makeRoomForRungs([first.path, last.path]);
+          unloaded = [
+            ...dropRunRungs(),
+            ...makeRoomForRungs([first.path, last.path]),
+          ];
           let loaded = false;
           try {
             await loadRung(first.path, 'run_first');
             await loadRung(last.path, 'run_last');
             loaded = true;
           } catch (err) {
+            dropRunRungs();
             out.push(
               `_Could not hold both rungs resident: ${err instanceof Error ? err.message : String(err)}. Re-run with skip_deep_dive to get the trend alone._`,
               '',
