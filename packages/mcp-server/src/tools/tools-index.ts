@@ -559,6 +559,10 @@ const GROUPS: Group[] = [
         'memlab_event_registry',
         'What is registered on what; `group_by` emitter × context class × callback says whose listener records they are, per rung with `run_dir`; a growing row whose callback is a library wrapper (the Arbiter `→ r`) also names the subscriber behind it.',
       ],
+      [
+        'memlab_duplicate_subscriptions',
+        'The same callback code subscribed more than once for the same subscriber, on an emitter event, a listener Set or a DOM target — fresh closures included — and which groups grew across rungs.',
+      ],
     ],
   },
   {

@@ -16,7 +16,7 @@ prints with `memlab_tools`.
 | [Growth and leaks](./tools/growth.md) | Is anything growing — and is it a leak? | 39 |
 | [Retention](./tools/retention.md) | Who owns the growth / why is X retained? | 31 |
 | [Measurement artifacts](./tools/artifacts.md) | Is it real, or a measurement artifact? | 6 |
-| [Detached DOM and listeners](./tools/dom.md) | Detached DOM and event listeners | 4 |
+| [Detached DOM and listeners](./tools/dom.md) | Detached DOM and event listeners | 5 |
 | [Collections and caches](./tools/collections.md) | Collections and caches | 15 |
 | [Strings and duplication](./tools/strings.md) | Strings and duplication | 8 |
 | [Inspect objects](./tools/inspect.md) | Inspect or find specific objects | 17 |
