@@ -98,6 +98,11 @@ function build(mock) {
   for (const c of mock.contexts)
     add(c.name, 'object', `system / Context / ${c.name}`, 16);
   for (const c of mock.closures ?? []) add(c.name, 'closure', c.name, 32);
+  // Objects held from the root as well, like a page's Window.
+  for (const g of mock.globals ?? []) {
+    const n = add(g.name, 'object', g.name, g.size ?? 100);
+    link(n, mk('array', 'payload', g.payload ?? 1000), 'internal', 'elements');
+  }
   mock.scripts.forEach((sc, i) => intEdge(N(sc.name), 'id', i + 1));
   for (const si of mock.scopeInfos) {
     const n = N(si.name);
@@ -138,6 +143,10 @@ function build(mock) {
     link(n, N(c.scopeInfo), 'internal', 'scope_info');
     if (c.previous) link(n, N(c.previous), 'internal', 'previous');
     for (const f of c.fields) {
+      if (f.shared) {
+        link(n, N(f.shared), 'context', f.name);
+        continue;
+      }
       // each value is a distinct object with a payload, so retained sizes show
       const v = mk('object', f.value, f.size ?? 100);
       link(
@@ -355,6 +364,15 @@ const cases = {
       previous: 'fnCall',
       fields: [{name: 'blockDead', value: 'BlockValue'}],
     });
+    return m;
+  })(),
+  // a dead slot whose value the root also holds frees nothing: left out
+  // unless include_shared
+  shared: (() => {
+    const m = base();
+    m.scripts[0].scopes[0].vars.push('sharedDead');
+    m.globals = [{name: 'SharedWindow', payload: 9000}];
+    m.contexts[0].fields.push({name: 'sharedDead', shared: 'SharedWindow'});
     return m;
   })(),
   // a context slot with no variable definition is ignored

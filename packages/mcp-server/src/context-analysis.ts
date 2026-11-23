@@ -56,12 +56,20 @@ export interface DeadField {
   valueType: string;
   selfSize: number;
   retainedSize: number;
+  /**
+   * What clearing the slot frees, by the dominator tree: the value's retained
+   * size when the context is its immediate dominator, else 0 (something live
+   * reaches the value another way, as with a shared `Window` or `Document`).
+   */
+  releasedSize: number;
 }
 
 export interface DeadContext {
   contextId: number;
   retainedSize: number;
   deadRetainedSize: number;
+  /** Sum of the dead fields' `releasedSize`. */
+  deadReleasedSize: number;
   deadFields: DeadField[];
 }
 
@@ -592,17 +600,23 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
           valueType: value.type,
           selfSize: value.self_size,
           retainedSize: value.retainedSize,
+          releasedSize:
+            value.dominatorNode?.id === ctx.id ? value.retainedSize : 0,
         });
       });
       fieldCount = Math.max(fieldCount, fields);
       if (deadFields.length === 0) continue;
       deadFields.sort(
-        (a, b) => b.retainedSize - a.retainedSize || a.valueId - b.valueId,
+        (a, b) =>
+          b.releasedSize - a.releasedSize ||
+          b.retainedSize - a.retainedSize ||
+          a.valueId - b.valueId,
       );
       contexts.push({
         contextId: ctx.id,
         retainedSize: ctx.retainedSize,
         deadRetainedSize: deadFields.reduce((s, f) => s + f.retainedSize, 0),
+        deadReleasedSize: deadFields.reduce((s, f) => s + f.releasedSize, 0),
         deadFields,
       });
     }
@@ -621,7 +635,11 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
       contexts,
     });
   }
-  scopes.sort((a, b) => compareContexts(a.contexts[0], b.contexts[0]));
+  scopes.sort(
+    (a, b) =>
+      scopeReleasedBytes(b) - scopeReleasedBytes(a) ||
+      compareContexts(a.contexts[0], b.contexts[0]),
+  );
 
   return {
     hasScopeMetadata: hasScopeMetadata(snapshot),
@@ -636,6 +654,7 @@ export function analyzeContexts(snapshot: IHeapSnapshot): ContextAnalysis {
 
 function compareContexts(a: DeadContext, b: DeadContext): number {
   return (
+    b.deadReleasedSize - a.deadReleasedSize ||
     b.deadRetainedSize - a.deadRetainedSize ||
     b.retainedSize - a.retainedSize ||
     a.contextId - b.contextId
@@ -645,4 +664,9 @@ function compareContexts(a: DeadContext, b: DeadContext): number {
 /** Total dead bytes of one scope: the sum over its contexts. */
 export function scopeDeadBytes(scope: DeadScope): number {
   return scope.contexts.reduce((s, c) => s + c.deadRetainedSize, 0);
+}
+
+/** What clearing every dead slot of one scope frees: the sum over its contexts. */
+export function scopeReleasedBytes(scope: DeadScope): number {
+  return scope.contexts.reduce((s, c) => s + c.deadReleasedSize, 0);
 }

@@ -283,6 +283,7 @@ const deadExpected = {
   mixed: ['deadVar'],
   nested: ['y'],
   generators: ['done'],
+  shared: ['deadVar'],
 };
 for (const [name, expected] of Object.entries(deadExpected)) {
   await check(`dead_context_variables: ${name}`, async () => {
@@ -298,6 +299,35 @@ for (const [name, expected] of Object.entries(deadExpected)) {
     );
   });
 }
+await check(
+  'dead_context_variables: a value held elsewhere frees nothing',
+  async () => {
+    const {data} = await call('memlab_dead_context_variables', {
+      snapshot: scope.shared.file,
+      include_shared: true,
+    });
+    const fields = data.scopes.flatMap(s =>
+      s.contexts.flatMap(c => c.dead_fields),
+    );
+    const byName = Object.fromEntries(fields.map(f => [f.name, f]));
+    assert(
+      byName.sharedDead?.released_size === 0 &&
+        byName.sharedDead.retained_size > 9000 &&
+        byName.deadVar?.released_size === byName.deadVar.retained_size &&
+        byName.deadVar.released_size > 5000,
+      `released: ${JSON.stringify(fields)}`,
+    );
+    const plain = await call('memlab_dead_context_variables', {
+      snapshot: scope.shared.file,
+    });
+    assert(
+      /1 dead variable\(s\) whose value something live also reaches/.test(
+        plain.text,
+      ),
+      `note: ${plain.text.slice(0, 400)}`,
+    );
+  },
+);
 await check('dead_context_variables: no scope metadata', async () => {
   const {data} = await call('memlab_dead_context_variables', {
     snapshot: scope.noMetadata.file,

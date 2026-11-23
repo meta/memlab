@@ -15,8 +15,13 @@ closure from the same scope does.
 
 `memlab_dead_context_variables` finds these values. It checks each variable
 in each Context against the closures and suspended async functions still on
-the heap, and reports the variables that nothing live can read, ranked by the
-bytes they retain. Each row gives the ids to pass to `memlab_retainer_trace`.
+the heap, and reports the variables that nothing live can read. Rows are grouped
+by scope (function and source position) and ranked by the bytes clearing them
+would free: a value counts only when its Context is its immediate dominator.
+A dead variable pointing at something live code also reaches, such as the
+page's `Window` or `Document`, frees nothing, so it is left out unless you
+pass `include_shared: true`. Each row gives the ids to pass to
+`memlab_retainer_trace`.
 
 This needs the source scope tree that V8 15.6 (Chrome 156) and later include
 in snapshots. For the most accurate results, capture with Chrome 157 or later,
