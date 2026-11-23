@@ -168,8 +168,8 @@ export function raiseHeapHint(currentHeapMB: number): string {
   const target = Math.max(16384, Math.round(doubled / 1024) * 1024);
   return (
     `restart the server with a larger heap (~${formatNumber(target)} MB). ` +
-    `Set MEMLAB_MAX_OLD_SPACE_MB=${target} if it is started by the memlab plugin or ` +
-    `bin/memlab-cli.js — both pass --max-old-space-size explicitly, which OVERRIDES ` +
+    `Set MEMLAB_MAX_OLD_SPACE_MB=${target} if it is started by the memlab plugin, ` +
+    `memlab-mcp or bin/memlab-cli.js — they pass --max-old-space-size explicitly, which OVERRIDES ` +
     `NODE_OPTIONS — or NODE_OPTIONS="--max-old-space-size=${target}" if you run ` +
     `dist/index.js directly. Raising it raises the node/edge ceiling with it.`
   );

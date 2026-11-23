@@ -25,8 +25,8 @@ The package also ships `memlab-cli`, which runs the same tools from a shell with
 
 **Which setting raises the heap depends on how the server is launched.**
 
-- **`memlab-mcp` or `dist/index.js`:** set `NODE_OPTIONS`. These run the server in-process without passing a flag of their own.
-- **`memlab-cli`:** set `MEMLAB_MAX_OLD_SPACE_MB` instead. `memlab-cli` spawns the server with an explicit `--max-old-space-size`, and an explicit flag overrides the same flag in `NODE_OPTIONS`.
+- **`memlab-mcp` and `memlab-cli`:** these size the heap themselves: 60% of RAM (or of the container's memory cap), at least 8 GB on an uncapped host and at most 48 GB. Set `MEMLAB_MAX_OLD_SPACE_MB` to choose it. `memlab-mcp` keeps a `--max-old-space-size` already given in `NODE_OPTIONS`; `memlab-cli` passes its own flag, which overrides `NODE_OPTIONS`.
+- **`dist/index.js` run directly:** set `NODE_OPTIONS="--max-old-space-size=…"`. Node's default (about 4 GB) refuses snapshots over about 1 GB.
 
 By default `memlab-cli` uses 60% of physical RAM, rounded to the nearest GB. The value is never less than 8,192 MB and never more than 49,152 MB. Inside a memory-limited container it uses 60% of the container limit instead, and the 8,192 MB minimum doesn't apply.
 
@@ -642,8 +642,8 @@ The server keeps a few small files so that work survives a restart:
 
 | Variable | Effect |
 | --- | --- |
-| `NODE_OPTIONS` | Set `--max-old-space-size` here when running `memlab-mcp` or `dist/index.js` directly |
-| `MEMLAB_MAX_OLD_SPACE_MB` | Server heap in MB when launched by `memlab-cli` (minimum 512; default scales with RAM) |
+| `NODE_OPTIONS` | Set `--max-old-space-size` here when running `dist/index.js` directly; `memlab-mcp` keeps it instead of sizing the heap itself |
+| `MEMLAB_MAX_OLD_SPACE_MB` | Server heap in MB when launched by `memlab-mcp` or `memlab-cli` (minimum 512; default scales with RAM) |
 | `MEMLAB_MAX_FILE_SIZE_MB` | Per-file size limit for every call, in MB, instead of the default (900 MB or a quarter of the server heap); a call's `max_file_size_mb` still wins |
 | `MEMLAB_ANALYSIS_TIMEOUT_MS` | Default per-call wall-clock budget (default 90000, or 9 µs per node of the active snapshot when larger; `<= 0` disables it) |
 | `MEMLAB_DISABLE_CODE_TOOLS` | `1` turns off every tool that runs caller-supplied JavaScript (the table under [Tools that execute JavaScript](#tools-that-execute-javascript)); `memlab_tools({enable})` cannot turn them back on. Use `memlab_query_objects`, `memlab_retained_by` and `memlab_native_contexts` for queries instead |

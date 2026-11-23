@@ -122,7 +122,9 @@ The server keeps every loaded snapshot fully parsed in memory, with its
 nodes, edges, dominator tree and indexes. That takes several times the
 snapshot's size on disk. Always start the server with
 `--max-old-space-size=8192` (8 GB) or more. Every configuration above already
-does.
+does. Started as `memlab-mcp` with no heap flag, the server sizes its heap
+itself: 60% of RAM (or of the container's memory cap), at least 8 GB and at
+most 48 GB; `MEMLAB_MAX_OLD_SPACE_MB` chooses it.
 
 ### Snapshots the Server Refuses to Load
 
