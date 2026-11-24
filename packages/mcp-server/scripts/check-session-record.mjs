@@ -35,6 +35,8 @@ const load = rel => import(pathToFileURL(path.join(dist, rel)).href);
 const {noteRecord, RECORD_CONTRACT_VERSION} = await load('session-record.js');
 const {registerRoundAudit} = await load('tools/round-audit.js');
 const {registerLeakReport} = await load('tools/leak-report.js');
+const {registerVerifyFix} = await load('tools/verify-fix.js');
+const {registerFindingIndex} = await load('tools/finding-index.js');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'session-record-'));
 
@@ -164,15 +166,16 @@ test('recordLabel hashes string contents and keeps class names', async () => {
   assert.ok(!a.includes('secret'));
 });
 
-/** Three snapshots of a node process in which `LeakyThing` grows by 300 per rung. */
-function growingLadder() {
+/** Three snapshots of a node process in which `LeakyThing` grows by `perRung` per rung. */
+function growingLadder(perRung = 300) {
   const dir = tmp();
   const script = `
     const v8 = require('v8');
     class LeakyThing { constructor(i) { this.i = i; } }
     globalThis.kept = [];
+    for (let i = 0; i < 300; i++) globalThis.kept.push(new LeakyThing(i));
     for (let rung = 0; rung < 3; rung++) {
-      for (let i = 0; i < 300; i++) globalThis.kept.push(new LeakyThing(i));
+      for (let i = 0; i < ${perRung}; i++) globalThis.kept.push(new LeakyThing(i));
       v8.writeHeapSnapshot(process.argv[1] + '/rung_' + rung + '.heapsnapshot');
     }`;
   execFileSync(process.execPath, ['-e', script, dir]);
@@ -220,4 +223,108 @@ test('leak_report records one row per class with its verdict, and its answer is 
   assert.equal(row.verdict, 'leak_candidate');
   assert.equal(row.settled, null);
   assert.ok(data.leak_candidates >= 1);
+});
+
+async function verifyFix(before, after) {
+  let handler;
+  registerVerifyFix({tool: (...args) => (handler = args.at(-1))});
+  const res = await handler({
+    metric_kind: 'class_count',
+    locator: 'LeakyThing',
+    before_paths: before,
+    after_paths: after,
+    cycles: 10,
+    expected_reduction: 0.9,
+    chain_edge: 'next',
+    max_file_size_mb: 4096,
+  });
+  return res.content.map(c => c.text).join('\n');
+}
+
+test('verify_fix records its verdict and rates, and its answer is unchanged', async () => {
+  const before = growingLadder(300);
+  const after = growingLadder(0);
+  const file = path.join(tmp(), 'records.jsonl');
+  const plain = await withRecordFile(null, () => verifyFix(before, after));
+  const recorded = await withRecordFile(file, () => verifyFix(before, after));
+  assert.equal(recorded, plain);
+  const recs = readRecords(file);
+  assert.equal(recs.length, 1);
+  const {tool, kind, data} = recs[0];
+  assert.equal(tool, 'memlab_verify_fix');
+  assert.equal(kind, 'verify_fix');
+  assert.equal(data.verdict, 'FIX_CONFIRMED', plain);
+  assert.match(plain, /FIX CONFIRMED/);
+  assert.equal(data.metric_kind, 'class_count');
+  assert.equal(data.locator, 'LeakyThing');
+  assert.equal(data.before_rate, 30);
+  assert.equal(data.after_rate, 0);
+  assert.equal(data.reduction, 1);
+  assert.equal(data.second_pair, false);
+});
+
+test('verify_fix records INCONCLUSIVE when the before arm does not grow', async () => {
+  const flat = growingLadder(0);
+  const file = path.join(tmp(), 'records.jsonl');
+  await withRecordFile(file, () => verifyFix(flat, flat));
+  const [rec] = readRecords(file);
+  assert.equal(rec.data.verdict, 'INCONCLUSIVE');
+  assert.equal(rec.data.reason, 'before_not_growing');
+});
+
+async function findingIndex(args) {
+  let handler;
+  registerFindingIndex({tool: (...a) => (handler = a.at(-1))});
+  const res = await handler({growing_classes: [], ...args});
+  return res.content.map(c => c.text).join('\n');
+}
+
+test('finding_index check records NEW and KNOWN verdicts with fingerprints; record and import write none', async () => {
+  const before = process.env.MEMLAB_FINDINGS_INDEX;
+  process.env.MEMLAB_FINDINGS_INDEX = path.join(tmp(), 'findings.json');
+  try {
+    const file = path.join(tmp(), 'records.jsonl');
+    const pathA = 'Window -> cache (property) -> LeakyThing';
+    await withRecordFile(file, () =>
+      findingIndex({
+        action: 'record',
+        retainer_path: pathA,
+        growing_classes: ['LeakyThing'],
+        round: 'r1',
+        status: 'known',
+      }),
+    );
+    assert.equal(readRecords(file).length, 0);
+    const known = await withRecordFile(file, () =>
+      findingIndex({
+        action: 'check',
+        retainer_path: pathA,
+        growing_classes: ['LeakyThing'],
+      }),
+    );
+    const fresh = await withRecordFile(file, () =>
+      findingIndex({
+        action: 'check',
+        retainer_path: 'Window -> other (property) -> Thing',
+        growing_classes: ['Thing'],
+      }),
+    );
+    const recs = readRecords(file);
+    assert.equal(recs.length, 2);
+    assert.ok(
+      recs.every(
+        r => r.tool === 'memlab_finding_index' && r.kind === 'finding_check',
+      ),
+    );
+    const [k, n] = recs.map(r => r.data.matches[0]);
+    assert.equal(k.verdict, 'KNOWN');
+    assert.deepEqual(k.classes, ['LeakyThing']);
+    assert.ok(known.includes(k.fingerprint));
+    assert.equal(n.verdict, 'NEW');
+    assert.ok(fresh.includes(n.fingerprint));
+    assert.notEqual(k.fingerprint, n.fingerprint);
+  } finally {
+    if (before == null) delete process.env.MEMLAB_FINDINGS_INDEX;
+    else process.env.MEMLAB_FINDINGS_INDEX = before;
+  }
 });

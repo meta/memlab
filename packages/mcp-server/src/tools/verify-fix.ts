@@ -40,6 +40,7 @@ import {
   recordNoiseFloor,
 } from '../noise-ledger.js';
 import type {SlopeFit} from '../slope-stats.js';
+import {noteRecord, recordLabel} from '../session-record.js';
 
 const {utils: memlabUtils} = memlabCore;
 const {getFullHeapFromFile} = memlabHeapAnalysis;
@@ -660,6 +661,19 @@ export function registerVerifyFix(server: McpServer): void {
           lines.push(
             `⚠ **INCONCLUSIVE — the BEFORE arm does not grow** (rate ${fmtRate(beforeRate)}/cycle). There is nothing for the fix to reduce, so this run cannot validate it. The unfixed arm has to reproduce the leak first: check the metric and locator, drive more cycles, or confirm the arm really is running the unfixed build.`,
           );
+          noteRecord('memlab_verify_fix', 'verify_fix', {
+            verdict: 'INCONCLUSIVE',
+            reason: 'before_not_growing',
+            metric_kind,
+            locator: recordLabel(locator, 'object'),
+            before_rate: beforeRate,
+            after_rate: afterRate,
+            reduction: null,
+            expected_reduction,
+            confirmable_reduction: null,
+            setup_changes: setupIssues.length,
+            second_pair: pair2 != null,
+          });
           return toolResult(lines.join('\n'), armsHeader);
         }
 
@@ -741,6 +755,22 @@ export function registerVerifyFix(server: McpServer): void {
             `⚠ **INCONCLUSIVE** (interval crosses the threshold) — the fixed arm's interval (${judged}) contains ${fmtRate(v.threshold)} per cycle. This run can confirm a reduction of at most ${pct(v.confirmableReduction ?? 0)} of the before arm's fitted rate. More rungs, or more cycles between rungs, narrow the interval.${pair2 ? '' : ' Or drive one more pair in the reverse order and pass it as `second_pair`.'}`,
           );
         }
+        const setupChanged =
+          setupIssues.length > 0 &&
+          (v.verdict === 'FIX_CONFIRMED' || v.verdict === 'FIX_FALLS_SHORT');
+        noteRecord('memlab_verify_fix', 'verify_fix', {
+          verdict: setupChanged ? 'SETUP_CHANGED' : v.verdict,
+          reason: setupChanged ? 'setup_changed' : (v.reason ?? null),
+          metric_kind,
+          locator: recordLabel(locator, 'object'),
+          before_rate: beforeRate,
+          after_rate: afterRate,
+          reduction,
+          expected_reduction,
+          confirmable_reduction: v.confirmableReduction ?? null,
+          setup_changes: setupIssues.length,
+          second_pair: pair2 != null,
+        });
         if (setupIssues.length > 0 && v.verdict === 'INCONCLUSIVE') {
           lines.push(
             `⛔ The setup check above also found ${setupIssues.length} change(s), so a conclusive reading of these ladders would be withheld too. Re-drive the affected arm with nothing else moving.`,

@@ -21,6 +21,7 @@ import {
   errorResult,
   toolResult,
 } from '../utils.js';
+import {noteRecord, recordLabel} from '../session-record.js';
 
 /**
  * A cross-round index of leak findings, keyed by a normalized retainer-path
@@ -2445,6 +2446,17 @@ export function registerFindingIndex(server: McpServer): void {
                       'But if one of these is an artifact family, the population you are looking at is ' +
                       'probably not app memory, and that is worth settling before spending the round on it.',
                   ];
+            noteRecord('memlab_finding_index', 'finding_check', {
+              matches: [
+                {
+                  fingerprint,
+                  verdict: 'NEW',
+                  classes: growing_classes.map(c => recordLabel(c, 'object')),
+                  index_empty: !hasAppHistory(index),
+                  possibly_same: near.map(({f}) => f.fingerprint),
+                },
+              ],
+            });
             return result(
               [
                 `## NEW finding — fingerprint \`${fingerprint}\``,
@@ -2489,6 +2501,26 @@ export function registerFindingIndex(server: McpServer): void {
                   : existing.status === 'candidate'
                     ? `CANDIDATE — UNREPLICATED LEAD (${existing.first_seen_round})`
                     : `KNOWN (${existing.first_seen_round})`;
+          noteRecord('memlab_finding_index', 'finding_check', {
+            matches: [
+              {
+                fingerprint,
+                verdict:
+                  existing.status === 'artifact'
+                    ? 'ARTIFACT'
+                    : existing.status === 'fixed'
+                      ? 'KNOWN-AND-FIXED-BEHIND'
+                      : existing.status === 'retracted'
+                        ? 'RETRACTED'
+                        : existing.status === 'candidate'
+                          ? 'CANDIDATE'
+                          : 'KNOWN',
+                classes: growing_classes.map(c => recordLabel(c, 'object')),
+                fixed_behind: existing.fixed_behind ?? null,
+                fixed_by_diffs: existing.fixed_by_diffs ?? [],
+              },
+            ],
+          });
           return result(
             [
               `## ${label} — fingerprint \`${fingerprint}\``,
