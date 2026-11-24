@@ -8,6 +8,7 @@
  * @oncall memory_lab
  */
 
+import {createHash} from 'crypto';
 import fs from 'fs';
 
 /**
@@ -74,4 +75,17 @@ export function noteRecord(
       `memlab: could not write the ${tool} record to ${file}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+}
+
+/**
+ * A heap class name fit for a record. For a string-typed node the "name" is the
+ * string's content, which a record must not carry, so it becomes a short hash:
+ * still the same label across sessions, so two runs can be matched on it.
+ */
+export function recordLabel(name: string, type: string): string {
+  if (/string/i.test(type)) {
+    const hash = createHash('sha256').update(name).digest('hex').slice(0, 12);
+    return `(string ${hash})`;
+  }
+  return name.length > 200 ? `${name.slice(0, 199)}…` : name;
 }

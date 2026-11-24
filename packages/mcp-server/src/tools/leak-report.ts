@@ -83,6 +83,7 @@ import {
   moduleProvenanceOf,
 } from '../dev-modules.js';
 import {makeProgressReporter} from '../progress.js';
+import {noteRecord, recordLabel} from '../session-record.js';
 
 // Nodes kept per candidate class for the retainer sample. Small on purpose: the
 // question is "what shape of thing holds these", and a handful of instances
@@ -898,6 +899,15 @@ export function registerLeakReport(server: McpServer): void {
         }
 
         if (candidates.length === 0) {
+          noteRecord('memlab_leak_report', 'leak_report', {
+            rungs: steps.length,
+            cycles: typeof cycles === 'number' ? cycles : null,
+            min_growth_count,
+            settle: null,
+            idle_floor: null,
+            leak_candidates: 0,
+            rows: [],
+          });
           lines.push(
             `No non-artifact class grew by >= ${formatNumber(min_growth_count)} instances across the ladder — no unbounded-growth signal to report.`,
           );
@@ -1285,6 +1295,7 @@ export function registerLeakReport(server: McpServer): void {
         // The column above names that path's retainer; this names production's.
         const productionPaths: string[] = [];
         const MAX_PRODUCTION_PATHS = 10;
+        const recordRows: Array<Record<string, unknown>> = [];
         const tableRows = candidates.map(r => {
           const ev = evidence.get(r.key) as Evidence;
           const devShare = ev.total > 0 ? ev.devOnly / ev.total : 0;
@@ -1393,11 +1404,16 @@ export function registerLeakReport(server: McpServer): void {
           }
 
           let verdict: string;
+          let kind: string;
           if (r.artifact != null) {
             verdict = artifactLabel(r.artifact);
+            kind = 'artifact';
           } else if (isDevOnly) {
             verdict = '🛠 dev/automation-retained (not production)';
+            kind = 'dev_only';
           } else if (devModuleOnly) {
+            kind =
+              ev.devModule >= ev.gatedModule ? 'dev_module' : 'gated_module';
             verdict =
               ev.devModule >= ev.gatedModule
                 ? `🛠 dev-only MODULE (${ev.devWhy ?? 'not production'})`
@@ -1407,6 +1423,7 @@ export function registerLeakReport(server: McpServer): void {
             codeLoaded(externalStrings) != null
           ) {
             verdict = codeLoaded(externalStrings) as string;
+            kind = 'code_loaded';
           } else if (drained && settle != null && !settle.present) {
             // Absent from the settle histogram is still a drain — nothing of
             // the class survived — but it is a drain measured by ABSENCE,
@@ -1415,14 +1432,18 @@ export function registerLeakReport(server: McpServer): void {
             // which evidence the verdict rests on. The round-level check
             // below catches the case where most rows read this way.
             verdict = '💧 absent from the settle rung — nothing survived';
+            kind = 'absent_at_settle';
           } else if (drained) {
             // A grower that drains is in-flight work. It must NOT carry the
             // "LEAK candidate" hint, which is the line that gets quoted.
             verdict = '💧 drained by settle — backlog, NOT a leak';
+            kind = 'drained';
           } else if (atIdleFloor) {
             verdict = '⏸ at the idle floor — grows without interaction';
+            kind = 'idle_floor';
           } else if (belowIdleFloor) {
             verdict = '⏸ BELOW the idle floor — idle alone produces more';
+            kind = 'below_idle_floor';
           } else if (
             r.trend === 'monotonic-up' &&
             oneTimeStep(r.counts, min_growth_count) != null
@@ -1433,6 +1454,7 @@ export function registerLeakReport(server: McpServer): void {
               rest: number;
             };
             oneTimeClasses++;
+            kind = 'one_time';
             verdict = `↑ but ONE-TIME — ${Math.round(once.share * 100)}% of the growth in step ${once.step}, the other steps added ${formatNumber(once.rest)}; not a rate`;
           } else if (
             r.trend === 'monotonic-up' &&
@@ -1442,6 +1464,7 @@ export function registerLeakReport(server: McpServer): void {
             // first did: warm-up (preloading, first-open loads) or a cache
             // filling toward a bound, which went flat on longer ladders.
             saturatingClasses++;
+            kind = 'saturating';
             verdict = `↑ every step but SATURATING — last step at ${lastStepShare(r.counts, ladderAxis)}% of the first; extend the ladder before filing`;
           } else if (r.trend === 'monotonic-up') {
             // "LEAK candidate" is the line that gets quoted out of this
@@ -1454,6 +1477,10 @@ export function registerLeakReport(server: McpServer): void {
                 : settle != null
                   ? `↑ every step${postStepNote(r.counts, ladderAxis)} AND survived settle — LEAK candidate`
                   : `↑ every step${postStepNote(r.counts, ladderAxis)} — LEAK candidate`;
+            kind =
+              settleError != null || settleMissing
+                ? 'unsettled'
+                : 'leak_candidate';
             if (settleError == null && !settleMissing) {
               leakCandidates++;
               // Counted HERE, in the branch that already survived every
@@ -1467,7 +1494,27 @@ export function registerLeakReport(server: McpServer): void {
             }
           } else {
             verdict = 'grew net (noisy)';
+            kind = 'noisy';
           }
+          recordRows.push({
+            class: recordLabel(r.name, r.type),
+            type: r.type,
+            net_count: r.netCount,
+            per_cycle: perCycle ? r.netCount / (cycles as number) : null,
+            net_size: r.netSize,
+            verdict: kind,
+            settled:
+              settle == null
+                ? null
+                : !settle.present
+                  ? 'absent'
+                  : drained
+                    ? 'drained'
+                    : 'held',
+            above_idle_floor: showIdleFloor
+              ? !(atIdleFloor || belowIdleFloor)
+              : null,
+          });
 
           const label = displayName(r);
           const probe = ev.newest[0] ?? ev.example;
@@ -1559,6 +1606,15 @@ export function registerLeakReport(server: McpServer): void {
           ];
         });
         lines.push(markdownTable(headers, tableRows, rightCols));
+        noteRecord('memlab_leak_report', 'leak_report', {
+          rungs: steps.length,
+          cycles: perCycle ? cycles : null,
+          min_growth_count,
+          settle: showSettled,
+          idle_floor: showIdleFloor,
+          leak_candidates: leakCandidates,
+          rows: recordRows,
+        });
         if (shapeRows.length > 0 && shapeNote == null) {
           try {
             const exportsOwner = exportsOwnerMap(snapshot);

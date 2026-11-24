@@ -16,6 +16,7 @@
  * Runs against the BUILT dist/.
  */
 import assert from 'assert/strict';
+import {execFileSync} from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -33,6 +34,7 @@ if (!fs.existsSync(path.join(dist, 'session-record.js'))) {
 const load = rel => import(pathToFileURL(path.join(dist, rel)).href);
 const {noteRecord, RECORD_CONTRACT_VERSION} = await load('session-record.js');
 const {registerRoundAudit} = await load('tools/round-audit.js');
+const {registerLeakReport} = await load('tools/leak-report.js');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'session-record-'));
 
@@ -151,4 +153,71 @@ test('round_audit records its verdict and the run shape, and its answer is uncha
   for (const c of data.checks) {
     assert.deepEqual(Object.keys(c).sort(), ['name', 'status']);
   }
+});
+
+test('recordLabel hashes string contents and keeps class names', async () => {
+  const {recordLabel} = await load('session-record.js');
+  assert.equal(recordLabel('Map', 'object'), 'Map');
+  const a = recordLabel('secret token value', 'string');
+  assert.match(a, /^\(string [0-9a-f]{12}\)$/);
+  assert.equal(recordLabel('secret token value', 'concatenated string'), a);
+  assert.ok(!a.includes('secret'));
+});
+
+/** Three snapshots of a node process in which `LeakyThing` grows by 300 per rung. */
+function growingLadder() {
+  const dir = tmp();
+  const script = `
+    const v8 = require('v8');
+    class LeakyThing { constructor(i) { this.i = i; } }
+    globalThis.kept = [];
+    for (let rung = 0; rung < 3; rung++) {
+      for (let i = 0; i < 300; i++) globalThis.kept.push(new LeakyThing(i));
+      v8.writeHeapSnapshot(process.argv[1] + '/rung_' + rung + '.heapsnapshot');
+    }`;
+  execFileSync(process.execPath, ['-e', script, dir]);
+  return [0, 1, 2].map(i => path.join(dir, `rung_${i}.heapsnapshot`));
+}
+
+async function leakReport(paths) {
+  let handler;
+  registerLeakReport({tool: (...args) => (handler = args.at(-1))});
+  const res = await handler({
+    paths,
+    cycles: [0, 10, 20],
+    limit: 10,
+    min_growth_count: 50,
+    monotonic_only: true,
+    include_artifacts: false,
+    auto_baseline: false,
+    compact: false,
+  });
+  return res.content.map(c => c.text).join('\n');
+}
+
+test('leak_report records one row per class with its verdict, and its answer is unchanged', async () => {
+  const paths = growingLadder();
+  const file = path.join(tmp(), 'records.jsonl');
+  const plain = await withRecordFile(null, () => leakReport(paths));
+  const recorded = await withRecordFile(file, () => leakReport(paths));
+  assert.equal(
+    recorded.replace(/\d+(\.\d+)?\s?(ms|s)\b/g, ''),
+    plain.replace(/\d+(\.\d+)?\s?(ms|s)\b/g, ''),
+  );
+
+  const recs = readRecords(file);
+  assert.equal(recs.length, 1);
+  const {tool, kind, data} = recs[0];
+  assert.equal(tool, 'memlab_leak_report');
+  assert.equal(kind, 'leak_report');
+  assert.equal(data.rungs, 3);
+  assert.equal(data.cycles, 20);
+  assert.equal(data.min_growth_count, 50);
+  const row = data.rows.find(r => r.class === 'LeakyThing');
+  assert.ok(row, JSON.stringify(data.rows.map(r => r.class)));
+  assert.equal(row.net_count, 600);
+  assert.equal(row.per_cycle, 30);
+  assert.equal(row.verdict, 'leak_candidate');
+  assert.equal(row.settled, null);
+  assert.ok(data.leak_candidates >= 1);
 });
