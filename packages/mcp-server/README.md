@@ -162,6 +162,8 @@ Two flags, placed right after the command, are for a program that wraps the CLI:
 
 With either flag, the exit status is 1 when any call reports `is_error`, a refusal included. Without them it stays 0 for a tool error, as before, and is 1 only when the CLI could not run a call at all.
 
+A third flag, **`--record <file>`** (`call` and `script` only, not with `--socket`), empties `<file>` and has the server append one JSON line to it per recording tool call: `memlab_round_audit`, `memlab_leak_report`, `memlab_verify_fix`, `memlab_finding_index` (`check`), `memlab_duplicated_strings` and `memlab_largest_objects`. Each line is `{"contract", "tool", "kind", "at", "data"}`, where `data` holds the tool's verdicts, counts and class names, never snapshot paths or string contents (see `src/session-record.ts`). Answers, output and exit status are the same with or without it.
+
 ```bash
 memlab-cli call --json --read-only memlab_load_snapshot '{"file_path":"/tmp/a.heapsnapshot"}' \
                 memlab_largest_objects '{"limit":5}'

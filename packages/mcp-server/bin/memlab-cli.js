@@ -39,7 +39,9 @@
  *
  * `--json` makes `doctor`, `list`, `call` and `script` print one JSON value,
  * for a program that wraps this CLI. `--read-only` makes `call` and `script`
- * refuse any tool whose `readOnlyHint` annotation is not true.
+ * refuse any tool whose `readOnlyHint` annotation is not true. `--record
+ * <file>` has the server append one JSON line per recording tool to <file>
+ * (see src/session-record.ts); answers, output and exit status are unchanged.
  */
 
 import {spawn} from 'child_process';
@@ -248,11 +250,18 @@ function resolveMaxOldSpaceMB() {
 }
 
 class Client {
-  constructor(serverPath) {
+  /** `recordFile`: where the server appends session records (`--record`). */
+  constructor(serverPath, recordFile = null) {
     this.proc = spawn(
       resolveNodeBin(),
       [`--max-old-space-size=${resolveMaxOldSpaceMB()}`, serverPath],
-      {stdio: ['pipe', 'pipe', 'pipe']},
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env:
+          recordFile != null
+            ? {...process.env, MEMLAB_RECORD_FILE: recordFile}
+            : process.env,
+      },
     );
     this.nextId = 0;
     this.buf = '';
@@ -419,11 +428,16 @@ async function doctor(serverPath, json) {
 }
 
 /**
- * Remove the leading `--socket <path>`, `--json` and `--read-only` flags from
- * argv, in any order.
+ * Remove the leading `--socket <path>`, `--record <file>`, `--json` and
+ * `--read-only` flags from argv, in any order.
  */
 function takeLeadingFlags(args) {
-  const flags = {socketPath: null, json: false, readOnly: false};
+  const flags = {
+    socketPath: null,
+    recordFile: null,
+    json: false,
+    readOnly: false,
+  };
   // Only right after the command, so a tool argument is never taken for one.
   for (;;) {
     if (args[0] === '--json') {
@@ -441,11 +455,20 @@ function takeLeadingFlags(args) {
       }
       flags.socketPath = args[1];
       args.splice(0, 2);
+    } else if (args[0] === '--record') {
+      if (flags.recordFile != null) {
+        throw new Error('--record given twice');
+      }
+      if (args[1] == null) {
+        throw new Error('--record needs a file');
+      }
+      flags.recordFile = path.resolve(args[1]);
+      args.splice(0, 2);
     } else {
       break;
     }
   }
-  for (const flag of ['--socket', '--json', '--read-only']) {
+  for (const flag of ['--socket', '--record', '--json', '--read-only']) {
     if (args.includes(flag)) {
       throw new Error(`${flag} must come right after the command`);
     }
@@ -860,6 +883,8 @@ async function main() {
         '  --json                      doctor, list, call, script: print one JSON value',
         '                              (call and script: [{"tool","is_error","text"}, ...])',
         '  --read-only                 call, script: refuse tools not annotated readOnlyHint',
+        '  --record <file>             call, script: the server writes one JSON line per recording',
+        '                              tool to <file> (emptied first); answers and output are unchanged',
         '',
         'Server is resolved from $MEMLAB_MCP_SERVER, else dist/index.js next to this script.',
       ].join('\n'),
@@ -867,6 +892,21 @@ async function main() {
     return 0;
   }
 
+  // Before every command branch, so no command (`serve`, `doctor`) can
+  // silently ignore the flag.
+  if (flags.recordFile != null) {
+    if (cmd !== 'call' && cmd !== 'script') {
+      throw new Error(`--record works with call and script, not ${cmd}`);
+    }
+    if (socketPath != null) {
+      // A resident server was started without a record file, and its
+      // environment can't be changed per connection.
+      throw new Error('--record does not work with --socket');
+    }
+    fs.writeFileSync(flags.recordFile, '', {mode: 0o600});
+    // `mode` applies only to a new file; an existing one keeps its own.
+    fs.chmodSync(flags.recordFile, 0o600);
+  }
   if (cmd === 'doctor') {
     return doctor(serverPath, flags.json);
   }
@@ -911,7 +951,7 @@ async function main() {
     throw new Error(`--socket works with call, script and stop, not ${cmd}`);
   }
 
-  const client = new Client(serverPath);
+  const client = new Client(serverPath, flags.recordFile);
   try {
     await client.init();
     if (cmd === 'list') {
