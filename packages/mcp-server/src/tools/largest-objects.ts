@@ -28,6 +28,7 @@ import {
   getContentPreview,
   heldByLabel,
 } from '../utils.js';
+import {noteRecord, recordLabel} from '../session-record.js';
 
 export function registerLargestObjects(server: McpServer): void {
   server.tool(
@@ -234,6 +235,19 @@ export function registerLargestObjects(server: McpServer): void {
           );
         }
         const footer = openPageFooter(start, rows.length, hasMore);
+        noteRecord('memlab_largest_objects', 'optimization', {
+          source: 'largest_objects',
+          // Retained sizes overlap (a holder's includes what it dominates),
+          // so they have no meaningful sum.
+          total_bytes: null,
+          items: groups.map(g => ({
+            label: recordLabel(g.node.name, g.node.type),
+            type: g.node.type,
+            count: null,
+            bytes: g.node.retainedSize,
+            self_bytes: g.node.self_size,
+          })),
+        });
         return structuredResult(
           `Top ${rows.length} objects by retained size${filterNote}\n\n${markdownTable(headers, rows, rightCols)}${collapseNote}` +
             (footer ? `\n\n${footer}` : ''),

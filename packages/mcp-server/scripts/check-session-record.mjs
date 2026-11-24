@@ -18,9 +18,9 @@
 import assert from 'assert/strict';
 import {execFileSync} from 'child_process';
 import fs from 'fs';
+import {test} from 'node:test';
 import os from 'os';
 import path from 'path';
-import {test} from 'node:test';
 import {fileURLToPath, pathToFileURL} from 'url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -32,11 +32,31 @@ if (!fs.existsSync(path.join(dist, 'session-record.js'))) {
   process.exit(1);
 }
 const load = rel => import(pathToFileURL(path.join(dist, rel)).href);
-const {noteRecord, RECORD_CONTRACT_VERSION} = await load('session-record.js');
+const {RECORD_CONTRACT_VERSION, noteRecord} = await load('session-record.js');
 const {registerRoundAudit} = await load('tools/round-audit.js');
 const {registerLeakReport} = await load('tools/leak-report.js');
 const {registerVerifyFix} = await load('tools/verify-fix.js');
 const {registerFindingIndex} = await load('tools/finding-index.js');
+const {registerLoadSnapshot} = await load('tools/load-snapshot.js');
+const {registerDuplicatedStrings} = await load('tools/duplicated-strings.js');
+const {registerLargestObjects} = await load('tools/largest-objects.js');
+const {resetEmittedNotes} = await load('heap-state.js');
+const {resetSuggestionBudget} = await load('utils.js');
+const {z} = await import('zod');
+
+/** Call a tool's handler with its zod defaults applied, as the SDK would. */
+async function callTool(register, input) {
+  let reg;
+  register({tool: (...args) => (reg = args)});
+  const shape = reg.find(
+    a =>
+      a != null &&
+      typeof a === 'object' &&
+      Object.values(a).some(v => v?._def != null),
+  );
+  const res = await reg.at(-1)(z.object(shape ?? {}).parse(input));
+  return res.content.map(c => c.text).join('\n');
+}
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'session-record-'));
 
@@ -139,7 +159,7 @@ test('round_audit records its verdict and the run shape, and its answer is uncha
 
   const recs = readRecords(file);
   assert.equal(recs.length, 1);
-  const {tool, kind, data} = recs[0];
+  const {data, kind, tool} = recs[0];
   assert.equal(tool, 'memlab_round_audit');
   assert.equal(kind, 'round_audit');
   assert.equal(data.run_id, 'r1');
@@ -210,7 +230,7 @@ test('leak_report records one row per class with its verdict, and its answer is 
 
   const recs = readRecords(file);
   assert.equal(recs.length, 1);
-  const {tool, kind, data} = recs[0];
+  const {data, kind, tool} = recs[0];
   assert.equal(tool, 'memlab_leak_report');
   assert.equal(kind, 'leak_report');
   assert.equal(data.rungs, 3);
@@ -250,7 +270,7 @@ test('verify_fix records its verdict and rates, and its answer is unchanged', as
   assert.equal(recorded, plain);
   const recs = readRecords(file);
   assert.equal(recs.length, 1);
-  const {tool, kind, data} = recs[0];
+  const {data, kind, tool} = recs[0];
   assert.equal(tool, 'memlab_verify_fix');
   assert.equal(kind, 'verify_fix');
   assert.equal(data.verdict, 'FIX_CONFIRMED', plain);
@@ -324,7 +344,74 @@ test('finding_index check records NEW and KNOWN verdicts with fingerprints; reco
     assert.ok(fresh.includes(n.fingerprint));
     assert.notEqual(k.fingerprint, n.fingerprint);
   } finally {
-    if (before == null) delete process.env.MEMLAB_FINDINGS_INDEX;
-    else process.env.MEMLAB_FINDINGS_INDEX = before;
+    if (before == null) {
+      delete process.env.MEMLAB_FINDINGS_INDEX;
+    } else {
+      process.env.MEMLAB_FINDINGS_INDEX = before;
+    }
   }
+});
+
+/** One node snapshot holding 400 copies of one long string and a big array. */
+function stringsSnapshot() {
+  const file = path.join(tmp(), 'strings.heapsnapshot');
+  const script = `
+    const v8 = require('v8');
+    class BigHolder { constructor() { this.items = new Array(50000).fill(0).map((_, i) => ({i})); } }
+    globalThis.holder = new BigHolder();
+    globalThis.copies = [];
+    for (let i = 0; i < 400; i++) globalThis.copies.push(['private-value-', 'x'.repeat(80), String(i % 1)].join(''));
+    v8.writeHeapSnapshot(process.argv[1]);`;
+  execFileSync(process.execPath, ['-e', script, file]);
+  return file;
+}
+
+test('duplicated_strings and largest_objects record optimization items without string contents', async () => {
+  const snap = stringsSnapshot();
+  await callTool(registerLoadSnapshot, {file_path: snap, quiet: true});
+  const file = path.join(tmp(), 'records.jsonl');
+  // Notes and suggestions are rationed per session; reset so both calls see
+  // the same session.
+  resetEmittedNotes();
+  resetSuggestionBudget();
+  const plainDup = await withRecordFile(null, () =>
+    callTool(registerDuplicatedStrings, {limit: 5}),
+  );
+  resetEmittedNotes();
+  resetSuggestionBudget();
+  const dup = await withRecordFile(file, () =>
+    callTool(registerDuplicatedStrings, {limit: 5}),
+  );
+  const big = await withRecordFile(file, () =>
+    callTool(registerLargestObjects, {limit: 5}),
+  );
+  // The second call is served from the first one's string scan and skips the
+  // once-per-session snapshot header; neither has to do with recording.
+  const uncached = t =>
+    t
+      .replace(', which was itself already cached', '')
+      .replace(/^> Snapshot: .*\n\n/, '');
+  assert.equal(uncached(dup), uncached(plainDup));
+  const recs = readRecords(file);
+  assert.equal(recs.length, 2);
+  const [d, l] = recs;
+  assert.equal(d.tool, 'memlab_duplicated_strings');
+  assert.equal(d.kind, 'optimization');
+  assert.equal(d.data.source, 'duplicated_strings');
+  assert.ok(d.data.items.length > 0);
+  assert.ok(
+    d.data.items.some(i => i.count >= 400),
+    JSON.stringify(d.data.items),
+  );
+  assert.ok(d.data.total_bytes > 0);
+  assert.ok(!JSON.stringify(d.data).includes('private-value'));
+  assert.match(dup, /private-value/);
+  assert.equal(l.tool, 'memlab_largest_objects');
+  assert.equal(l.data.source, 'largest_objects');
+  assert.ok(l.data.items.length > 0 && l.data.items.length <= 5);
+  assert.ok(
+    l.data.items.every(i => typeof i.bytes === 'number' && i.bytes > 0),
+  );
+  assert.equal(l.data.total_bytes, null);
+  assert.match(big, /retained size/);
 });

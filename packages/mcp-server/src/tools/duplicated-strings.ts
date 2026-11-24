@@ -33,6 +33,7 @@ import {
   identityKeyCut,
   identityKeyText,
 } from '../string-identity.js';
+import {noteRecord, recordLabel} from '../session-record.js';
 
 const ROPE_PREFIX_CHARS = 120;
 
@@ -528,6 +529,17 @@ export function registerDuplicatedStrings(server: McpServer): void {
             )
           : '';
         const body = `Duplicated strings (${summaryLine}):\n\n${lines.join('\n')}\n\n**${page.total > page.items.length ? 'Interning savings for the rows shown' : 'Total interning savings'}: ${formatBytes(totalSavings)}** (if each string were stored only once, harness content excluded)\n${pageLines(page, 'duplicated values').join('\n')}${harnessNote}${ownerSection}${ropeSection}${suggestionsSuppressed('memlab_duplicated_strings') ? '' : relatedNote}`;
+        noteRecord('memlab_duplicated_strings', 'optimization', {
+          source: 'duplicated_strings',
+          total_bytes: totalSavings,
+          items: duplicated.map(d => ({
+            label: recordLabel(d.value, 'string'),
+            count: d.count,
+            bytes: d.total_size,
+            savings: d.potential_savings,
+            actionability: d.actionability,
+          })),
+        });
         return structuredResult(
           withAnonymizedBanner(
             snapshot,
