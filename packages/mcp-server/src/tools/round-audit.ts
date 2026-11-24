@@ -21,6 +21,7 @@ import {
   toolResult,
 } from '../utils.js';
 import {readSidecar} from '../snapshot-index.js';
+import {noteRecord} from '../session-record.js';
 import {loadFindingIndex, workstreamFromRun} from './finding-index.js';
 
 /**
@@ -89,6 +90,8 @@ interface RunManifest {
   stop_reason?: string;
   /** `dev_build: false` is a production-like (minified, __DEV__=0) round. */
   environment?: {dev_build?: boolean | null};
+  settle_rung?: unknown;
+  positive_controls?: unknown[];
   /** An A/B round's arms (hunt_runner --ab): rung indices and cycles per arm. */
   ab?: {
     off?: AbArmRecord;
@@ -1040,6 +1043,20 @@ export function registerRoundAudit(server: McpServer): void {
             : fixGateCheck(manifest, gated.fixes);
         if (fixGates != null) checks.push(fixGates);
         const verdict = verdictOf(checks);
+        noteRecord('memlab_round_audit', 'round_audit', {
+          run_id: manifest.run_id ?? null,
+          verdict,
+          checks: checks.map(c => ({name: c.name, status: c.status})),
+          cycles: manifest.totals?.cycles ?? null,
+          cycles_landed: manifest.totals?.ok ?? null,
+          rungs: (manifest.rungs ?? []).length,
+          settle: manifest.settle_rung != null,
+          dev_build: manifest.environment?.dev_build ?? null,
+          combos: manifest.config?.combos ?? [],
+          positive_controls: (manifest.positive_controls ?? []).length,
+          caveats: standing.roundCaveats.length,
+          stop_reason: manifest.stop_reason ?? null,
+        });
 
         const lines: string[] = [
           `## Round audit — \`${manifest.run_id ?? path.basename(path.dirname(manifestPath))}\``,
