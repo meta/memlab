@@ -27,18 +27,21 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 
 interface ReadScope {
   files: string[];
+  lastPath: string | null;
+  parent: ReadScope | undefined;
 }
 
 const scope = new AsyncLocalStorage<ReadScope>();
 
 export function runWithReadScope<T>(fn: () => Promise<T>): Promise<T> {
-  return scope.run({files: []}, fn);
+  return scope.run({files: [], lastPath: null, parent: scope.getStore()}, fn);
 }
 
 /** Record that the current call read `filePath`. */
 export function noteSnapshotRead(filePath: string): void {
   const store = scope.getStore();
   if (store == null) return;
+  setLastPath(store, filePath);
   const name = labelFor(filePath);
   if (!store.files.includes(name)) store.files.push(name);
 }
@@ -52,6 +55,29 @@ export function noteSnapshotRead(filePath: string): void {
 export function snapshotsReadInScope(): readonly string[] {
   const files = scope.getStore()?.files;
   return files == null ? [] : [...files].sort();
+}
+
+/**
+ * Record a file the current call works on without loading it as a rung, such
+ * as a round's `run.json` or a ladder named in its parameters.
+ */
+export function noteRoundPath(filePath: string): void {
+  const store = scope.getStore();
+  if (store != null) setLastPath(store, filePath);
+}
+
+function setLastPath(store: ReadScope, filePath: string): void {
+  for (let s: ReadScope | undefined = store; s != null; s = s.parent) {
+    s.lastPath = filePath;
+  }
+}
+
+/**
+ * The path of the file read most recently by the current call, including
+ * reads made by a battery step inside it.
+ */
+export function lastSnapshotReadInScope(): string | null {
+  return scope.getStore()?.lastPath ?? null;
 }
 
 /**

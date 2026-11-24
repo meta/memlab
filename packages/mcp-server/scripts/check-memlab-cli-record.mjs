@@ -78,11 +78,25 @@ test('script --record writes the records and leaves output and exit status alone
       text: r.text.replace(/\d[\d.,]*\s?(ms|s|MB|KB|GB|%)/g, ''),
     }));
   assert.deepEqual(strip(recorded.stdout), strip(plain.stdout));
-  const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
-  assert.equal(lines.length, 1);
-  const rec = JSON.parse(lines[0]);
-  assert.equal(rec.tool, 'memlab_round_audit');
+  const recs = fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map(line => JSON.parse(line));
+  // memlab-cli makes calls of its own around the steps; they are recorded too.
+  assert.deepEqual(
+    recs.slice(-3).map(r => [r.kind, r.tool]),
+    [
+      ['round_audit', 'memlab_round_audit'],
+      ['tool_call', 'memlab_round_audit'],
+      ['tool_call', 'memlab_server_status'],
+    ],
+  );
+  assert.ok(recs.slice(0, -3).every(r => r.kind === 'tool_call'));
+  const [rec, auditCall] = recs.slice(-3);
   assert.equal(rec.data.run_id, 'r1');
+  assert.match(rec.round.key, /^[0-9a-f]{16}$/);
+  assert.deepEqual(auditCall.round, rec.round);
   assert.equal((fs.statSync(file).mode % 0o1000).toString(8), '600');
 });
 

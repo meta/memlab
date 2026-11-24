@@ -31,6 +31,7 @@ import {toolAnnotations} from './tool-annotations.js';
 import {getSnapshotMetadata, isTerse, shouldEmitNote} from './heap-state.js';
 import {makeProgressReporter, runWithProgress} from './progress.js';
 import {runWithReadScope} from './read-scope.js';
+import {withToolCallRecord} from './session-record.js';
 import {withFileSizeLimit} from './file-size-scope.js';
 import type {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -652,10 +653,12 @@ export function installAnalysisGuardrail(server: McpServer): void {
             const job = startJob(name, async jobExtra => {
               const {result, stats} = await runWithRungStats(() =>
                 withFileSizeLimit(fileLimitOf(params), () =>
-                  runWithReadScope(async () =>
-                    ref != null
-                      ? withSnapshotRef(ref, () => inner(params, jobExtra))
-                      : inner(params, jobExtra),
+                  runWithReadScope(() =>
+                    withToolCallRecord(name, params, async () =>
+                      ref != null
+                        ? withSnapshotRef(ref, () => inner(params, jobExtra))
+                        : inner(params, jobExtra),
+                    ),
                   ),
                 ),
               );
@@ -678,10 +681,12 @@ export function installAnalysisGuardrail(server: McpServer): void {
               makeProgressReporter(extra, name.replace(/^memlab_/, '')),
               () =>
                 withFileSizeLimit(fileLimitOf(params), () =>
-                  runWithReadScope(async () =>
-                    ref != null
-                      ? withSnapshotRef(ref, () => inner(...hArgs))
-                      : inner(...hArgs),
+                  runWithReadScope(() =>
+                    withToolCallRecord(name, params, async () =>
+                      ref != null
+                        ? withSnapshotRef(ref, () => inner(...hArgs))
+                        : inner(...hArgs),
+                    ),
                   ),
                 ),
             ),

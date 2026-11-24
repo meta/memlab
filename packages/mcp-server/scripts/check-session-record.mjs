@@ -17,6 +17,7 @@
  */
 import assert from 'assert/strict';
 import {execFileSync} from 'child_process';
+import {createHash} from 'crypto';
 import fs from 'fs';
 import {test} from 'node:test';
 import os from 'os';
@@ -32,7 +33,10 @@ if (!fs.existsSync(path.join(dist, 'session-record.js'))) {
   process.exit(1);
 }
 const load = rel => import(pathToFileURL(path.join(dist, rel)).href);
-const {RECORD_CONTRACT_VERSION, noteRecord} = await load('session-record.js');
+const {RECORD_CONTRACT_VERSION, noteRecord, withToolCallRecord} =
+  await load('session-record.js');
+const {noteSnapshotRead, runWithReadScope} = await load('read-scope.js');
+const {SERVER_VERSION} = await load('server-version.js');
 const {registerRoundAudit} = await load('tools/round-audit.js');
 const {registerLeakReport} = await load('tools/leak-report.js');
 const {registerVerifyFix} = await load('tools/verify-fix.js');
@@ -106,6 +110,8 @@ test('noteRecord appends one JSON line per call', async () => {
   assert.equal(recs[1].kind, 'verify_fix');
   assert.deepEqual(recs[1].data, {n: 2});
   assert.ok(!Number.isNaN(Date.parse(recs[0].at)));
+  assert.equal(recs[0].server_version, SERVER_VERSION);
+  assert.equal(recs[0].round, undefined);
 });
 
 test('noteRecord never throws when the file cannot be written', async () => {
@@ -120,6 +126,136 @@ test('noteRecord never throws when the file cannot be written', async () => {
   }
   assert.equal(errors.length, 1);
   assert.match(errors[0], /could not write the memlab_a record/);
+});
+
+/** `<tmp>/<name>/snapshots/rung_0.heapsnapshot`, with `manifest` as the round's run.json. */
+function roundWithRung(name, manifest) {
+  const dir = path.join(fs.realpathSync(tmp()), name);
+  fs.mkdirSync(path.join(dir, 'snapshots'), {recursive: true});
+  if (manifest != null) {
+    fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify(manifest));
+  }
+  return {dir, rung: path.join(dir, 'snapshots', 'rung_0.heapsnapshot')};
+}
+
+const roundKey = dir =>
+  createHash('sha256')
+    .update(`${os.hostname()}\0${dir}`)
+    .digest('hex')
+    .slice(0, 16);
+
+test('a record names the round of the snapshot the call read last', async () => {
+  const first = roundWithRung('r41', null);
+  const {dir, rung} = roundWithRung('r42 voip/call', {
+    app: 'wa',
+    combos: ['voip call', 7, 'x'.repeat(200)],
+  });
+  const file = path.join(tmp(), 'records.jsonl');
+  await withRecordFile(file, () =>
+    runWithReadScope(async () => {
+      noteSnapshotRead(first.rung);
+      noteSnapshotRead(rung);
+      noteRecord('memlab_a', 'leak_report', {});
+    }),
+  );
+  const [rec] = readRecords(file);
+  assert.deepEqual(rec.round, {
+    key: roundKey(dir),
+    label: 'call',
+    app: 'wa',
+    combos: ['voip_call', 'x'.repeat(128)],
+  });
+  assert.ok(!JSON.stringify(rec).includes(dir));
+});
+
+test('a read inside a nested scope names the round for the enclosing call', async () => {
+  const {dir, rung} = roundWithRung('r43', null);
+  const file = path.join(tmp(), 'records.jsonl');
+  await withRecordFile(file, () =>
+    runWithReadScope(async () => {
+      await runWithReadScope(async () => noteSnapshotRead(rung));
+      noteRecord('memlab_battery', 'tool_call', {});
+    }),
+  );
+  const [rec] = readRecords(file);
+  assert.deepEqual(rec.round, {
+    key: roundKey(dir),
+    label: 'r43',
+    app: null,
+    combos: [],
+  });
+});
+
+test('a call names the round its parameters point at, unless it reads another', async () => {
+  const named = roundWithRung('r44', null);
+  const read = roundWithRung('r45', null);
+  const file = path.join(tmp(), 'records.jsonl');
+  await withRecordFile(file, () =>
+    runWithReadScope(async () => {
+      await withToolCallRecord(
+        'memlab_leak_report',
+        {paths: [read.rung, named.rung]},
+        async () => noteRecord('memlab_leak_report', 'leak_report', {}),
+      );
+      await runWithReadScope(() =>
+        withToolCallRecord('memlab_x', {file_path: named.rung}, async () =>
+          noteSnapshotRead(read.rung),
+        ),
+      );
+      await runWithReadScope(() =>
+        withToolCallRecord(
+          'memlab_round_audit',
+          {run_dir: named.dir},
+          async () => ({}),
+        ),
+      );
+    }),
+  );
+  assert.deepEqual(
+    readRecords(file).map(r => [r.tool, r.kind, r.round.label]),
+    [
+      ['memlab_leak_report', 'leak_report', 'r44'],
+      ['memlab_leak_report', 'tool_call', 'r44'],
+      ['memlab_x', 'tool_call', 'r45'],
+      ['memlab_round_audit', 'tool_call', 'r44'],
+    ],
+  );
+});
+
+test('withToolCallRecord records duration and failure, and passes results and errors through', async () => {
+  const file = path.join(tmp(), 'records.jsonl');
+  const off = await withRecordFile(null, () =>
+    withToolCallRecord('memlab_a', {}, async () => 'answer'),
+  );
+  assert.equal(off, 'answer');
+  assert.equal(readRecords(file).length, 0);
+  await withRecordFile(file, async () => {
+    assert.deepEqual(
+      await withToolCallRecord('memlab_ok', {}, async () => ({content: []})),
+      {content: []},
+    );
+    await withToolCallRecord('memlab_bad', {}, async () => ({
+      content: [],
+      isError: true,
+    }));
+    await assert.rejects(
+      withToolCallRecord('memlab_throws', {}, async () => {
+        throw new Error('timed out');
+      }),
+      /timed out/,
+    );
+  });
+  const recs = readRecords(file);
+  assert.deepEqual(
+    recs.map(r => [r.tool, r.kind, r.data.is_error]),
+    [
+      ['memlab_ok', 'tool_call', false],
+      ['memlab_bad', 'tool_call', true],
+      ['memlab_throws', 'tool_call', true],
+    ],
+  );
+  assert.ok(recs.every(r => Number.isInteger(r.data.ms) && r.data.ms >= 0));
+  assert.deepEqual(Object.keys(recs[0].data).sort(), ['is_error', 'ms']);
 });
 
 function roundDir() {
@@ -154,12 +290,22 @@ test('round_audit records its verdict and the run shape, and its answer is uncha
   const dir = roundDir();
   const file = path.join(tmp(), 'records.jsonl');
   const plain = await withRecordFile(null, () => audit(dir));
-  const recorded = await withRecordFile(file, () => audit(dir));
+  const recorded = await withRecordFile(file, () =>
+    runWithReadScope(() =>
+      withToolCallRecord('memlab_round_audit', {run_dir: dir}, () =>
+        audit(dir),
+      ),
+    ),
+  );
   assert.equal(recorded, plain);
 
   const recs = readRecords(file);
-  assert.equal(recs.length, 1);
-  const {data, kind, tool} = recs[0];
+  assert.deepEqual(
+    recs.map(r => r.kind),
+    ['round_audit', 'tool_call'],
+  );
+  const {data, kind, tool, round} = recs[0];
+  assert.equal(round.key, roundKey(path.resolve(dir)));
   assert.equal(tool, 'memlab_round_audit');
   assert.equal(kind, 'round_audit');
   assert.equal(data.run_id, 'r1');
