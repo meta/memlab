@@ -113,7 +113,7 @@ export default class CheckLeakCommand extends BaseCommand {
 
     return `There are three ways to specify inputs for the \`memlab ${this.getCommandName()}\` command:
  1. \`${baselineOption}\`, \`${targetOption}\`, \`${finalOption}\` specifies each heap snapshot input individually;
- 2. \`${snapshotDirOption}\` specifies the directory that contains all three heap snapshot files (MemLab will assign baseline, target, and final based on alphabetic order of the file);
+ 2. \`${snapshotDirOption}\` specifies the directory that contains all three heap snapshot files (MemLab will assign baseline, target, and final in file name order: \`s{n}.heapsnapshot\` names by number, other names alphabetically);
  3. \`${workDirOption}\` specifies the output working directory of the \`memlab run\` or the \`memlab snapshot\` command;
 
 Please only use one of the three ways to specify the input.

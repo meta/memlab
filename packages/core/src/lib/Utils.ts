@@ -1297,7 +1297,9 @@ function hasOnlyWeakReferrers(node: IHeapNode): boolean {
 function getSnapshotSequenceFilePath(): string {
   if (!config.useExternalSnapshot) {
     // load the snapshot sequence meta file from the default location
-    return config.snapshotSequenceFile;
+    return fileManager.resolveSnapshotSequenceMetaFile(
+      config.snapshotSequenceFile,
+    );
   }
   if (config.externalSnapshotDir) {
     // try to load the snap-seq.json file from the specified external dir
@@ -1312,16 +1314,36 @@ function getSnapshotSequenceFilePath(): string {
 
 // this should be called only after exploration
 function loadTabsOrder(metaFile: Optional<string> = void 0): E2EStepInfo[] {
+  let file: string;
+  let tabsOrder: E2EStepInfo[];
   try {
-    const file =
-      metaFile != null && fs.existsSync(metaFile)
-        ? metaFile
+    const explicitFile =
+      metaFile != null
+        ? fileManager.resolveSnapshotSequenceMetaFile(metaFile)
+        : metaFile;
+    file =
+      explicitFile != null && fs.existsSync(explicitFile)
+        ? explicitFile
         : getSnapshotSequenceFilePath();
     const content = fs.readFileSync(file, {encoding: 'utf8'});
-    return JSON.parse(content);
+    tabsOrder = JSON.parse(content);
   } catch {
     throw haltOrThrow('snapshot meta data invalid or missing');
   }
+  if (
+    file === config.externalSnapshotVisitOrderFile &&
+    config.externalSnapshotDir
+  ) {
+    const files = getSnapshotFilesInDir(
+      path.resolve(config.externalSnapshotDir),
+    );
+    if (files.length === tabsOrder.length) {
+      tabsOrder.forEach((tab, index) => {
+        tab.snapshotFile = files[index];
+      });
+    }
+  }
+  return tabsOrder;
 }
 
 // return true if the heap node represents JS object or closure
