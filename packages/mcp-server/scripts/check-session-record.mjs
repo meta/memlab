@@ -168,6 +168,27 @@ test('a record names the round of the snapshot the call read last', async () => 
   assert.ok(!JSON.stringify(rec).includes(dir));
 });
 
+test("a round's combos come from hunt_runner's config.combos too", async () => {
+  const {dir, rung} = roundWithRung('r45', {
+    app: 'whatsapp-web',
+    config: {combos: ['wa-idle-control']},
+  });
+  const file = path.join(tmp(), 'records.jsonl');
+  await withRecordFile(file, () =>
+    runWithReadScope(async () => {
+      noteSnapshotRead(rung);
+      noteRecord('memlab_a', 'leak_report', {});
+    }),
+  );
+  const [rec] = readRecords(file);
+  assert.deepEqual(rec.round, {
+    key: roundKey(dir),
+    label: 'r45',
+    app: 'whatsapp-web',
+    combos: ['wa-idle-control'],
+  });
+});
+
 test('a read inside a nested scope names the round for the enclosing call', async () => {
   const {dir, rung} = roundWithRung('r43', null);
   const file = path.join(tmp(), 'records.jsonl');

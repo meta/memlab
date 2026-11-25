@@ -216,10 +216,13 @@ function readManifest(dir: string): Omit<RoundManifest, 'mtimeMs'> {
     const manifest = JSON.parse(fs.readFileSync(file, 'utf8')) as {
       app?: unknown;
       combos?: unknown;
+      config?: {combos?: unknown} | null;
     };
     app = cleanName(manifest.app, MAX_LABEL_CHARS);
-    if (Array.isArray(manifest.combos)) {
-      combos = manifest.combos
+    // hunt_runner writes the combos under `config`.
+    const named = manifest.combos ?? manifest.config?.combos;
+    if (Array.isArray(named)) {
+      combos = named
         .map(combo => cleanName(combo, MAX_COMBO_CHARS))
         .filter((combo): combo is string => combo != null)
         .slice(0, MAX_COMBOS);
