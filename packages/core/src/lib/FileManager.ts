@@ -310,6 +310,17 @@ export class FileManager {
     return path.join(this.getCurDataDir(options), 'snap-seq.json');
   }
 
+  private getDefaultSnapshotSequenceMetaFile(file: string): string {
+    return `${file}.default`;
+  }
+
+  public resolveSnapshotSequenceMetaFile(file: string): string {
+    const defaultFile = this.getDefaultSnapshotSequenceMetaFile(file);
+    return !fs.existsSync(file) && fs.existsSync(defaultFile)
+      ? defaultFile
+      : file;
+  }
+
   public getSnapshotSequenceExternalTemplateFile(): string {
     return path.join(this.getCodeDataDir(), 'visit-order.json');
   }
@@ -388,6 +399,12 @@ export class FileManager {
     }
     this.emptyDirIfExists(this.getWebSourceDir(options));
     this.emptyDirIfExists(this.getDebugDataDir(options));
+    const defaultMetaFile = this.getDefaultSnapshotSequenceMetaFile(
+      this.getSnapshotSequenceMetaFile(options),
+    );
+    if (fs.existsSync(defaultMetaFile)) {
+      fs.unlinkSync(defaultMetaFile);
+    }
     const dataSuffix = ['.heapsnapshot', '.json', '.png'];
     const files = fs.readdirSync(curDataDir);
     for (const file of files) {
@@ -499,9 +516,10 @@ export class FileManager {
     if (!fs.existsSync(curDataDir)) {
       return;
     }
-    // if the snap-seq.json file exists, return
     const snapshotSeqMetaFile = this.getSnapshotSequenceMetaFile(options);
-    if (fs.existsSync(snapshotSeqMetaFile)) {
+    const defaultMetaFile =
+      this.getDefaultSnapshotSequenceMetaFile(snapshotSeqMetaFile);
+    if (fs.existsSync(snapshotSeqMetaFile) || fs.existsSync(defaultMetaFile)) {
       return;
     }
     // if there is no .heapsnapshot file, return
@@ -510,11 +528,10 @@ export class FileManager {
     if (snapshotFile == null) {
       return;
     }
-    // If there is at least one snapshot, create a snap-seq.json file.
-    // First, get the meta file for leak detection in a single heap snapshot
     this.createDefaultVisitOrderMetaFileWithSingleSnapshot(
       options,
       snapshotFile,
+      defaultMetaFile,
     );
   }
 
@@ -542,8 +559,8 @@ export class FileManager {
   public createDefaultVisitOrderMetaFileWithSingleSnapshot(
     options: FileOption = FileManager.defaultFileOption,
     snapshotFile: string,
+    snapshotSeqMetaFile = this.getSnapshotSequenceMetaFile(options),
   ) {
-    const snapshotSeqMetaFile = this.getSnapshotSequenceMetaFile(options);
     const codeDataDir = this.getCodeDataDir();
     const singleSnapshotMetaFile = path.join(
       codeDataDir,

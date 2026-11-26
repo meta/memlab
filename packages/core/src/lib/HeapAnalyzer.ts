@@ -247,13 +247,20 @@ class MemoryAnalyst {
     return false;
   }
 
+  private loadTabsOrder(options: WorkDirOptions): E2EStepInfo[] {
+    if (config.useExternalSnapshot && !options.workDir) {
+      return utils.loadTabsOrder();
+    }
+    return utils.loadTabsOrder(
+      fileManager.getSnapshotSequenceMetaFile(options),
+    );
+  }
+
   async diffSnapshots(
     options: DiffSnapshotsOptions = {},
   ): Promise<IMemoryAnalystSnapshotDiff> {
     const nodeIdsInSnapshots = [];
-    const tabsOrder = utils.loadTabsOrder(
-      fileManager.getSnapshotSequenceMetaFile(options),
-    );
+    const tabsOrder = this.loadTabsOrder(options);
     // a set keeping track of node ids generated before the target snapshot
     const baselineIds = new NumericSet();
     let collectBaselineIds = true;
@@ -371,9 +378,7 @@ class MemoryAnalyst {
 
   // summarize the page interaction and dump to the leak text summary file
   private dumpPageInteractionSummary(options: WorkDirOptions = {}) {
-    const tabsOrder = utils.loadTabsOrder(
-      fileManager.getSnapshotSequenceMetaFile(options),
-    );
+    const tabsOrder = this.loadTabsOrder(options);
     const tabsOrderStr = serializer.summarizeTabsOrder(tabsOrder);
     fs.writeFileSync(fileManager.getLeakSummaryFile(options), tabsOrderStr, {
       encoding: 'utf8',
